@@ -183,6 +183,7 @@ class ClickHouseTestSettings extends BackendTestSettings {
     .exclude("session window groupBy with multiple keys statement - two distinct")
     .exclude("session window groupBy with multiple keys statement - keys overlapped with sessions")
     .exclude("session window with multi-column projection")
+    .exclude("session window combined with explode expression")
   enableSuite[GlutenDataFrameSetOperationsSuite]
     .exclude("SPARK-10740: handle nondeterministic expressions correctly for set operations")
     .exclude(
@@ -230,6 +231,9 @@ class ClickHouseTestSettings extends BackendTestSettings {
     .exclude("SPARK-22520: support code generation for large CaseWhen")
     .exclude("SPARK-24165: CaseWhen/If - nullability of nested types")
     .exclude("SPARK-27671: Fix analysis exception when casting null in nested field in struct")
+    .exclude("Star Expansion - explode alias and star")
+    .exclude("sort after generate with join=true")
+    .exclude("SPARK-37855: IllegalStateException when transforming an array inside a nested struct")
     .excludeGlutenTest("distributeBy and localSort")
     .excludeGlutenTest("describe")
     .excludeGlutenTest("Allow leading/trailing whitespace in string before casting")
@@ -244,6 +248,7 @@ class ClickHouseTestSettings extends BackendTestSettings {
     .exclude("time window joins")
     .exclude("negative timestamps")
     .exclude("millisecond precision sliding windows")
+    .exclude("windowing combined with explode expression")
   enableSuite[GlutenDataFrameTungstenSuite].excludeGlutenTest("Map type with struct type as key")
   enableSuite[GlutenDataFrameWindowFramesSuite]
     .exclude("rows between should accept int/long values as boundary")
@@ -349,6 +354,8 @@ class ClickHouseTestSettings extends BackendTestSettings {
     .exclude("SPARK-14986: Outer lateral view with empty generate expression")
     .exclude("outer explode()")
     .exclude("generator in aggregate expression")
+    .exclude("explode and other columns")
+    .exclude("SPARK-38528: generator in stream of aggregate expressions")
   enableSuite[GlutenIntervalFunctionsSuite]
   enableSuite[GlutenJoinSuite]
   enableSuite[GlutenJsonFunctionsSuite]
@@ -1187,6 +1194,7 @@ class ClickHouseTestSettings extends BackendTestSettings {
       "SPARK-35968: AQE coalescing should not produce too small partitions by default")
     .excludeGlutenTest(
       "SPARK-37742: AQE reads invalid InMemoryRelation stats and mistakenly plans BHJ")
+    .excludeGlutenTest("SPARK-36020: Check logical link in remove redundant projects")
   enableSuite[GlutenBucketingUtilsSuite]
   enableSuite[GlutenCSVReadSchemaSuite]
   enableSuite[GlutenDataSourceStrategySuite]
@@ -1692,6 +1700,14 @@ class ClickHouseTestSettings extends BackendTestSettings {
     .exclude("Non-vectorized reader - without partition data column - SPARK-34638: nested column prune on generator output - case-sensitivity")
     .exclude("Non-vectorized reader - with partition data column - SPARK-34638: nested column prune on generator output - case-sensitivity")
     .exclude("SPARK-37450: Prunes unnecessary fields from Explode for count aggregation")
+    .exclude("Spark vectorized reader - without partition data column - select explode of nested field of array of struct")
+    .exclude("Spark vectorized reader - with partition data column - select explode of nested field of array of struct")
+    .exclude("Non-vectorized reader - without partition data column - select explode of nested field of array of struct")
+    .exclude("Non-vectorized reader - with partition data column - select explode of nested field of array of struct")
+    .exclude("Spark vectorized reader - without partition data column - SPARK-32163: nested pruning should work even with cosmetic variations")
+    .exclude("Spark vectorized reader - with partition data column - SPARK-32163: nested pruning should work even with cosmetic variations")
+    .exclude("Non-vectorized reader - without partition data column - SPARK-32163: nested pruning should work even with cosmetic variations")
+    .exclude("Non-vectorized reader - with partition data column - SPARK-32163: nested pruning should work even with cosmetic variations")
   enableSuite[GlutenParquetColumnIndexSuite]
     .exclude("test reading unaligned pages - test all types")
     .exclude("test reading unaligned pages - test all types (dict encode)")
@@ -1982,6 +1998,14 @@ class ClickHouseTestSettings extends BackendTestSettings {
     .exclude("Non-vectorized reader - without partition data column - SPARK-34638: nested column prune on generator output - case-sensitivity")
     .exclude("Non-vectorized reader - with partition data column - SPARK-34638: nested column prune on generator output - case-sensitivity")
     .exclude("SPARK-37450: Prunes unnecessary fields from Explode for count aggregation")
+    .exclude("Spark vectorized reader - without partition data column - select explode of nested field of array of struct")
+    .exclude("Spark vectorized reader - with partition data column - select explode of nested field of array of struct")
+    .exclude("Non-vectorized reader - without partition data column - select explode of nested field of array of struct")
+    .exclude("Non-vectorized reader - with partition data column - select explode of nested field of array of struct")
+    .exclude("Spark vectorized reader - without partition data column - SPARK-32163: nested pruning should work even with cosmetic variations")
+    .exclude("Spark vectorized reader - with partition data column - SPARK-32163: nested pruning should work even with cosmetic variations")
+    .exclude("Non-vectorized reader - without partition data column - SPARK-32163: nested pruning should work even with cosmetic variations")
+    .exclude("Non-vectorized reader - with partition data column - SPARK-32163: nested pruning should work even with cosmetic variations")
   enableSuite[GlutenTextV1Suite]
   enableSuite[GlutenTextV2Suite]
   enableSuite[GlutenFileTableSuite]

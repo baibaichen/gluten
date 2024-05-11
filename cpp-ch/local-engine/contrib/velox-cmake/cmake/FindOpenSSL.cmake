@@ -1,7 +1,7 @@
 if (ENABLE_OPENSSL OR ENABLE_OPENSSL_DYNAMIC)
    message(STATUS "[Y] --- Using OpenSSL - ClickHouse Bundled ---")
 else ()
-   message(FATAL_ERROR "[X] --- Using BoringSSL - ClickHouse Bundled ---")
+   message(STATUS "[X] --- Using BoringSSL - ClickHouse Bundled ---")
 endif ()
 set(OpenSSL_FOUND TRUE)
 set(OPENSSL_LIBRARIES OpenSSL::Crypto OpenSSL::SSL)

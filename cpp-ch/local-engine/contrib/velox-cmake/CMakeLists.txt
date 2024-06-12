@@ -1,4 +1,4 @@
-set(VELOX_ROOT_DIR "/home/chang/SourceCode/velox" CACHE PATH "Velox root directory")
+set(VELOX_ROOT_DIR "/data0/hongbin/code/gluten-velox/velox-chenchang" CACHE PATH "Velox root directory")
 
 # Sets new behavior for CMP0135, which controls how timestamps are extracted
 # when using ExternalProject_Add():
@@ -91,6 +91,8 @@ target_compile_options(_glog_remove_warning INTERFACE
 # target_link_libraries(_glog_remove_warning INTERFACE glog::glog)
 add_library(ch_contrib::glog_compile_option ALIAS _glog_remove_warning)
 
+add_compile_options(-Wno-unused-exception-parameter) 
+
 # folly
 list(PREPEND CMAKE_MODULE_PATH ${WRAP_VELOX_CMAKE})
 set(FOLLY_BINARY_DIR "${GLUTEN_CONTRIB_BINARY_DIR}/folly")
@@ -124,6 +126,8 @@ add_library(ch_contrib::folly ALIAS _folly_compile_options)
 #TODO: Why and How to transfer to the other target?
 include_directories(SYSTEM "${VELOX_ROOT_DIR}/velox")
 include_directories(${VELOX_ROOT_DIR})
+
+include_directories(${VELOX_ROOT_DIR}/velox/external/xxhash)
 
 # velox warning
 add_library(_velox_remove_warning INTERFACE)  # only for remove waring
@@ -276,8 +280,41 @@ target_link_libraries(gluten_velox_memory
         ch_contrib::re2
 )
 
+#date
+
+set(VELOX_EXTERNAL_DIR "${VELOX_ROOT_DIR}/velox/external")
+include_directories(SYSTEM ${VELOX_EXTERNAL_DIR})
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_OS_TZDB")
+
+add_library(gluten_velox_external_date ${VELOX_EXTERNAL_DIR}/date/tz.cpp)
+
+#md5
+
+add_library(gluten_md5 ${VELOX_EXTERNAL_DIR}/md5/md5.cpp)
+
+add_compile_definitions(FOLLY_HAVE_INT128_T=1)
+target_link_libraries(
+        gluten_md5
+        ch_contrib::folly)
+
+ target_compile_options(gluten_md5 PRIVATE
+        -Wno-cast-align
+        -Wno-shorten-64-to-32
+)
+
+
 # gluten_velox_type
 set(DWIO_TYPE_DIR "${VELOX_ROOT_DIR}/velox/type")
+add_library(
+        gluten_velox_type_tz
+        ${DWIO_TYPE_DIR}/tz/TimeZoneMap.h 
+        ${DWIO_TYPE_DIR}/tz/TimeZoneDatabase.cpp 
+        ${DWIO_TYPE_DIR}/tz/TimeZoneMap.cpp)
+target_link_libraries(gluten_velox_type_tz 
+        #Boost::regex
+        ch_contrib::fmt ch_contrib::folly)
+
 add_library(
         gluten_velox_type
         ${DWIO_TYPE_DIR}/Conversions.cpp
@@ -294,6 +331,8 @@ add_library(
         ${DWIO_TYPE_DIR}/Variant.cpp
 )
 target_link_libraries(gluten_velox_type PRIVATE
+        gluten_velox_type_tz
+        gluten_velox_external_date
         gluten_velox_encode
         boost::headers_only
         ch_contrib::velox_compile_option
@@ -325,6 +364,387 @@ target_link_libraries(gluten_velox_vector
         boost::headers_only
         ch_contrib::velox_compile_option
 )
+
+
+
+# gluten_velox_type_calculation
+set(VELOX_TYPE_CALC_DIR "${VELOX_ROOT_DIR}/velox/expression/type_calculation")
+find_package(BISON 3.0.4 REQUIRED)
+find_package(FLEX 2.5.13 REQUIRED)
+
+bison_target(
+  TypeCalculationParser ${VELOX_TYPE_CALC_DIR}/TypeCalculation.yy
+  ${CMAKE_CURRENT_BINARY_DIR}/TypeCalculation.yy.cc
+  DEFINES_FILE ${CMAKE_CURRENT_BINARY_DIR}/velox/expression/type_calculation/TypeCalculation.yy.h)
+
+flex_target(
+  TypeCalculationScanner ${VELOX_TYPE_CALC_DIR}/TypeCalculation.ll
+  ${CMAKE_CURRENT_BINARY_DIR}/Scanner.cpp COMPILE_FLAGS "-Cf --prefix=veloxtc")
+
+message(STATUS "CMAKE_CURRENT_BINARY_DIR: ${CMAKE_CURRENT_BINARY_DIR}, PROJECT_BINARY_DIR: ${PROJECT_BINARY_DIR}") 
+message(STATUS "FLEX_INCLUDE_DIRS: ${FLEX_INCLUDE_DIRS}")
+message(STATUS "BISON_TypeCalculationParser_OUTPUTS: ${BISON_TypeCalculationParser_OUTPUTS}")
+message(STATUS "FLEX_TypeCalculationScanner_OUTPUTS: ${FLEX_TypeCalculationScanner_OUTPUTS}")
+
+add_flex_bison_dependency(TypeCalculationScanner TypeCalculationParser)
+
+include_directories(${PROJECT_BINARY_DIR})
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/velox/expression/type_calculation)
+include_directories(${FLEX_INCLUDE_DIRS})
+include_directories("/tmp/bison")
+
+
+add_library(
+  gluten_velox_type_calculation
+  ${BISON_TypeCalculationParser_OUTPUTS} ${FLEX_TypeCalculationScanner_OUTPUTS}
+  ${VELOX_TYPE_CALC_DIR}/Scanner.h ${VELOX_TYPE_CALC_DIR}/TypeCalculation.h)
+
+target_link_libraries(gluten_velox_type_calculation gluten_velox_common_base)
+target_compile_options(gluten_velox_type_calculation PRIVATE
+  -Wno-unused-macros
+  -Wno-implicit-fallthrough
+)
+
+# get_target_property(_include_dirs gluten_velox_type_calculation INCLUDE_DIRECTORIES)
+# message("Included files for YourLibrary:")
+# foreach(_dir ${_include_dirs})
+#     file(GLOB_RECURSE _files ${_dir}/*.h)
+#     foreach(_file ${_files})
+#         message("including:   ${_file}")
+#     endforeach()
+# endforeach()
+
+# gluten_velox_expression_functions
+
+set(VELOX_EXPR_DIR "${VELOX_ROOT_DIR}/velox/expression")
+add_library(
+  gluten_velox_expression_functions 
+  ${VELOX_EXPR_DIR}/FunctionSignature.cpp 
+  ${VELOX_EXPR_DIR}/SignatureBinder.cpp
+  ${VELOX_EXPR_DIR}/ReverseSignatureBinder.cpp)
+
+target_link_libraries(gluten_velox_expression_functions gluten_velox_common_base
+                      gluten_velox_type_calculation)
+
+
+# # caching
+# set(VELOX_CACHING_DIR "${VELOX_ROOT_DIR}/velox/common/caching")
+# add_library(
+#   gluten_velox_caching
+#   ${VELOX_CACHING_DIR}/FileIds.cpp
+#   ${VELOX_CACHING_DIR}/StringIdMap.cpp
+#   ${VELOX_CACHING_DIR}/AsyncDataCache.cpp
+#   ${VELOX_CACHING_DIR}/ScanTracker.cpp
+#   ${VELOX_CACHING_DIR}/SsdCache.cpp
+#   ${VELOX_CACHING_DIR}/SsdFile.cpp
+#   ${VELOX_CACHING_DIR}/SsdFileTracker.cpp)
+# target_link_libraries(
+#         gluten_velox_caching
+#   PUBLIC gluten_velox_common_base
+#          gluten_velox_exception
+#          gluten_velox_file
+#          gluten_velox_memory
+#          ch_contrib::folly
+#          ch_contrib::fmt
+#          gflags::gflags
+#   PRIVATE velox_time)
+
+
+# gluten_velox_core
+
+set(VELOX_CORE_DIR "${VELOX_ROOT_DIR}/velox/core")
+# add_library(gluten_velox_core Expressions.cpp PlanFragment.cpp PlanNode.cpp
+#                        QueryConfig.cpp QueryCtx.cpp SimpleFunctionMetadata.cpp)
+add_library(gluten_velox_core ${VELOX_CORE_DIR}/Expressions.cpp
+        ${VELOX_CORE_DIR}/QueryConfig.cpp
+        ${VELOX_CORE_DIR}/QueryCtx.cpp
+        ${VELOX_CORE_DIR}/Config.cpp
+        ${VELOX_CORE_DIR}/SimpleFunctionMetadata.cpp
+)
+
+# target_link_libraries(
+#   velox_core
+#   velox_caching
+#   velox_config
+#   velox_expression_functions
+#   velox_type
+#   velox_connector
+#   velox_serialization
+#   velox_vector
+#   Folly::folly)
+
+target_link_libraries(
+  gluten_velox_core
+  gluten_velox_expression_functions
+  gluten_velox_type
+  gluten_velox_vector
+  gluten_velox_exception
+  ch_contrib::folly)
+
+
+# function util
+set(VELOX_FUNCTIONS_LIB_DIR "${VELOX_ROOT_DIR}/velox/functions/lib")
+
+
+add_library(gluten_velox_is_null_functions ${VELOX_FUNCTIONS_LIB_DIR}/IsNull.cpp)
+
+target_link_libraries(gluten_velox_is_null_functions gluten_velox_expression)
+
+add_library(
+        gluten_velox_functions_util 
+        ${VELOX_FUNCTIONS_LIB_DIR}/LambdaFunctionUtil.cpp
+        ${VELOX_FUNCTIONS_LIB_DIR}/RowsTranslationUtil.cpp)
+
+target_link_libraries(gluten_velox_functions_util gluten_velox_vector gluten_velox_common_base)
+
+add_library(
+  gluten_velox_functions_lib
+  ${VELOX_FUNCTIONS_LIB_DIR}/CheckDuplicateKeys.cpp
+  ${VELOX_FUNCTIONS_LIB_DIR}/DateTimeFormatter.cpp
+  ${VELOX_FUNCTIONS_LIB_DIR}/DateTimeFormatterBuilder.cpp
+  ${VELOX_FUNCTIONS_LIB_DIR}/KllSketch.cpp
+  ${VELOX_FUNCTIONS_LIB_DIR}/MapConcat.cpp
+  ${VELOX_FUNCTIONS_LIB_DIR}/Re2Functions.cpp
+  ${VELOX_FUNCTIONS_LIB_DIR}/StringEncodingUtils.cpp)
+
+target_link_libraries(gluten_velox_functions_lib gluten_velox_functions_util gluten_velox_vector
+        ch_contrib::re2 ch_contrib::folly)
+
+target_compile_options(gluten_velox_functions_lib PRIVATE
+        -Wno-unused-function
+)
+
+
+# gluten_velox_expression
+
+add_library(
+  gluten_velox_expression
+  ${VELOX_EXPR_DIR}/BooleanMix.cpp
+  ${VELOX_EXPR_DIR}/CastExpr.cpp
+  ${VELOX_EXPR_DIR}/CoalesceExpr.cpp
+  ${VELOX_EXPR_DIR}/ConjunctExpr.cpp
+  ${VELOX_EXPR_DIR}/ConstantExpr.cpp
+  ${VELOX_EXPR_DIR}/EvalCtx.cpp
+  ${VELOX_EXPR_DIR}/Expr.cpp
+  ${VELOX_EXPR_DIR}/ExprCompiler.cpp
+  ${VELOX_EXPR_DIR}/ExprToSubfieldFilter.cpp
+  ${VELOX_EXPR_DIR}/FieldReference.cpp
+  ${VELOX_EXPR_DIR}/FunctionCallToSpecialForm.cpp
+  ${VELOX_EXPR_DIR}/LambdaExpr.cpp
+  ${VELOX_EXPR_DIR}/VectorFunction.cpp
+  ${VELOX_EXPR_DIR}/RegisterSpecialForm.cpp
+  ${VELOX_EXPR_DIR}/RowConstructor.cpp
+  ${VELOX_EXPR_DIR}/SimpleFunctionRegistry.cpp
+  ${VELOX_EXPR_DIR}/SpecialFormRegistry.cpp
+  ${VELOX_EXPR_DIR}/SwitchExpr.cpp
+  ${VELOX_EXPR_DIR}/TryExpr.cpp
+  ${VELOX_EXPR_DIR}/GenericWriter.cpp
+  ${VELOX_EXPR_DIR}/PeeledEncoding.cpp)
+
+target_link_libraries(
+  gluten_velox_expression
+  gluten_velox_core 
+  gluten_velox_vector 
+  gluten_velox_common_base
+  gluten_velox_expression_functions
+  gluten_velox_functions_util
+  )
+
+target_compile_options(gluten_velox_expression PRIVATE
+  -Wno-unused-exception-parameter
+  -Wno-atomic-implicit-seq-cst
+  -Wno-unused-function
+)
+
+
+# buffer
+add_library(gluten_velox_buffer ${VELOX_ROOT_DIR}/velox/buffer/StringViewBufferHolder.cpp)
+
+target_link_libraries(gluten_velox_buffer gluten_velox_memory gluten_velox_common_base ch_contrib::folly)
+
+
+# function registry
+
+##
+set(VELOX_FUNCTIONS_DIR "${VELOX_ROOT_DIR}/velox/functions")
+
+add_library(gluten_velox_function_registry ${VELOX_FUNCTIONS_DIR}/FunctionRegistry.cpp)
+
+target_link_libraries(gluten_velox_function_registry gluten_velox_expression gluten_velox_type
+                      gluten_velox_core gluten_velox_exception)
+
+target_compile_options(gluten_velox_function_registry PRIVATE
+        -Wno-unused-exception-parameter
+)
+
+set(VELOX_PRESTO_FUNCTIONS_DIR "${VELOX_ROOT_DIR}/velox/functions/prestosql")
+
+## presto types
+add_library(gluten_velox_presto_types 
+        ${VELOX_PRESTO_FUNCTIONS_DIR}/types/HyperLogLogType.cpp
+        ${VELOX_PRESTO_FUNCTIONS_DIR}/types/JsonType.cpp
+        ${VELOX_PRESTO_FUNCTIONS_DIR}/types/TimestampWithTimeZoneType.cpp)
+
+target_link_libraries(gluten_velox_presto_types gluten_velox_memory gluten_velox_expression
+                      gluten_velox_functions_util)
+
+
+## presto function impl
+
+add_library(
+  gluten_velox_functions_prestosql_impl
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/ArrayConstructor.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/ArrayContains.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/ArrayDistinct.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/ArrayDuplicates.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/ArrayIntersectExcept.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/ArrayMatch.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/ArrayPosition.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/ArrayShuffle.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/ArraySort.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/ArraySum.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/Comparisons.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/DecimalVectorFunctions.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/ElementAt.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/FilterFunctions.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/FromUnixTime.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/FromUtf8.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/GreatestLeast.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/InPredicate.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/JsonFunctions.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/Map.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/MapEntries.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/MapFromEntries.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/MapKeysAndValues.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/MapZipWith.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/Not.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/Reduce.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/Repeat.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/Reverse.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/RowFunction.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/Sequence.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/SimpleComparisonMatcher.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/Slice.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/Split.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/StringFunctions.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/Subscript.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/ToUtf8.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/Transform.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/TransformKeys.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/TransformValues.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/URLFunctions.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/Utf8Utils.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/VectorArithmetic.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/WidthBucketArray.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/Zip.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/ZipWith.cpp)
+
+target_link_libraries(
+  gluten_velox_functions_prestosql_impl
+#   velox_common_hyperloglog
+#   velox_functions_json
+  gluten_velox_functions_lib
+  gluten_velox_expression
+  gluten_md5
+  gluten_velox_type_tz
+  gluten_velox_presto_types
+  gluten_velox_functions_util
+  ch_contrib::folly)
+
+set_property(TARGET gluten_velox_functions_prestosql_impl PROPERTY JOB_POOL_COMPILE
+                                                            high_memory_pool)
+target_compile_options(gluten_velox_functions_prestosql_impl PRIVATE
+        -Wno-unused-exception-parameter
+)
+
+
+
+
+
+## presto functions registration
+
+add_library(
+  gluten_velox_functions_prestosql
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/ArithmeticFunctionsRegistration.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/ArrayFunctionsRegistration.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/BinaryFunctionsRegistration.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/CheckedArithmeticRegistration.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/ComparisonFunctionsRegistration.cpp
+#   ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/DateTimeFunctionsRegistration.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/GeneralFunctionsRegistration.cpp
+#   ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/HyperLogFunctionsRegistration.cpp
+#   ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/JsonFunctionsRegistration.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/MapFunctionsRegistration.cpp
+#   ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/StringFunctionsRegistration.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/BitwiseFunctionsRegistration.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/URLFunctionsRegistration.cpp
+  ${VELOX_PRESTO_FUNCTIONS_DIR}/registration/RegistrationFunctions.cpp)
+
+target_link_libraries(gluten_velox_functions_prestosql gluten_velox_functions_prestosql_impl
+                      gluten_velox_is_null_functions 
+                      #simdjson::simdjson
+                      )
+
+set_property(TARGET gluten_velox_functions_prestosql PROPERTY JOB_POOL_COMPILE
+                                                       high_memory_pool)
+
+target_compile_options(gluten_velox_functions_prestosql PRIVATE
+        -Wno-used-but-marked-unused
+)
+                      
+# duckdb
+set_property(GLOBAL PROPERTY JOB_POOLS high_memory_pool=1000)
+
+add_subdirectory(${VELOX_ROOT_DIR}/velox/external/duckdb ${CMAKE_CURRENT_BINARY_DIR}/duckdb)
+
+set(VELOX_DUCKDB_DIR "${VELOX_ROOT_DIR}/velox/duckdb/conversion")
+add_library(gluten_velox_duckdb_conversion ${VELOX_DUCKDB_DIR}/DuckConversion.cpp
+        ${VELOX_DUCKDB_DIR}/DuckWrapper.cpp)
+
+target_link_libraries(gluten_velox_duckdb_conversion gluten_velox_core gluten_velox_vector duckdb
+tpch_extension)
+
+add_library(gluten_velox_duckdb_parser ${VELOX_DUCKDB_DIR}/DuckParser.cpp)
+
+target_link_libraries(gluten_velox_duckdb_parser gluten_velox_duckdb_conversion duckdb
+                      gluten_velox_parse_expression)
+
+target_compile_options(gluten_velox_duckdb_parser PRIVATE
+        -Wno-unused-exception-parameter
+)
+
+# parser
+
+add_library(gluten_velox_parse_utils ${VELOX_ROOT_DIR}/velox/parse/TypeResolver.cpp)
+target_link_libraries(gluten_velox_parse_utils gluten_velox_buffer gluten_velox_type gluten_velox_vector
+gluten_velox_function_registry)
+target_compile_options(gluten_velox_parse_utils PRIVATE
+        -Wno-unused-exception-parameter
+)
+
+
+add_library(gluten_velox_parse_expression ${VELOX_ROOT_DIR}/velox/parse/Expressions.cpp)
+target_link_libraries(gluten_velox_parse_expression gluten_velox_type gluten_velox_parse_utils
+                      gluten_velox_expression 
+                      #velox_exec
+                      )
+target_compile_options(gluten_velox_parse_expression PRIVATE
+        -Wno-unused-exception-parameter
+        -Wno-unused-function
+)
+
+add_library(gluten_velox_parse_parser ${VELOX_ROOT_DIR}/velox/parse/ExpressionsParser.cpp 
+#QueryPlanner.cpp
+)
+target_link_libraries(gluten_velox_parse_parser gluten_velox_parse_expression gluten_velox_type
+                      gluten_velox_duckdb_parser)
+
+target_compile_options(gluten_velox_parse_parser PRIVATE
+        -Wno-unused-exception-parameter
+)
+
+
+
 
 ################################
 # DWIO                         #

@@ -55,6 +55,7 @@ target_compile_options(
         -Wno-zero-as-null-pointer-constant      # glog
         -Wno-suggest-destructor-override        # glog
         -Wno-cast-align                         # xsimd
+        -Wno-unused-exception-parameter
 )
 target_link_libraries(gluten_dwio_parquet_reader_example PRIVATE
         gluten_velox_flag_definitions
@@ -71,10 +72,15 @@ target_link_libraries(gluten_dwio_parquet_reader_example PRIVATE
         gluten_velox_type
         gluten_velox_time
         gluten_velox_memory
+        gluten_velox_expression
+        gluten_velox_parse_parser
+        gluten_velox_functions_prestosql
 
         gluten_dwio_common_exception
         gluten_dwio_common
         gluten_dwio_common_compression
         gluten_dwio_native_parquet_reader
         gluten_dwio_parquet_thrift
+
+
 )

@@ -32,13 +32,6 @@ case class ArrowCSVScanBuilder(
   extends FileScanBuilder(sparkSession, fileIndex, dataSchema) {
 
   override def build(): Scan = {
-    ArrowCSVScan(
-      sparkSession,
-      fileIndex,
-      dataSchema,
-      readDataSchema(),
-      readPartitionSchema(),
-      Array.empty,
-      options)
+    null
   }
 }

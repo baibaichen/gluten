@@ -29,7 +29,6 @@ import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
 import org.apache.arrow.c.{ArrowSchema, CDataDictionaryProvider, Data}
 import org.apache.arrow.dataset.file.{FileFormat, FileSystemDatasetFactory}
 import org.apache.arrow.dataset.jni.NativeMemoryPool
-import org.apache.arrow.dataset.scanner.FragmentScanOptions
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch
 import org.apache.arrow.vector.types.pojo.{ArrowType, Field, Schema}
@@ -41,6 +40,8 @@ import java.util.Optional
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
+
+case class FragmentScanOptions()
 
 object ArrowUtil extends Logging {
 
@@ -125,7 +126,7 @@ object ArrowUtil extends Logging {
       pool: NativeMemoryPool
   ): FileSystemDatasetFactory = {
     val factory =
-      new FileSystemDatasetFactory(allocator, pool, format, rewriteUri(encodedUri), option)
+      new FileSystemDatasetFactory(allocator, pool, format, rewriteUri(encodedUri))
     factory
   }
 

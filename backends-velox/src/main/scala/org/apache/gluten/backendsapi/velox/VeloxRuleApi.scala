@@ -59,7 +59,6 @@ object VeloxRuleApi {
     injector.injectOptimizerRule(CollectRewriteRule.apply)
     injector.injectOptimizerRule(HLLRewriteRule.apply)
     injector.injectOptimizerRule(CollapseGetJsonObjectExpressionRule.apply)
-    injector.injectPostHocResolutionRule(ArrowConvertorRule.apply)
   }
 
   private def injectLegacy(injector: LegacyInjector): Unit = {
@@ -71,7 +70,6 @@ object VeloxRuleApi {
     injector.injectPreTransform(c => MergeTwoPhasesHashBaseAggregate(c.session))
     injector.injectPreTransform(_ => RewriteSubqueryBroadcast())
     injector.injectPreTransform(c => BloomFilterMightContainJointRewriteRule.apply(c.session))
-    injector.injectPreTransform(c => ArrowScanReplaceRule.apply(c.session))
 
     // Legacy: The legacy transform rule.
     val offloads = Seq(OffloadOthers(), OffloadExchange(), OffloadJoin())
@@ -125,7 +123,6 @@ object VeloxRuleApi {
     injector.injectPreTransform(c => MergeTwoPhasesHashBaseAggregate(c.session))
     injector.injectPreTransform(_ => RewriteSubqueryBroadcast())
     injector.injectPreTransform(c => BloomFilterMightContainJointRewriteRule.apply(c.session))
-    injector.injectPreTransform(c => ArrowScanReplaceRule.apply(c.session))
 
     // Gluten RAS: The RAS rule.
     val validatorBuilder: GlutenConfig => Validator = conf => Validators.newValidator(conf)

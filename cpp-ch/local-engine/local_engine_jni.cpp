@@ -957,7 +957,7 @@ JNIEXPORT jlong Java_org_apache_spark_sql_execution_datasources_CHDatasourceJniW
 {
     LOCAL_ENGINE_JNI_METHOD_START
     auto query_context = local_engine::QueryContext::instance().currentQueryContext();
-    // by task update new configs ( in case of dynamic config update )
+    // by task update new configs (in case of dynamic config update)
     const auto conf_plan_a = local_engine::getByteArrayElementsSafe(env, conf_plan);
     local_engine::SparkConfigs::updateConfig(
         query_context, {reinterpret_cast<const char *>(conf_plan_a.elems()), static_cast<size_t>(conf_plan_a.length())});

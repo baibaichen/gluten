@@ -16,6 +16,7 @@
  */
 package org.apache.spark.sql.delta
 
+import org.apache.gluten.GlutenConfig
 import org.apache.gluten.backendsapi.clickhouse.CHConf
 
 import org.apache.spark.SparkException
@@ -64,10 +65,15 @@ class ClickhouseOptimisticTransaction(
       inputData: Dataset[_],
       writeOptions: Option[DeltaOptions],
       additionalConstraints: Seq[Constraint]): Seq[FileAction] = {
-    if (ClickHouseConfig.isMergeTreeFormatEngine(metadata.configuration)) {
-      hasWritten = true
 
-      val spark = inputData.sparkSession
+    // TODO: FallbackByBackendSettings for mergetree
+    val disableNativeWriter = !GlutenConfig.getConf.enableNativeWriter.getOrElse(false)
+    val spark = inputData.sparkSession
+    val separatePipeline = disableNativeWriter ||
+      spark.conf.get("spark.gluten.sql.native.mergetree.writer.pipeline", "false") == "false"
+
+    if (separatePipeline && ClickHouseConfig.isMergeTreeFormatEngine(metadata.configuration)) {
+      hasWritten = true
       val (data, partitionSchema) = performCDCPartition(inputData)
       val outputPath = deltaLog.dataPath
 
@@ -228,7 +234,17 @@ class ClickhouseOptimisticTransaction(
       WriteFiles(logicalPlan, fileFormat, partitioningColumns, None, options, Map.empty)
 
     val queryExecution = new QueryExecution(spark, write)
-    val committer = getCommitter(outputPath)
+    val committer = fileFormat.toString match {
+      case "MergeTree" =>
+        val tableV2 = ClickHouseTableV2.getTable(deltaLog)
+        new MergeTreeDelayedCommitProtocol(
+          outputPath.toString,
+          None,
+          deltaDataSubdir,
+          tableV2.dataBaseName,
+          tableV2.tableName)
+      case _ => getCommitter(outputPath)
+    }
 
     // If Statistics Collection is enabled, then create a stats tracker that will be injected during
     // the FileFormatWriter.write call below and will collect per-file stats using

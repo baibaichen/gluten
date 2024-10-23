@@ -21,7 +21,7 @@ import org.apache.gluten.exception.GlutenNotSupportException
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.internal.io.FileCommitProtocol
-import org.apache.spark.sql.delta.files.DelayedCommitProtocol
+import org.apache.spark.sql.delta.files.{DelayedCommitProtocol, MergeTreeDelayedCommitProtocol, MergeTreeDelayedCommitProtocolWrite}
 import org.apache.spark.sql.execution.datasources.{ExecutedWriteSummary, WriteJobDescription, WriteTaskResult}
 import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.apache.spark.util.Utils
@@ -136,6 +136,9 @@ object CHDeltaColumnarWrite {
       committer: FileCommitProtocol): CHColumnarWrite[FileCommitProtocol] = committer match {
     case c: CHDelayedCommitProtocol =>
       CHDelayedCommitProtocolWrite(jobTrackerID, description, c)
+        .asInstanceOf[CHColumnarWrite[FileCommitProtocol]]
+    case m: MergeTreeDelayedCommitProtocol =>
+      MergeTreeDelayedCommitProtocolWrite(jobTrackerID, description, m)
         .asInstanceOf[CHColumnarWrite[FileCommitProtocol]]
     case _ =>
       throw new GlutenNotSupportException(

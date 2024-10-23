@@ -16,6 +16,10 @@
  */
 package org.apache.spark.sql.delta.files
 
+import org.apache.spark.sql.execution.CHColumnarWrite
+import org.apache.spark.sql.execution.datasources.{WriteJobDescription, WriteTaskResult}
+import org.apache.spark.sql.vectorized.ColumnarBatch
+
 class MergeTreeDelayedCommitProtocol(
     val outputPath: String,
     randomPrefixLength: Option[Int],
@@ -24,3 +28,13 @@ class MergeTreeDelayedCommitProtocol(
     val tableName: String)
   extends DelayedCommitProtocol("delta-mergetree", outputPath, randomPrefixLength, subdir)
   with MergeTreeFileCommitProtocol {}
+
+case class MergeTreeDelayedCommitProtocolWrite(
+    override val jobTrackerID: String,
+    override val description: WriteJobDescription,
+    override val committer: MergeTreeDelayedCommitProtocol)
+  extends CHColumnarWrite[MergeTreeDelayedCommitProtocol] {
+  override def doSetupNativeTask(): Unit = {}
+
+  override def commitTask(batch: ColumnarBatch): Option[WriteTaskResult] = None
+}

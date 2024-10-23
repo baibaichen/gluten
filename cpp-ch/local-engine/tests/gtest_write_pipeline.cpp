@@ -33,6 +33,7 @@
 #include <google/protobuf/wrappers.pb.h>
 #include <gtest/gtest.h>
 #include <substrait/plan.pb.h>
+#include <Poco/StringTokenizer.h>
 #include <Common/DebugUtils.h>
 #include <Common/QueryContext.h>
 
@@ -64,6 +65,31 @@ Chunk testChunk()
     x.push_back(std::move(nameCol));
     x.push_back(std::move(valueCol));
     return {std::move(x), 3};
+}
+
+std::map<std::string, std::string> parse_write_parameter(const std::string & input)
+{
+    std::map<std::string, std::string> reuslt;
+    const std::string prefix = "WriteParameters:";
+    const size_t prefix_pos = input.find(prefix);
+    if (prefix_pos == std::string::npos)
+        return reuslt;
+
+    const size_t start_pos = prefix_pos + prefix.length();
+    const size_t end_pos = input.find('\n', start_pos);
+
+    if (end_pos == std::string::npos)
+        return reuslt;
+
+    for (const Poco::StringTokenizer tok(input.substr(start_pos, end_pos - start_pos), ";", Poco::StringTokenizer::TOK_TRIM);
+         const auto & parameter : tok)
+    {
+        const size_t pos = parameter.find('=');
+        if (pos == std::string::npos)
+            continue;
+        reuslt[parameter.substr(0, pos)] = parameter.substr(pos + 1);
+    }
+    return reuslt;
 }
 
 TEST(LocalExecutor, StorageObjectStorageSink)
@@ -141,7 +167,7 @@ TEST(WritePipeline, SubstraitFileSink)
 
     google::protobuf::StringValue optimization;
     named_table.advanced_extension().optimization().UnpackTo(&optimization);
-    auto config = local_engine::parse_write_parameter(optimization.value());
+    auto config = parse_write_parameter(optimization.value());
     EXPECT_EQ(2, config.size());
     EXPECT_EQ("parquet", config["format"]);
     EXPECT_EQ("1", config["isSnappy"]);
@@ -197,7 +223,7 @@ TEST(WritePipeline, SubstraitPartitionedFileSink)
 
     google::protobuf::StringValue optimization;
     named_table.advanced_extension().optimization().UnpackTo(&optimization);
-    auto config = local_engine::parse_write_parameter(optimization.value());
+    auto config = parse_write_parameter(optimization.value());
     EXPECT_EQ(2, config.size());
     EXPECT_EQ("parquet", config["format"]);
     EXPECT_EQ("1", config["isSnappy"]);

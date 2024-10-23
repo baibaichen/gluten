@@ -149,7 +149,7 @@ case class GlutenCHCacheDataCommand(
         val locations = CHAffinity.getNativeMergeTreePartLocations(partName, relativeTablePath)
 
         if (locations.isEmpty) {
-          // non soft affinity
+          // non-soft affinity
           executorIdsToAddFiles(ALL_EXECUTORS)
             .append(mergeTreePart)
         } else {

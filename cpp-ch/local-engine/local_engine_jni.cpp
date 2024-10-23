@@ -977,7 +977,7 @@ JNIEXPORT jlong Java_org_apache_spark_sql_execution_datasources_CHDatasourceJniW
     assert(write_rel.has_named_table());
     const substrait::NamedObjectWrite & named_table = write_rel.named_table();
     local_engine::Write write;
-    if (named_table.advanced_extension().optimization().UnpackTo(&write))
+    if (!named_table.advanced_extension().optimization().UnpackTo(&write))
         throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Failed to unpack write optimization with local_engine::Write.");
     assert(write.has_common());
     assert(write.has_mergetree());

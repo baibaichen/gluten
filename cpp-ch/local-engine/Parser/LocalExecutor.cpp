@@ -110,7 +110,7 @@ Block * LocalExecutor::nextColumnar()
     return columnar_batch;
 }
 
-void LocalExecutor::cancel()
+void LocalExecutor::cancel() const
 {
     if (executor)
         executor->cancel();
@@ -118,7 +118,7 @@ void LocalExecutor::cancel()
         push_executor->cancel();
 }
 
-void LocalExecutor::setSinks(std::function<void(DB::QueryPipelineBuilder &)> setter)
+void LocalExecutor::setSinks(const std::function<void(DB::QueryPipelineBuilder &)> & setter) const
 {
     setter(*query_pipeline_builder);
 }

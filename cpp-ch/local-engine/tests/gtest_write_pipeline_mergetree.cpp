@@ -262,13 +262,17 @@ TEST(MergeTree, Pipeline)
 {
     const auto context = DB::Context::createCopy(QueryContext::globalContext());
     GlutenWriteSettings settings{
-        .task_write_tmp_dir = "file:///tmp/lineitem_mergetree",
-        .task_write_filename = "part-00000-a09f9d59-2dc6-43bc-a485-dcab8384b2ff.c000.mergetree",
+        .task_write_tmp_dir = "tmp/lineitem_mergetree"
     };
     settings.set(context);
 
     auto [_, local_executor] = test::create_plan_and_executor(
         EMBEDDED_PLAN(_3_mergetree_plan_), replaceLocalFilesWithTPCH(EMBEDDED_PLAN(_3_mergetree_plan_input_)), context);
-    EXPECT_TRUE(local_executor->hasNext());
-    const Block & x = *local_executor->nextColumnar();
+    size_t sum = 0;
+    while (local_executor->hasNext())
+    {
+        const Block & x = *local_executor->nextColumnar();
+        sum += x.rows();
+    }
+    EXPECT_EQ(600572, sum);
 }

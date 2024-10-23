@@ -26,6 +26,7 @@
 #include <Processors/Transforms/PlanSquashingTransform.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Storages/MergeTree/SparkMergeTreeMeta.h>
+#include <Storages/MergeTree/SparkStorageMergeTree.h>
 #include <Storages/Output/NormalFileWriter.h>
 #include <google/protobuf/wrappers.pb.h>
 #include <substrait/algebra.pb.h>
@@ -145,21 +146,24 @@ void adjust_output(const DB::QueryPipelineBuilderPtr & builder, const DB::Block 
 void addMergeTreeSinkTransform(
     const DB::ContextPtr & context,
     const DB::QueryPipelineBuilderPtr & builder,
-    const MergeTreeTable & merge_tree_table,
+    const MergeTreeTable& merge_tree_table,
     const DB::Block & output,
-    const DB::Names & partitionCols)
+    const DB::Names & /*partitionCols*/)
 {
-    GlutenWriteSettings write_settings = GlutenWriteSettings::get(context);
-    if (write_settings.task_write_tmp_dir.empty())
-        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "MergeTree Write Pipeline need inject temp directory.");
 
     const DB::Settings & settings = context->getSettingsRef();
-
+    const auto dest_storage = merge_tree_table.getStorage(context->getGlobalContext());
+    StorageMetadataPtr metadata_snapshot = dest_storage->getInMemoryMetadataPtr();
+    ASTPtr none;
+    auto sink = dest_storage->write(none, metadata_snapshot, context, false);
     Chain chain;
+    chain.addSink(sink);
     chain.addSource(std::make_shared<ApplySquashingTransform>(
-        builder->getHeader(), settings[Setting::min_insert_block_size_rows], settings[Setting::min_insert_block_size_bytes]));
+        output, settings[Setting::min_insert_block_size_rows], settings[Setting::min_insert_block_size_bytes]));
     chain.addSource(std::make_shared<PlanSquashingTransform>(
-        builder->getHeader(), settings[Setting::min_insert_block_size_rows], settings[Setting::min_insert_block_size_bytes]));
+        output, settings[Setting::min_insert_block_size_rows], settings[Setting::min_insert_block_size_bytes]));
+
+    builder->addChain(std::move(chain));
 }
 
 void addNormalFileWriterSinkTransform(
@@ -225,6 +229,13 @@ void addSinkTransform(const DB::ContextPtr & context, const substrait::WriteRel 
     if (write.has_mergetree())
     {
         local_engine::MergeTreeTable merge_tree_table(write, table_schema);
+        GlutenWriteSettings write_settings = GlutenWriteSettings::get(context);
+        if (write_settings.task_write_tmp_dir.empty())
+            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "MergeTree Write Pipeline need inject temp directory.");
+
+        if (!merge_tree_table.relative_path.empty())
+            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Non empty relative path for MergeTree table in pipeline mode.");
+        merge_tree_table.relative_path = write_settings.task_write_tmp_dir;
         addMergeTreeSinkTransform(context, builder, merge_tree_table, output, partitionCols);
     }
     else

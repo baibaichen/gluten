@@ -35,7 +35,7 @@ object GlutenCacheBase {
   def toExecutorId(executorId: String): String =
     executorId.split("_").last
 
-  protected def waitRpcResults
+  private def waitRpcResults
       : ArrayBuffer[(String, Future[CacheJobInfo])] => ArrayBuffer[(String, CacheJobInfo)] =
     (futureList: ArrayBuffer[(String, Future[CacheJobInfo])]) => {
       val resultList = ArrayBuffer[(String, CacheJobInfo)]()
@@ -54,7 +54,7 @@ object GlutenCacheBase {
     }
   }
 
-  def waitAllJobFinish(
+  private def waitAllJobFinish(
       jobs: ArrayBuffer[(String, CacheJobInfo)],
       ask: (String, String) => Future[CacheResult]): (Boolean, String) = {
     val res = collectJobTriggerResult(jobs)

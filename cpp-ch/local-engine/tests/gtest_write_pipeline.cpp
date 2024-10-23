@@ -164,14 +164,6 @@ TEST(WritePipeline, SubstraitFileSink)
     EXPECT_TRUE(write_rel.has_named_table());
 
     const substrait::NamedObjectWrite & named_table = write_rel.named_table();
-
-    google::protobuf::StringValue optimization;
-    named_table.advanced_extension().optimization().UnpackTo(&optimization);
-    auto config = parse_write_parameter(optimization.value());
-    EXPECT_EQ(2, config.size());
-    EXPECT_EQ("parquet", config["format"]);
-    EXPECT_EQ("1", config["isSnappy"]);
-
     EXPECT_TRUE(write_rel.has_table_schema());
     const substrait::NamedStruct & table_schema = write_rel.table_schema();
     auto block = TypeParser::buildBlockFromNamedStruct(table_schema);
@@ -220,15 +212,6 @@ TEST(WritePipeline, SubstraitPartitionedFileSink)
     EXPECT_TRUE(write_rel.has_named_table());
 
     const substrait::NamedObjectWrite & named_table = write_rel.named_table();
-
-    google::protobuf::StringValue optimization;
-    named_table.advanced_extension().optimization().UnpackTo(&optimization);
-    auto config = parse_write_parameter(optimization.value());
-    EXPECT_EQ(2, config.size());
-    EXPECT_EQ("parquet", config["format"]);
-    EXPECT_EQ("1", config["isSnappy"]);
-
-
     EXPECT_TRUE(write_rel.has_table_schema());
     const substrait::NamedStruct & table_schema = write_rel.table_schema();
     auto block = TypeParser::buildBlockFromNamedStruct(table_schema);

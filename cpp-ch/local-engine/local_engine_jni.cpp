@@ -973,18 +973,18 @@ JNIEXPORT jlong Java_org_apache_spark_sql_execution_datasources_CHDatasourceJniW
     const auto writeRelBytes = local_engine::getByteArrayElementsSafe(env, writeRel);
     substrait::WriteRel write_rel = local_engine::BinaryToMessage<substrait::WriteRel>(
         {reinterpret_cast<const char *>(writeRelBytes.elems()), static_cast<size_t>(writeRelBytes.length())});
-    local_engine::MergeTreeTable merge_tree_table(write_rel);
 
     assert(write_rel.has_named_table());
     const substrait::NamedObjectWrite & named_table = write_rel.named_table();
-    local_engine::Write write_opt;
-    named_table.advanced_extension().optimization().UnpackTo(&write_opt);
-    assert(write_opt.has_common());
-    auto * writer
-        = local_engine::SparkMergeTreeWriter::create(merge_tree_table, settings, query_context, write_opt.common().job_task_attempt_id())
-              .release();
+    local_engine::Write write;
+    if (named_table.advanced_extension().optimization().UnpackTo(&write))
+        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Failed to unpack write optimization with local_engine::Write.");
+    assert(write.has_common());
+    assert(write.has_mergetree());
+    local_engine::MergeTreeTable merge_tree_table(write, write_rel.table_schema());
+    const std::string & id = write.common().job_task_attempt_id();
 
-    return reinterpret_cast<jlong>(writer);
+    return reinterpret_cast<jlong>(local_engine::SparkMergeTreeWriter::create(merge_tree_table, settings, query_context, id).release());
     LOCAL_ENGINE_JNI_METHOD_END(env, 0)
 }
 

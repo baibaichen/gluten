@@ -112,7 +112,15 @@ public:
 
 using BuildRead = std::function<ColumnReadState(const arrow::io::ReadRange & col_range)>;
 
-class ParquetFileReaderExt
+/// UT
+class IRowRangesProvider
+{
+public:
+    virtual ~IRowRangesProvider() = default;
+    virtual std::optional<RowRanges> getRowRanges(Int32 row_group_index) = 0;
+};
+
+class ParquetFileReaderExt : public IRowRangesProvider
 {
     using RowRangesMap = absl::flat_hash_map<Int32, std::unique_ptr<RowRanges>>;
     using ColumnIndexStoreMap = absl::flat_hash_map<Int32, std::unique_ptr<ColumnIndexStore>>;
@@ -163,7 +171,7 @@ public:
 
     parquet::ParquetFileReader * fileReader() const { return file_reader_.get(); }
 
-    std::optional<RowRanges> getRowRanges(int32_t row_group_index)
+    std::optional<RowRanges> getRowRanges(Int32 row_group_index) override
     {
         const auto rg = rowGroup(row_group_index);
         const auto rg_count = rg->num_rows();
@@ -228,8 +236,8 @@ public:
 
 class VirtualColumnRowIndexReader
 {
-    ParquetFileReaderExt * reader_ext_;
-    std::deque<int> row_groups_;
+    IRowRangesProvider * row_ranges_provider_;
+    std::deque<Int32> row_groups_;
     std::vector<UInt64> row_group_ordinal_to_row_idx_idx_;
     std::optional<RowIndexGenerator> row_index_generator_;
 
@@ -238,7 +246,7 @@ class VirtualColumnRowIndexReader
         while (!row_groups_.empty())
         {
             const Int32 row_group_index = row_groups_.front();
-            auto result = reader_ext_->getRowRanges(row_group_index);
+            auto result = row_ranges_provider_->getRowRanges(row_group_index);
             row_groups_.pop_front();
             if (result)
                 return RowIndexGenerator{result.value(), row_group_ordinal_to_row_idx_idx_[row_group_index]};
@@ -248,8 +256,10 @@ class VirtualColumnRowIndexReader
 
 public:
     VirtualColumnRowIndexReader(
-        ParquetFileReaderExt * reader_ext, std::vector<int> & row_groups, const std::vector<UInt64> & row_group_ordinal_to_row_idx_idx)
-        : reader_ext_(reader_ext)
+        IRowRangesProvider * reader_ext,
+        const std::vector<Int32> & row_groups,
+        const std::vector<UInt64> & row_group_ordinal_to_row_idx_idx)
+        : row_ranges_provider_(reader_ext)
         , row_groups_(row_groups.begin(), row_groups.end())
         , row_group_ordinal_to_row_idx_idx_(row_group_ordinal_to_row_idx_idx)
         , row_index_generator_(nextRowGroup())

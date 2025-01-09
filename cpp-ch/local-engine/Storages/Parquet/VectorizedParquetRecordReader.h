@@ -111,13 +111,13 @@ public:
 };
 
 using BuildRead = std::function<ColumnReadState(const arrow::io::ReadRange & col_range)>;
-class PageIterator;
 
 class ParquetFileReaderExt
 {
     using RowRangesMap = absl::flat_hash_map<Int32, std::unique_ptr<RowRanges>>;
     using ColumnIndexStoreMap = absl::flat_hash_map<Int32, std::unique_ptr<ColumnIndexStore>>;
-    friend class PageIterator;
+
+    /// Members
     std::shared_ptr<::arrow::io::RandomAccessFile> source_;
     int64_t source_size_;
     std::unique_ptr<parquet::ParquetFileReader> file_reader_;
@@ -125,10 +125,10 @@ class ParquetFileReaderExt
     RowRangesMap row_group_row_ranges_;
     ColumnIndexStoreMap row_group_column_index_stores_;
     const DB::FormatSettings & format_settings_;
-
-protected:
     std::unordered_set<Int32> column_indices_;
-    const RowRanges & getRowRanges(Int32 row_group);
+
+    /// Methods
+    const RowRanges & internalGetRowRanges(Int32 row_group);
     const ColumnIndexStore & getColumnIndexStore(Int32 row_group);
 
     bool canPruningPage(const Int32 row_group) const { return column_index_filter_ && rowGroupPageIndexReader(row_group) != nullptr; }
@@ -158,6 +158,21 @@ public:
         const ColumnIndexFilterPtr & column_index_filter,
         const std::vector<Int32> & column_indices,
         const DB::FormatSettings & format_settings);
+
+    std::optional<ColumnChunkPageRead> nextRowGroup(int32_t row_group_index, int32_t column_index, const std::string & column_name);
+
+    parquet::ParquetFileReader * fileReader() const { return file_reader_.get(); }
+
+    std::optional<RowRanges> getRowRanges(int32_t row_group_index)
+    {
+        const auto rg = rowGroup(row_group_index);
+        const auto rg_count = rg->num_rows();
+
+        if (rg_count == 0 || (canPruningPage(row_group_index) && internalGetRowRanges(row_group_index).rowCount() == 0))
+            return std::nullopt;
+
+        return canPruningPage(row_group_index) ? internalGetRowRanges(row_group_index) : RowRanges::createSingle(rg_count);
+    }
 };
 
 class PageIterator final : public parquet::arrow::FileColumnIterator
@@ -166,13 +181,101 @@ class PageIterator final : public parquet::arrow::FileColumnIterator
 
 public:
     PageIterator(const int column_index, ParquetFileReaderExt * reader_ext, const std::vector<Int32> & row_groups)
-        : FileColumnIterator(column_index, reader_ext->file_reader_.get(), row_groups), reader_ext_(reader_ext)
+        : FileColumnIterator(column_index, reader_ext->fileReader(), row_groups), reader_ext_(reader_ext)
     {
     }
 
     ~PageIterator() override = default;
 
-    std::optional<ColumnChunkPageRead> nextChunkWithRowRange();
+    std::optional<ColumnChunkPageRead> nextRowGroup();
+};
+
+class RowIndexGenerator
+{
+    RowRanges row_ranges_;
+    size_t start_rowRange_ = 0;
+
+public:
+    RowIndexGenerator(const RowRanges & row_ranges, UInt64 startingRowIdx) : row_ranges_(row_ranges)
+    {
+        assert(!row_ranges_.getRanges().empty());
+        for (auto & range : row_ranges_.getRanges())
+        {
+            range.from += startingRowIdx;
+            range.to += startingRowIdx;
+        }
+    }
+
+    size_t populateRowIndices(UInt64 * row_indices, size_t batchSize)
+    {
+        size_t count = 0;
+        for (; start_rowRange_ < row_ranges_.getRanges().size(); ++start_rowRange_)
+        {
+            auto & range = row_ranges_.getRange(start_rowRange_);
+            for (size_t j = range.from; j <= range.to; ++j)
+            {
+                *row_indices++ = j;
+                if (++count >= batchSize)
+                {
+                    range.from = j + 1; // Advance range.from
+                    return count;
+                }
+            }
+        }
+        return count;
+    }
+};
+
+class VirtualColumnRowIndexReader
+{
+    ParquetFileReaderExt * reader_ext_;
+    std::deque<int> row_groups_;
+    std::vector<UInt64> row_group_ordinal_to_row_idx_idx_;
+    std::optional<RowIndexGenerator> row_index_generator_;
+
+    std::optional<RowIndexGenerator> nextRowGroup()
+    {
+        while (!row_groups_.empty())
+        {
+            const Int32 row_group_index = row_groups_.front();
+            auto result = reader_ext_->getRowRanges(row_group_index);
+            row_groups_.pop_front();
+            if (result)
+                return RowIndexGenerator{result.value(), row_group_ordinal_to_row_idx_idx_[row_group_index]};
+        }
+        return std::nullopt;
+    }
+
+public:
+    VirtualColumnRowIndexReader(
+        ParquetFileReaderExt * reader_ext, std::vector<int> & row_groups, const std::vector<UInt64> & row_group_ordinal_to_row_idx_idx)
+        : reader_ext_(reader_ext)
+        , row_groups_(row_groups.begin(), row_groups.end())
+        , row_group_ordinal_to_row_idx_idx_(row_group_ordinal_to_row_idx_idx)
+        , row_index_generator_(nextRowGroup())
+    {
+    }
+
+    DB::ColumnPtr readBatch(const int64_t batch_size)
+    {
+        auto column = DB::ColumnUInt64::create(batch_size);
+        DB::ColumnUInt64::Container & vec = column->getData();
+        int64_t readCount = 0;
+        int64_t remaining = batch_size;
+        while (remaining > 0 && row_index_generator_)
+        {
+            UInt64 * pos = vec.data() + readCount;
+            readCount += row_index_generator_->populateRowIndices(pos, remaining);
+            remaining -= readCount;
+            if (remaining > 0)
+                row_index_generator_ = nextRowGroup();
+        }
+
+        if (remaining) // we know that we have read all the rows, but we can't fill the container
+            vec.resize(readCount);
+        assert(readCount + remaining == batch_size);
+        return column;
+    }
 };
 
 class VectorizedColumnReader

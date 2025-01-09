@@ -105,7 +105,7 @@ VectorizedColumnReader::VectorizedColumnReader(
 
 void VectorizedColumnReader::nextRowGroup()
 {
-    input_.nextChunkWithRowRange().and_then(
+    input_.nextRowGroup().and_then(
         [&](ColumnChunkPageRead && read) -> std::optional<int64_t>
         {
             setPageReader(std::move(read.first), read.second);
@@ -200,14 +200,19 @@ bool VectorizedParquetRecordReader::initialize(
 
     std::vector<Int32> column_indices;
     for (const auto & [clickhouse_header_index, parquet_indexes] : index_mapping)
-    {
         for (auto parquet_index : parquet_indexes)
-        {
             column_indices.push_back(parquet_index);
-        }
-    }
 
     THROW_ARROW_NOT_OK_OR_ASSIGN(std::vector<int> field_indices, manifest.GetFieldIndices(column_indices));
+
+
+    UInt64 rowIdxSum = 0;
+    std::vector<UInt64> rowGroupOrdinalToRowIdx;
+    for (size_t i = 0; i < file_metadata.num_row_groups(); i++)
+    {
+        rowGroupOrdinalToRowIdx.push_back(rowIdxSum);
+        rowIdxSum += file_metadata.RowGroup(i)->num_rows();
+    }
 
     /// row groups pruning
     std::vector<Int32> row_groups(boost::counting_iterator<Int32>(0), boost::counting_iterator<Int32>(file_metadata.num_row_groups()));
@@ -271,44 +276,39 @@ ParquetFileReaderExt::ParquetFileReaderExt(
     THROW_ARROW_NOT_OK_OR_ASSIGN(const int64_t source_size, source_->GetSize());
     source_size_ = source_size;
 }
-std::optional<ColumnChunkPageRead> PageIterator::nextChunkWithRowRange()
+
+std::optional<ColumnChunkPageRead> PageIterator::nextRowGroup()
 {
     while (!row_groups_.empty())
     {
         const Int32 row_group_index = row_groups_.front();
-        const auto rg = reader_ext_->rowGroup(row_group_index);
-        const auto rg_count = rg->num_rows();
-
-        if (rg_count == 0)
-        {
-            row_groups_.pop_front();
-            continue;
-        }
-
-        const RowRanges row_ranges
-            = reader_ext_->canPruningPage(row_group_index) ? reader_ext_->getRowRanges(row_group_index) : RowRanges::createSingle(rg_count);
-
-        if (row_ranges.rowCount() == 0)
-        {
-            row_groups_.pop_front();
-            continue;
-        }
-
-        const BuildRead readWithRowRange = [&](const arrow::io::ReadRange & col_range)
-        {
-            const ColumnIndexStore & column_index_store = reader_ext_->getColumnIndexStore(row_group_index);
-            const ColumnIndex & index
-                = *(column_index_store.find(lowerColumnNameIfNeed(descr()->name(), reader_ext_->format_settings_))->second);
-            return buildRead(rg_count, col_range, index.offsetIndex().page_locations(), row_ranges);
-        };
-        const BuildRead readAll = [&](const arrow::io::ReadRange & col_range) { return buildAllRead(rg_count, col_range); };
-
-        const auto read = row_ranges.rowCount() == rg_count ? readAll : readWithRowRange;
-        auto result = reader_ext_->readColumnChunkPageBase(*rg, column_index_, read);
+        auto result = reader_ext_->nextRowGroup(row_group_index, column_index_, descr()->name());
         row_groups_.pop_front();
-        return result;
+        if (result)
+            return result;
     }
-    return {};
+    return std::nullopt;
+}
+
+std::optional<ColumnChunkPageRead>
+ParquetFileReaderExt::nextRowGroup(int32_t row_group_index, int32_t column_index, const std::string & column_name)
+{
+    return getRowRanges(row_group_index)
+        .transform(
+            [&](const RowRanges & row_ranges)
+            {
+                const auto rg = rowGroup(row_group_index);
+                const auto rg_count = rg->num_rows();
+                const BuildRead readAll = [&](const arrow::io::ReadRange & col_range) { return buildAllRead(rg_count, col_range); };
+                const BuildRead read = row_ranges.rowCount() == rg_count ? readAll : [&](const arrow::io::ReadRange & col_range)
+                {
+                    const ColumnIndexStore & column_index_store = getColumnIndexStore(row_group_index);
+                    const ColumnIndex & index = *(column_index_store.find(lowerColumnNameIfNeed(column_name, format_settings_))->second);
+                    return buildRead(rg_count, col_range, index.offsetIndex().page_locations(), row_ranges);
+                };
+
+                return readColumnChunkPageBase(*rg, column_index, read);
+            });
 }
 
 ColumnChunkPageRead ParquetFileReaderExt::readColumnChunkPageBase(
@@ -331,7 +331,7 @@ ColumnChunkPageRead ParquetFileReaderExt::readColumnChunkPageBase(
         read_sequence);
 }
 
-const RowRanges & ParquetFileReaderExt::getRowRanges(const Int32 row_group)
+const RowRanges & ParquetFileReaderExt::internalGetRowRanges(const Int32 row_group)
 {
     if (!row_group_row_ranges_.contains(row_group))
     {
@@ -459,7 +459,7 @@ ColumnReadState buildRead(
         const size_t lastRowIndexInPage = page_row_ranges[i].to;
         size_t readRowIndexInPage = page_row_ranges[i].from;
 
-        /// [readRowIndexInPage ,rowIndex-1] - [rowIndex, rowIndex+readNumber-1] - [rowIndex+readNumber, lastRowIndexInPage]
+        /// [readRowIndexInPage, rowIndex-1] - [rowIndex, rowIndex+readNumber-1] - [rowIndex+readNumber, lastRowIndexInPage]
         if (rowIndex <= lastRowIndexInPage)
         {
             assert(rowIndex >= readRowIndexInPage);
@@ -472,7 +472,7 @@ ColumnReadState buildRead(
                 rowIndex += readNumber;
                 readRowIndexInPage = rowIndex;
 
-                /// we already read cuurent page, so we need to read next page.
+                /// we already read current page, so we need to read next page.
                 if (row_range_begin->to > lastRowIndexInPage)
                 {
                     assert(readRowIndexInPage > lastRowIndexInPage);

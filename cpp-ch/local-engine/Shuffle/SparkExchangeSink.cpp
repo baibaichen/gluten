@@ -102,15 +102,15 @@ void SparkExchangeSink::initOutputHeader(const Block & block)
     }
 }
 
-SparkExchangeManager::SparkExchangeManager(const Block& header, const String & short_name, const SplitOptions & options_, jobject rss_pusher): input_header(materializeBlock(header)), options(options_)
+SparkExchangeManager::SparkExchangeManager(
+    const Block & header, const String & short_name, const SplitOptions & options_, jobject rss_pusher)
+    : input_header(materializeBlock(header)), options(options_)
 {
     if (rss_pusher)
     {
         GET_JNIENV(env)
-        jclass celeborn_partition_pusher_class =
-            CreateGlobalClassReference(env, "Lorg/apache/spark/shuffle/CelebornPartitionPusher;");
-        jmethodID celeborn_push_partition_data_method =
-            GetMethodID(env, celeborn_partition_pusher_class, "pushPartitionData", "(I[BI)I");
+        jclass celeborn_partition_pusher_class = CreateGlobalClassReference(env, "Lorg/apache/spark/shuffle/CelebornPartitionPusher;");
+        jmethodID celeborn_push_partition_data_method = GetMethodID(env, celeborn_partition_pusher_class, "pushPartitionData", "(I[BI)I");
         CLEAN_JNIENV
         celeborn_client = std::make_unique<CelebornClient>(rss_pusher, celeborn_push_partition_data_method);
         use_rss = true;
@@ -130,7 +130,8 @@ SparkExchangeManager::SparkExchangeManager(const Block& header, const String & s
     split_result.raw_partition_lengths.resize(options.partition_num, 0);
 }
 
-static std::shared_ptr<PartitionWriter> createPartitionWriter(const SplitOptions& options, bool use_sort_shuffle, std::unique_ptr<CelebornClient> celeborn_client)
+static std::shared_ptr<PartitionWriter>
+createPartitionWriter(const SplitOptions & options, bool use_sort_shuffle, std::unique_ptr<CelebornClient> celeborn_client)
 {
     if (celeborn_client)
     {
@@ -154,7 +155,8 @@ void SparkExchangeManager::initSinks(size_t num)
     for (size_t i = 0; i < num; ++i)
     {
         partition_writers[i] = createPartitionWriter(options, use_sort_shuffle, std::move(celeborn_client));
-        sinks[i] = std::make_shared<SparkExchangeSink>(input_header, partitioner_creator(options), partition_writers[i], output_columns_indicies, use_sort_shuffle);
+        sinks[i] = std::make_shared<SparkExchangeSink>(
+            input_header, partitioner_creator(options), partition_writers[i], output_columns_indicies, use_sort_shuffle);
     }
 }
 
@@ -174,7 +176,7 @@ void SparkExchangeManager::setSinksToPipeline(DB::QueryPipelineBuilder & pipelin
     pipeline.setSinks(getter);
 }
 
-void SparkExchangeManager::pushBlock(const DB::Block & block)
+void SparkExchangeManager::pushBlock(const DB::Block & block) const
 {
     if (sinks.size() != 1)
     {
@@ -241,7 +243,8 @@ void checkPartitionLengths(const std::vector<UInt64> & partition_length, size_t 
 {
     if (partition_num != partition_length.size())
     {
-        throw Exception(DB::ErrorCodes::LOGICAL_ERROR, "except partition_lengths size is {}, but got {}", partition_num, partition_length.size());
+        throw Exception(
+            DB::ErrorCodes::LOGICAL_ERROR, "except partition_lengths size is {}, but got {}", partition_num, partition_length.size());
     }
 }
 
@@ -295,9 +298,11 @@ std::vector<SpillInfo> SparkExchangeManager::gatherAllSpillInfo() const
     return res;
 }
 
-std::vector<UInt64> SparkExchangeManager::mergeSpills(DB::WriteBuffer & data_file, const std::vector<SpillInfo>& spill_infos, const std::vector<Spillable::ExtraData> & extra_datas)
+std::vector<UInt64> SparkExchangeManager::mergeSpills(
+    DB::WriteBuffer & data_file, const std::vector<SpillInfo> & spill_infos, const std::vector<Spillable::ExtraData> & extra_datas)
 {
-    if (sinks.empty()) return {};
+    if (sinks.empty())
+        return {};
     auto codec = DB::CompressionCodecFactory::instance().get(boost::to_upper_copy(options.compress_method), options.compress_level);
 
     CompressedWriteBuffer compressed_output(data_file, codec, options.io_buffer_size);
@@ -371,8 +376,7 @@ std::vector<UInt64> SparkExchangeManager::mergeSpills(DB::WriteBuffer & data_fil
     split_result.total_write_time += write_time_watch.elapsedNanoseconds();
     split_result.total_compress_time += compressed_output.getCompressTime();
     split_result.total_io_time += compressed_output.getWriteTime();
-    split_result.total_serialize_time = split_result.total_serialize_time
-        - split_result.total_io_time - split_result.total_compress_time;
+    split_result.total_serialize_time = split_result.total_serialize_time - split_result.total_io_time - split_result.total_compress_time;
     split_result.total_io_time += merge_io_time;
 
     for (const auto & spill : spill_infos)

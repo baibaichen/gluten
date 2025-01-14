@@ -16,15 +16,15 @@
  */
 
 #pragma once
+#include <jni.h>
 #include <Processors/ISink.h>
+#include <Shuffle/PartitionWriter.h>
 #include <Shuffle/SelectorBuilder.h>
 #include <Shuffle/ShuffleCommon.h>
-#include <jni.h>
-#include <Shuffle/PartitionWriter.h>
 
 namespace DB
 {
-    class QueryPipelineBuilder;
+class QueryPipelineBuilder;
 }
 
 namespace local_engine
@@ -35,41 +35,36 @@ class PartitionWriter;
 class SparkExchangeSink : public DB::ISink
 {
     friend class SparkExchangeManager;
+
 public:
-    SparkExchangeSink(const DB::Block& header, std::unique_ptr<SelectorBuilder> partitioner_,
-                      std::shared_ptr<PartitionWriter> partition_writer_,
-                      const std::vector<size_t>& output_columns_indicies_, bool sort_writer_)
+    SparkExchangeSink(
+        const DB::Block & header,
+        std::unique_ptr<SelectorBuilder> partitioner_,
+        const std::shared_ptr<PartitionWriter> & partition_writer_,
+        const std::vector<size_t> & output_columns_indicies_,
+        bool sort_writer_)
         : DB::ISink(header)
-          , partitioner(std::move(partitioner_))
-          , partition_writer(partition_writer_)
-          , output_columns_indicies(output_columns_indicies_)
-          , sort_writer(sort_writer_)
+        , partitioner(std::move(partitioner_))
+        , partition_writer(partition_writer_)
+        , output_columns_indicies(output_columns_indicies_)
+        , sort_writer(sort_writer_)
     {
         initOutputHeader(header);
         partition_writer->initialize(&split_result, output_header);
     }
 
-    String getName() const override
-    {
-        return "SparkExchangeSink";
-    }
+    String getName() const override { return "SparkExchangeSink"; }
 
-    const SplitResult& getSplitResult() const
-    {
-        return split_result;
-    }
+    const SplitResult & getSplitResult() const { return split_result; }
 
-    const DB::Block& getOutputHeader() const
-    {
-        return output_header;
-    }
+    const DB::Block & getOutputHeader() const { return output_header; }
 
 protected:
     void consume(DB::Chunk block) override;
     void onFinish() override;
 
 private:
-    void initOutputHeader(const DB::Block& block);
+    void initOutputHeader(const DB::Block & block);
 
     DB::Block output_header;
     std::unique_ptr<SelectorBuilder> partitioner;
@@ -85,15 +80,12 @@ using SelectBuilderCreator = std::function<SelectBuilderPtr(const SplitOptions &
 class SparkExchangeManager
 {
 public:
-    SparkExchangeManager(const DB::Block& header, const String & short_name, const SplitOptions & options_,  jobject rss_pusher = nullptr);
+    SparkExchangeManager(const DB::Block & header, const String & short_name, const SplitOptions & options_, jobject rss_pusher = nullptr);
     void initSinks(size_t num);
     void setSinksToPipeline(DB::QueryPipelineBuilder & pipeline) const;
-    void pushBlock(const DB::Block &block);
+    void pushBlock(const DB::Block & block) const;
     void finish();
-    [[nodiscard]] SplitResult getSplitResult() const
-    {
-        return split_result;
-    }
+    [[nodiscard]] SplitResult getSplitResult() const { return split_result; }
 
 private:
     static SelectBuilderPtr createRoundRobinSelectorBuilder(const SplitOptions & options_);
@@ -104,7 +96,10 @@ private:
 
     void mergeSplitResult();
     std::vector<SpillInfo> gatherAllSpillInfo() const;
-    std::vector<UInt64> mergeSpills(DB::WriteBuffer & data_file, const std::vector<SpillInfo>& spill_infos, const std::vector<Spillable::ExtraData> & extra_datas = {});
+    std::vector<UInt64> mergeSpills(
+        DB::WriteBuffer & data_file,
+        const std::vector<SpillInfo> & spill_infos,
+        const std::vector<Spillable::ExtraData> & extra_datas = {});
 
     DB::Block input_header;
     std::vector<std::shared_ptr<SparkExchangeSink>> sinks;

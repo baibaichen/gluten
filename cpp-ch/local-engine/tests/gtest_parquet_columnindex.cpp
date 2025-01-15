@@ -516,13 +516,13 @@ struct FakeRowRangesProvider : public local_engine::IRowRangesProvider
     }
 };
 
-TEST(VirtualColumnRowIndexReader, Basic)
+TEST(RowIndex, VirtualColumnRowIndexReader)
 {
     local_engine::RowRanges row_ranges = calculateRowRangesForTest("column1 in (7)");
     FakeRowRangesProvider provider({row_ranges});
-    local_engine::VirtualColumnRowIndexReader reader(&provider, {0}, {0});
+    local_engine::VirtualColumnRowIndexReader reader(&provider, {0}, {0}, local_engine::BIGINT());
     DB::ColumnPtr col = reader.readBatch(TOTALSIZE);
-    const auto & col_str = typeid_cast<const ColumnUInt64 &>(*col);
+    const auto & col_str = typeid_cast<const ColumnInt64 &>(*col);
     std::vector<size_t> result;
     std::ranges::for_each(col_str.getData(), [&](const auto & val) { result.push_back(val); });
     ASSERT_EQ(result, std::vector<size_t>({7, 8, 9, 10, 11, 12, 13}));
@@ -1132,7 +1132,7 @@ TEST(ColumnIndex, VectorizedParquetRecordReader)
     Block blockHeader({{BIGINT(), "11"}, {STRING(), "18"}});
 
     local_engine::VectorizedParquetRecordReader recordReader(blockHeader, format_settings);
-    recordReader.initialize(blockHeader, arrow_file, column_index_filter);
+    recordReader.initialize(arrow_file, column_index_filter);
     auto chunk{recordReader.nextBatch()};
     ASSERT_EQ(chunk.getNumColumns(), 2);
     ASSERT_EQ(chunk.getNumRows(), format_settings.parquet.max_block_size);

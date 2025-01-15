@@ -15,6 +15,10 @@
  * limitations under the License.
  */
 #pragma once
+
+#include "DataTypes/DataTypeNullable.h"
+
+
 #include <config.h>
 
 #if USE_PARQUET
@@ -33,6 +37,7 @@ struct PageLocation;
 }
 namespace DB
 {
+class DataTypeNullable;
 class Block;
 }
 
@@ -214,7 +219,7 @@ public:
         }
     }
 
-    size_t populateRowIndices(UInt64 * row_indices, size_t batchSize)
+    size_t populateRowIndices(Int64 * row_indices, size_t batchSize)
     {
         size_t count = 0;
         for (; start_rowRange_ < row_ranges_.getRanges().size(); ++start_rowRange_)
@@ -234,12 +239,36 @@ public:
     }
 };
 
+namespace ParquetVirtualMeta
+{
+inline constexpr auto TMP_ROWINDEX = "_tmp_metadata_row_index";
+inline bool hasMetaColumns(const DB::Block & header)
+{
+    return header.findByName(TMP_ROWINDEX) != nullptr;
+}
+inline DB::DataTypePtr getMetaColumnType(const DB::Block & header)
+{
+    return header.findByName(TMP_ROWINDEX)->type;
+}
+inline DB::Block removeMetaColumns(const DB::Block & header)
+{
+    DB::Block new_header;
+    for (const auto & col : header)
+    {
+        if (col.name != TMP_ROWINDEX)
+            new_header.insert(col);
+    }
+    return new_header;
+}
+}
+
 class VirtualColumnRowIndexReader
 {
     IRowRangesProvider * row_ranges_provider_;
     std::deque<Int32> row_groups_;
     std::vector<UInt64> row_group_ordinal_to_row_idx_idx_;
     std::optional<RowIndexGenerator> row_index_generator_;
+    DB::DataTypePtr column_type_;
 
     std::optional<RowIndexGenerator> nextRowGroup()
     {
@@ -256,25 +285,40 @@ class VirtualColumnRowIndexReader
 
 public:
     VirtualColumnRowIndexReader(
-        IRowRangesProvider * reader_ext,
+        IRowRangesProvider * row_ranges_provider,
         const std::vector<Int32> & row_groups,
-        const std::vector<UInt64> & row_group_ordinal_to_row_idx_idx)
-        : row_ranges_provider_(reader_ext)
+        const std::vector<UInt64> & row_group_ordinal_to_row_idx_idx,
+        const DB::DataTypePtr & column_type)
+        : row_ranges_provider_(row_ranges_provider)
         , row_groups_(row_groups.begin(), row_groups.end())
         , row_group_ordinal_to_row_idx_idx_(row_group_ordinal_to_row_idx_idx)
         , row_index_generator_(nextRowGroup())
+        , column_type_(column_type)
     {
     }
 
     DB::ColumnPtr readBatch(const int64_t batch_size)
     {
-        auto column = DB::ColumnUInt64::create(batch_size);
-        DB::ColumnUInt64::Container & vec = column->getData();
+        if (column_type_->isNullable())
+        {
+            auto internal_type = typeid_cast<const DB::DataTypeNullable &>(*column_type_).getNestedType();
+            auto nested_column = readBatchNonNullable(internal_type, batch_size);
+            auto nullmap_column = DB::ColumnUInt8::create(nested_column->size(), 0);
+            return DB::ColumnNullable::create(nested_column, std::move(nullmap_column));
+        }
+        return readBatchNonNullable(column_type_, batch_size);
+    }
+
+    DB::ColumnPtr readBatchNonNullable(const DB::DataTypePtr & notNullType, const int64_t batch_size)
+    {
+        assert(DB::WhichDataType(notNullType).isInt64());
+        auto column = DB::ColumnInt64::create(batch_size);
+        DB::ColumnInt64::Container & vec = column->getData();
         int64_t readCount = 0;
         int64_t remaining = batch_size;
         while (remaining > 0 && row_index_generator_)
         {
-            UInt64 * pos = vec.data() + readCount;
+            Int64 * pos = vec.data() + readCount;
             readCount += row_index_generator_->populateRowIndices(pos, remaining);
             remaining -= readCount;
             if (remaining > 0)
@@ -284,6 +328,7 @@ public:
         if (remaining) // we know that we have read all the rows, but we can't fill the container
             vec.resize(readCount);
         assert(readCount + remaining == batch_size);
+        assert(readCount == column->size());
         return column;
     }
 };
@@ -308,6 +353,8 @@ public:
 
 class VectorizedParquetRecordReader
 {
+    const DB::Block original_header_;
+    const DB::Block parquet_header_;
     const DB::FormatSettings format_settings_;
     DB::ArrowColumnToCHColumn arrow_column_to_ch_column_;
 
@@ -316,14 +363,32 @@ class VectorizedParquetRecordReader
     // parquet::arrow::SchemaManifest manifest_;
     /// columns to read from Parquet file.
     std::vector<VectorizedColumnReader> column_readers_;
+    std::optional<VirtualColumnRowIndexReader> row_index_reader_ = std::nullopt;
+
     friend class VectorizedParquetBlockInputFormat;
+
+    static parquet::arrow::SchemaManifest createSchemaManifest(const parquet::FileMetaData & metadata);
+    std::vector<Int32> pruneColumn(const DB::Block & header, const parquet::FileMetaData & metadata) const;
+    std::vector<Int32> pruneRowGroups(const parquet::FileMetaData & file_metadata) const;
+
+
+    static std::vector<UInt64> calculateRowGroupOffsets(const parquet::FileMetaData & file_metadata)
+    {
+        UInt64 rowIdxSum = 0;
+        std::vector<UInt64> rowGroupOrdinalToRowIdx;
+        for (size_t i = 0; i < file_metadata.num_row_groups(); i++)
+        {
+            rowGroupOrdinalToRowIdx.push_back(rowIdxSum);
+            rowIdxSum += file_metadata.RowGroup(i)->num_rows();
+        }
+        return rowGroupOrdinalToRowIdx;
+    }
 
 public:
     VectorizedParquetRecordReader(const DB::Block & header, const DB::FormatSettings & format_settings);
     ~VectorizedParquetRecordReader() = default;
 
     bool initialize(
-        const DB::Block & header,
         const std::shared_ptr<arrow::io::RandomAccessFile> & arrow_file,
         const ColumnIndexFilterPtr & column_index_filter,
         const std::shared_ptr<parquet::FileMetaData> & metadata = nullptr);

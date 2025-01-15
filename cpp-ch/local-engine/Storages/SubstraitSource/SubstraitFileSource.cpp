@@ -68,9 +68,7 @@ static DB::Block getRealHeader(const DB::Block & header)
 }
 
 SubstraitFileSource::SubstraitFileSource(
-    const DB::ContextPtr & context_,
-    const DB::Block & header_,
-    const substrait::ReadRel::LocalFiles & file_infos)
+    const DB::ContextPtr & context_, const DB::Block & header_, const substrait::ReadRel::LocalFiles & file_infos)
     : DB::SourceWithKeyCondition(getRealHeader(header_), false)
     , context(context_)
     , output_header(InputFileNameParser::removeInputFileColumn(header_))
@@ -385,7 +383,7 @@ bool NormalFileReader::pull(DB::Chunk & chunk)
 
     DB::Columns res_columns;
     res_columns.reserve(columns.size());
-    for (auto & column : columns)
+    for (const auto & column : columns)
     {
         if (to_read_header.has(column.name))
         {

@@ -20,6 +20,7 @@
 #include <Interpreters/Context.h>
 #include <Parser/LocalExecutor.h>
 #include <Parser/SubstraitParserUtils.h>
+#include <base/scope_guard.h>
 #include <gtest/gtest.h>
 #include <substrait/plan.pb.h>
 #include <Common/DebugUtils.h>

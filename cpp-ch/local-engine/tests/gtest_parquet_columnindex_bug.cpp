@@ -57,6 +57,7 @@ TEST(RowIndex, Basic)
     auto query_id = local_engine::QueryContext::instance().initializeQuery("RowIndex");
     SCOPE_EXIT({ local_engine::QueryContext::instance().finalizeQuery(query_id); });
     const auto context = local_engine::QueryContext::instance().currentQueryContext();
+    context->setSetting("input_format_parquet_allow_missing_columns", Field(false));
     constexpr std::string_view file{GLUTEN_DATA_DIR("/utils/extern-local-engine/tests/data/metadata.rowindex.snappy.parquet")};
     constexpr std::string_view split_template
         = R"({"items":[{"uriFile":"{replace_local_files}","length":"1767","parquet":{},"partitionColumns":[{"key":"pb","value":"1003"}],"schema":{},"metadataColumns":[{"key":"input_file_name","value":"{replace_local_files}"},{"key":"input_file_block_length","value":"1767"},{"key":"input_file_block_start","value":"0"}],"properties":{"fileSize":"1767","modificationTime":"1736847651881"}}]})";
@@ -74,11 +75,45 @@ TEST(RowIndex, In)
     auto query_id = local_engine::QueryContext::instance().initializeQuery("RowIndex");
     SCOPE_EXIT({ local_engine::QueryContext::instance().finalizeQuery(query_id); });
     const auto context = local_engine::QueryContext::instance().currentQueryContext();
-    constexpr std::string_view file{GLUTEN_DATA_DIR("/utils/extern-local-engine/tests/data/rowindex_in.snappy.parquet")};
-    constexpr std::string_view split_template
-        = R"({"items":[{"uriFile":"{replace_local_files}","length":"256","parquet":{},"schema":{},"metadataColumns":[{"key":"input_file_name","value":"{replace_local_files}"},{"key":"input_file_block_length","value":"256"},{"key":"input_file_block_start","value":"0"}],"properties":{"fileSize":"125451","modificationTime":"1737104830724"}}]})";
+    context->setSetting("input_format_parquet_allow_missing_columns", Field(false));
 
-    auto [_, local_executor] = local_engine::test::create_plan_and_executor(EMBEDDED_PLAN(_rowindex_in), split_template, file, context);
+    {
+        /// all row gorups are ignored
+        constexpr std::string_view file{GLUTEN_DATA_DIR("/utils/extern-local-engine/tests/data/rowindex_in.snappy.parquet")};
+        constexpr std::string_view split_template
+            = R"({"items":[{"uriFile":"{replace_local_files}","length":"256","parquet":{},"schema":{},"metadataColumns":[{"key":"input_file_name","value":"{replace_local_files}"},{"key":"input_file_block_length","value":"256"},{"key":"input_file_block_start","value":"0"}],"properties":{"fileSize":"125451","modificationTime":"1737104830724"}}]})";
+
+        auto [_, local_executor] = local_engine::test::create_plan_and_executor(EMBEDDED_PLAN(_rowindex_in), split_template, file, context);
+
+        EXPECT_FALSE(local_executor->hasNext());
+    }
+
+    {
+        constexpr std::string_view file{GLUTEN_DATA_DIR("/utils/extern-local-engine/tests/data/rowindex_in.snappy.parquet")};
+        constexpr std::string_view split_template
+            = R"({"items":[{"uriFile":"{replace_local_files}","length":"125451","parquet":{},"schema":{},"metadataColumns":[{"key":"input_file_name","value":"{replace_local_files}"},{"key":"input_file_block_length","value":"256"},{"key":"input_file_block_start","value":"0"}],"properties":{"fileSize":"125451","modificationTime":"1737104830724"}}]})";
+
+        auto [_, local_executor] = local_engine::test::create_plan_and_executor(EMBEDDED_PLAN(_rowindex_in), split_template, file, context);
+
+        EXPECT_TRUE(local_executor->hasNext());
+        const Block & x = *local_executor->nextColumnar();
+        debug::headBlock(x);
+    }
+}
+
+
+INCBIN(_all_meta, SOURCE_DIR "/utils/extern-local-engine/tests/json/parquet_metadata/read_metadata.all.json");
+TEST(RowIndex, AllMeta)
+{
+    auto query_id = local_engine::QueryContext::instance().initializeQuery("RowIndex");
+    SCOPE_EXIT({ local_engine::QueryContext::instance().finalizeQuery(query_id); });
+    const auto context = local_engine::QueryContext::instance().currentQueryContext();
+    context->setSetting("input_format_parquet_allow_missing_columns", Field(false));
+    constexpr std::string_view file{GLUTEN_DATA_DIR("/utils/extern-local-engine/tests/data/all_meta/data/f0/part-00000-92bb25d0-7446-4f9b-8bdd-a6911d0d465a-c000.snappy.parquet")};
+    constexpr std::string_view split_template
+        = R"({"items":[{"uriFile":"{replace_local_files}","length":"1282","parquet":{},"schema":{},"metadataColumns":[{"key":"file_path","value":"{replace_local_files}"},{"key":"file_block_length","value":"1282"},{"key":"input_file_name","value":"{replace_local_files}"},{"key":"input_file_block_length","value":"1282"},{"key":"file_name","value":"part-00000-484a7344-cf25-4367-bf46-8123a6a7b71e-c000.snappy.parquet"},{"key":"file_modification_time","value":"2025-01-19 05:09:48.664"},{"key":"file_block_start","value":"0"},{"key":"input_file_block_start","value":"0"},{"key":"file_size","value":"1282"}],"properties":{"fileSize":"1282","modificationTime":"1737263388664"}}]})";
+
+    auto [_, local_executor] = local_engine::test::create_plan_and_executor(EMBEDDED_PLAN(_all_meta), split_template, file, context);
 
     EXPECT_TRUE(local_executor->hasNext());
     const Block & x = *local_executor->nextColumnar();

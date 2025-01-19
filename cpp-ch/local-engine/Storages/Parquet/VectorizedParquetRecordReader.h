@@ -254,10 +254,8 @@ inline DB::Block removeMetaColumns(const DB::Block & header)
 {
     DB::Block new_header;
     for (const auto & col : header)
-    {
         if (col.name != TMP_ROWINDEX)
             new_header.insert(col);
-    }
     return new_header;
 }
 }
@@ -320,7 +318,7 @@ public:
         {
             Int64 * pos = vec.data() + readCount;
             readCount += row_index_generator_->populateRowIndices(pos, remaining);
-            remaining -= readCount;
+            remaining = batch_size - readCount;
             if (remaining > 0)
                 row_index_generator_ = nextRowGroup();
         }

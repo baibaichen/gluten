@@ -262,6 +262,14 @@ bool VectorizedParquetRecordReader::initialize(
 DB::Chunk VectorizedParquetRecordReader::nextBatch()
 {
     assert(initialized());
+    assert(!column_readers_.empty() || row_index_reader_.has_value());
+    if (column_readers_.empty())
+    {
+        DB::Columns cols{row_index_reader_->readBatch(format_settings_.parquet.max_block_size)};
+        size_t rows = cols[0]->size();
+        return DB::Chunk(std::move(cols), rows);
+    }
+
     ::arrow::ChunkedArrayVector columns(column_readers_.size());
     DB::ArrowColumnToCHColumn::NameToArrowColumn name_to_column_ptr;
     for (auto & vectorized_column_reader : column_readers_)

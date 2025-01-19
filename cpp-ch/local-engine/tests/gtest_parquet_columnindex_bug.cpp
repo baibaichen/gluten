@@ -59,9 +59,26 @@ TEST(RowIndex, Basic)
     const auto context = local_engine::QueryContext::instance().currentQueryContext();
     constexpr std::string_view file{GLUTEN_DATA_DIR("/utils/extern-local-engine/tests/data/metadata.rowindex.snappy.parquet")};
     constexpr std::string_view split_template
-        = R"({"items":[{"uriFile":"{replace_local_files}","length":"1767","parquet":{},"partitionColumns":[{"key":"pb","value":"1003"}],"schema":{},"metadataColumns":[{"key":"input_file_name","value":"file:///tmp/spark-ad967189-8cd8-40b6-803a-8eab5c8c1166/pb=1003/part-00000-25605de3-f55f-455c-8d5d-f7245a495a02.c000.snappy.parquet"},{"key":"input_file_block_length","value":"1767"},{"key":"input_file_block_start","value":"0"}],"properties":{"fileSize":"1767","modificationTime":"1736847651881"}}]})";
+        = R"({"items":[{"uriFile":"{replace_local_files}","length":"1767","parquet":{},"partitionColumns":[{"key":"pb","value":"1003"}],"schema":{},"metadataColumns":[{"key":"input_file_name","value":"{replace_local_files}"},{"key":"input_file_block_length","value":"1767"},{"key":"input_file_block_start","value":"0"}],"properties":{"fileSize":"1767","modificationTime":"1736847651881"}}]})";
 
     auto [_, local_executor] = local_engine::test::create_plan_and_executor(EMBEDDED_PLAN(_read_metadata), split_template, file, context);
+
+    EXPECT_TRUE(local_executor->hasNext());
+    const Block & x = *local_executor->nextColumnar();
+    debug::headBlock(x);
+}
+
+INCBIN(_rowindex_in, SOURCE_DIR "/utils/extern-local-engine/tests/json/parquet_metadata/rowindex_in.json");
+TEST(RowIndex, In)
+{
+    auto query_id = local_engine::QueryContext::instance().initializeQuery("RowIndex");
+    SCOPE_EXIT({ local_engine::QueryContext::instance().finalizeQuery(query_id); });
+    const auto context = local_engine::QueryContext::instance().currentQueryContext();
+    constexpr std::string_view file{GLUTEN_DATA_DIR("/utils/extern-local-engine/tests/data/rowindex_in.snappy.parquet")};
+    constexpr std::string_view split_template
+        = R"({"items":[{"uriFile":"{replace_local_files}","length":"256","parquet":{},"schema":{},"metadataColumns":[{"key":"input_file_name","value":"{replace_local_files}"},{"key":"input_file_block_length","value":"256"},{"key":"input_file_block_start","value":"0"}],"properties":{"fileSize":"125451","modificationTime":"1737104830724"}}]})";
+
+    auto [_, local_executor] = local_engine::test::create_plan_and_executor(EMBEDDED_PLAN(_rowindex_in), split_template, file, context);
 
     EXPECT_TRUE(local_executor->hasNext());
     const Block & x = *local_executor->nextColumnar();

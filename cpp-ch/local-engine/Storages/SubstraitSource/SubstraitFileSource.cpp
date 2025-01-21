@@ -49,6 +49,7 @@ extern const int LOGICAL_ERROR;
 
 namespace local_engine
 {
+
 /// When run query "select count(*) from t", there is no any column to be read. The only necessary information is the number of rows.
 /// To handle these cases, we build blocks with a const virtual column to indicate how many rows are in it.
 static DB::Block getRealHeader(const DB::Block & header)
@@ -67,10 +68,10 @@ static DB::Block getRealHeader(const DB::Block & header)
 SubstraitFileSource::SubstraitFileSource(
     const DB::ContextPtr & context_, const DB::Block & header_, const substrait::ReadRel::LocalFiles & file_infos)
     : DB::SourceWithKeyCondition(getRealHeader(header_), false)
-    , context(context_)
-    , output_header(InputFileNameParser::removeInputFileColumn(header_))
-    , to_read_header(output_header)
     , input_file_name(InputFileNameParser::containsInputFileColumns(header_))
+    , context(context_)
+    , output_header(input_file_name ? InputFileNameParser::removeInputFileColumn(header_) : header_)
+    , to_read_header(output_header)
 {
     if (file_infos.items_size())
     {
@@ -154,9 +155,9 @@ bool SubstraitFileSource::tryPrepareReader()
     }
     else
         file_reader = std::make_unique<NormalFileReader>(current_file, context, to_read_header, output_header);
-    input_file_name_parser.setFileName(current_file->getURIPath());
-    input_file_name_parser.setBlockStart(current_file->getStartOffset());
-    input_file_name_parser.setBlockLength(current_file->getLength());
+
+    input_file_name_parser.setMetaColumns(FileMetaColumns(*current_file));
+
     file_reader->applyKeyCondition(key_condition, column_index_filter);
     return true;
 }
@@ -299,15 +300,15 @@ DB::Field FileReaderWrapper::buildFieldFromString(const String & str_value, DB::
     return it->second(read_buffer, str_value);
 }
 
-ConstColumnsFileReader::ConstColumnsFileReader(FormatFilePtr file_, DB::ContextPtr context_, const DB::Block & header_, size_t block_size_)
+ConstColumnsFileReader::ConstColumnsFileReader(
+    const FormatFilePtr & file_, const DB::ContextPtr & context_, const DB::Block & header_, size_t block_size_)
     : FileReaderWrapper(file_), context(context_), header(header_), remained_rows(0), block_size(block_size_)
 {
-    auto rows = file->getTotalRows();
+    const auto rows = file->getTotalRows();
     if (!rows)
         throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Cannot get total rows number from file : {}", file->getURIPath());
     remained_rows = *rows;
 }
-
 
 bool ConstColumnsFileReader::pull(DB::Chunk & chunk)
 {
@@ -342,7 +343,7 @@ bool ConstColumnsFileReader::pull(DB::Chunk & chunk)
 
             auto it = normalized_partition_values.find(boost::to_lower_copy(name));
             if (it == normalized_partition_values.end())
-                throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Unknow partition column : {}", name);
+                throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Unknown partition column : {}", name);
 
             res_columns.emplace_back(createColumn(it->second, type, to_read_rows));
         }

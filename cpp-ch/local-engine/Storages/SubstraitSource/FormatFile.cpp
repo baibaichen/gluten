@@ -49,7 +49,7 @@ namespace local_engine
 {
 using namespace DB;
 // Initialize the static variable outside the class definition
-std::map<std::string, std::function<Field(const std::string &)>> FormatFile::BASE_METADATA_EXTRACTORS = {
+std::map<std::string, std::function<Field(const std::string &)>> FileMetaColumns::BASE_METADATA_EXTRACTORS = {
     {FILE_PATH, [](const std::string & metadata) { return metadata; }},
     {FILE_NAME, [](const std::string & metadata) { return metadata; }},
     {FILE_SIZE, [](const std::string & value) { return std::strtoll(value.c_str(), nullptr, 10); }},
@@ -59,22 +59,18 @@ std::map<std::string, std::function<Field(const std::string &)>> FormatFile::BAS
 };
 
 // Initialize the static variable outside the class definition
-std::map<std::string, std::function<DB::Field(const FormatFile &)>> FormatFile::INPUT_FUNCTION_EXTRACTORS
+std::map<std::string, std::function<DB::Field(const FormatFile &)>> FileMetaColumns::INPUT_FUNCTION_EXTRACTORS
     = {{INPUT_FILE_NAME, [](const FormatFile & file) { return file.getURIPath(); }},
        {INPUT_FILE_BLOCK_START, [](const FormatFile & file) { return file.getStartOffset(); }},
        {INPUT_FILE_BLOCK_LENGTH, [](const FormatFile & file) { return file.getLength(); }}};
 
-FormatFile::FormatFile(
-    DB::ContextPtr context_,
-    const substrait::ReadRel::LocalFiles::FileOrFiles & file_info_,
-    const ReadBufferBuilderPtr & read_buffer_builder_)
-    : context(context_), file_info(file_info_), read_buffer_builder(read_buffer_builder_)
+FileMetaColumns::FileMetaColumns(const FormatFile & file)
 {
-    for (const auto & column : file_info.metadata_columns())
+    for (const auto & column : file.getFileInfo().metadata_columns())
     {
         if (column.key() == FILE_MODIFICATION_TIME)
         {
-            metadata_columns_map[column.key()] = DecimalField<DateTime64>(file_info.properties().modificationtime(), 6);
+            metadata_columns_map[column.key()] = DecimalField<DateTime64>(file.getModificationTime(), 6);
             continue;
         }
         if (!BASE_METADATA_EXTRACTORS.contains(column.key()))
@@ -87,9 +83,45 @@ FormatFile::FormatFile(
     for (const auto & inputExtractor : INPUT_FUNCTION_EXTRACTORS)
     {
         assert(!metadata_columns_map.contains(inputExtractor.first));
-        metadata_columns_map[inputExtractor.first] = inputExtractor.second(*this);
+        metadata_columns_map[inputExtractor.first] = inputExtractor.second(file);
     }
+}
+void FileMetaColumns::addInputFileColumnsToChunk(const DB::Block & header, DB::Chunk & chunk) const
+{
+    UInt64 rows = chunk.getNumRows();
+    auto output_columns = chunk.getColumns();
+    for (size_t i = 0; i < header.columns(); ++i)
+    {
+        const auto & column = header.getByPosition(i);
+        if (!isVirtualColumn(column.name))
+            continue;
+        assert(metadata_columns_map.contains(column.name));
+        auto field = metadata_columns_map.at(column.name);
 
+        ColumnPtr column_ptr;
+        if (INPUT_FILE_COLUMNS_SET.contains(column.name))
+        {
+            /// copied from InputFileNameParser::addInputFileColumnsToChunk()
+            /// TODO: check whether this is correct or not
+            column_ptr = column.type->createColumnConst(rows, field);
+        }
+        else
+        {
+            auto mutable_column = column.type->createColumn();
+            mutable_column->insertMany(field, rows);
+            column_ptr = std::move(mutable_column);
+        }
+        output_columns.insert(output_columns.begin() + i, std::move(column_ptr));
+    }
+    chunk.setColumns(output_columns, rows);
+}
+
+FormatFile::FormatFile(
+    DB::ContextPtr context_,
+    const substrait::ReadRel::LocalFiles::FileOrFiles & file_info_,
+    const ReadBufferBuilderPtr & read_buffer_builder_)
+    : context(context_), file_info(file_info_), read_buffer_builder(read_buffer_builder_)
+{
     if (file_info.partition_columns_size())
     {
         for (size_t i = 0; i < file_info.partition_columns_size(); ++i)
@@ -112,13 +144,12 @@ FormatFile::FormatFile(
 
     LOG_INFO(
         &Poco::Logger::get("FormatFile"),
-        "Reading File path: {}, format: {}, range: {}, partition_index: {}, partition_values: {}, metadata_columns: {}",
+        "Reading File path: {}, format: {}, range: {}, partition_index: {}, partition_values: {}",
         file_info.uri_file(),
         file_info.file_format_case(),
         std::to_string(file_info.start()) + "-" + std::to_string(file_info.start() + file_info.length()),
         file_info.partition_index(),
-        GlutenStringUtils::mkString(partition_values),
-        GlutenStringUtils::mkString(metadata_columns_map));
+        GlutenStringUtils::mkString(partition_values));
 }
 
 FormatFilePtr FormatFileUtil::createFile(

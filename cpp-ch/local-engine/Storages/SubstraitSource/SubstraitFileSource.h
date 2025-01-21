@@ -103,7 +103,10 @@ class ConstColumnsFileReader : public FileReaderWrapper
 {
 public:
     ConstColumnsFileReader(
-        FormatFilePtr file_, DB::ContextPtr context_, const DB::Block & header_, size_t block_size_ = DB::DEFAULT_BLOCK_SIZE);
+        const FormatFilePtr & file_,
+        const DB::ContextPtr & context_,
+        const DB::Block & header_,
+        size_t block_size_ = DB::DEFAULT_BLOCK_SIZE);
     ~ConstColumnsFileReader() override = default;
 
     bool pull(DB::Chunk & chunk) override;
@@ -131,12 +134,12 @@ protected:
 private:
     bool tryPrepareReader();
     void onCancel() noexcept override;
+    bool input_file_name = false;
 
     DB::ContextPtr context;
     DB::Block output_header; /// Sample header may contain partitions keys
     DB::Block to_read_header; // Sample header doesn't include partition keys
     FormatFiles files;
-    bool input_file_name = false;
     InputFileNameParser input_file_name_parser;
 
     UInt32 current_file_index = 0;

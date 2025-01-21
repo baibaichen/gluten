@@ -49,14 +49,20 @@ namespace local_engine
 {
 using namespace DB;
 // Initialize the static variable outside the class definition
-std::map<std::string, std::function<Field(const std::string &)>> FileMetaColumns::BASE_METADATA_EXTRACTORS = {
-    {FILE_PATH, [](const std::string & metadata) { return metadata; }},
-    {FILE_NAME, [](const std::string & metadata) { return metadata; }},
-    {FILE_SIZE, [](const std::string & value) { return std::strtoll(value.c_str(), nullptr, 10); }},
-    {FILE_BLOCK_START, [](const std::string & value) { return std::strtoll(value.c_str(), nullptr, 10); }},
-    {FILE_BLOCK_LENGTH, [](const std::string & value) { return std::strtoll(value.c_str(), nullptr, 10); }}
-    //, {FILE_MODIFICATION_TIME, [](const std::string & metadata) { return metadata; }}
-};
+std::map<std::string, std::function<Field(const std::string &)>> FileMetaColumns::BASE_METADATA_EXTRACTORS
+    = {{FILE_PATH, [](const std::string & metadata) { return metadata; }},
+       {FILE_NAME, [](const std::string & metadata) { return metadata; }},
+       {FILE_SIZE, [](const std::string & value) { return std::strtoll(value.c_str(), nullptr, 10); }},
+       {FILE_BLOCK_START, [](const std::string & value) { return std::strtoll(value.c_str(), nullptr, 10); }},
+       {FILE_BLOCK_LENGTH, [](const std::string & value) { return std::strtoll(value.c_str(), nullptr, 10); }},
+       {FILE_MODIFICATION_TIME,
+        [](const std::string & metadata)
+        {
+            DB::ReadBufferFromString in(metadata);
+            DateTime64 time = 0;
+            readDateTime64Text(time, 6, in, DateLUT::instance("UTC"));
+            return DecimalField(time, 6);
+        }}};
 
 // Initialize the static variable outside the class definition
 std::map<std::string, std::function<DB::Field(const FormatFile &)>> FileMetaColumns::INPUT_FUNCTION_EXTRACTORS
@@ -68,11 +74,6 @@ FileMetaColumns::FileMetaColumns(const FormatFile & file)
 {
     for (const auto & column : file.getFileInfo().metadata_columns())
     {
-        if (column.key() == FILE_MODIFICATION_TIME)
-        {
-            metadata_columns_map[column.key()] = DecimalField<DateTime64>(file.getModificationTime(), 6);
-            continue;
-        }
         if (!BASE_METADATA_EXTRACTORS.contains(column.key()))
             continue;
 

@@ -19,13 +19,13 @@
 #include <Columns/IColumn.h>
 #include <Core/Block.h>
 #include <Core/Field.h>
+#include <Parser/InputFileNameParser.h>
 #include <Processors/Chunk.h>
 #include <Storages/Parquet/ColumnIndexFilter.h>
 #include <Storages/Parquet/VectorizedParquetRecordReader.h>
 #include <Storages/SubstraitSource/FormatFile.h>
 #include <Storages/SubstraitSource/ReadBufferBuilder.h>
 #include <base/types.h>
-#include <Parser/InputFileNameParser.h>
 
 namespace local_engine
 {
@@ -53,7 +53,7 @@ public:
     }
 
 protected:
-    virtual void onCancel() {};
+    virtual void onCancel() { };
 
     FormatFilePtr file;
     std::atomic<bool> is_cancelled{false};
@@ -83,10 +83,7 @@ public:
     }
 
 private:
-    void onCancel() override
-    {
-        input_format->input->cancel();
-    }
+    void onCancel() override { input_format->input->cancel(); }
 
     DB::ContextPtr context;
     DB::Block to_read_header;
@@ -136,8 +133,8 @@ private:
     void onCancel() noexcept override;
 
     DB::ContextPtr context;
-    DB::Block output_header; /// Sample header may contains partitions keys
-    DB::Block to_read_header; // Sample header not include partition keys
+    DB::Block output_header; /// Sample header may contain partitions keys
+    DB::Block to_read_header; // Sample header doesn't include partition keys
     FormatFiles files;
     bool input_file_name = false;
     InputFileNameParser input_file_name_parser;

@@ -49,20 +49,17 @@ extern const int LOGICAL_ERROR;
 
 namespace local_engine
 {
-// When run query "select count(*) from t", there is no any column to be read.
-// The number of rows is the only needed information. To handle these cases, we
-// build blocks with a const virtual column to indicate how many rows is in it.
+/// When run query "select count(*) from t", there is no any column to be read. The only necessary information is the number of rows.
+/// To handle these cases, we build blocks with a const virtual column to indicate how many rows are in it.
 static DB::Block getRealHeader(const DB::Block & header)
 {
     auto header_without_input_file_columns = InputFileNameParser::removeInputFileColumn(header);
     auto result_header = header;
     if (!header_without_input_file_columns.columns())
     {
-        auto virtual_header =  BlockUtil::buildRowCountHeader();
+        auto virtual_header = BlockUtil::buildRowCountHeader();
         for (const auto & column_with_type_and_name : virtual_header.getColumnsWithTypeAndName())
-        {
             result_header.insert(column_with_type_and_name);
-        }
     }
     return result_header;
 }

@@ -24,6 +24,7 @@
 #include <Processors/ISimpleTransform.h>
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
+#include <Storages/SubstraitSource/FormatFile.h>
 
 namespace local_engine
 {
@@ -48,14 +49,11 @@ static DB::Block createOutputHeader(
 {
     DB::Block output_header{header};
     if (file_name.has_value())
-        output_header.insert(DB::ColumnWithTypeAndName{std::make_shared<DB::DataTypeString>(), InputFileNameParser::INPUT_FILE_NAME});
+        output_header.insert(DB::ColumnWithTypeAndName{std::make_shared<DB::DataTypeString>(), FormatFile::INPUT_FILE_NAME});
     if (block_start.has_value())
-        output_header.insert(DB::ColumnWithTypeAndName{std::make_shared<DB::DataTypeInt64>(), InputFileNameParser::INPUT_FILE_BLOCK_START});
+        output_header.insert(DB::ColumnWithTypeAndName{std::make_shared<DB::DataTypeInt64>(), FormatFile::INPUT_FILE_BLOCK_START});
     if (block_length.has_value())
-    {
-        output_header.insert(
-            DB::ColumnWithTypeAndName{std::make_shared<DB::DataTypeInt64>(), InputFileNameParser::INPUT_FILE_BLOCK_LENGTH});
-    }
+        output_header.insert(DB::ColumnWithTypeAndName{std::make_shared<DB::DataTypeInt64>(), FormatFile::INPUT_FILE_BLOCK_LENGTH});
     return output_header;
 }
 
@@ -123,20 +121,17 @@ private:
 
 bool InputFileNameParser::hasInputFileNameColumn(const DB::Block & block)
 {
-    auto names = block.getNames();
-    return std::find(names.begin(), names.end(), INPUT_FILE_NAME) != names.end();
+    return block.findByName(FormatFile::INPUT_FILE_NAME) != nullptr;
 }
 
 bool InputFileNameParser::hasInputFileBlockStartColumn(const DB::Block & block)
 {
-    auto names = block.getNames();
-    return std::find(names.begin(), names.end(), INPUT_FILE_BLOCK_START) != names.end();
+    return block.findByName(FormatFile::INPUT_FILE_BLOCK_START) != nullptr;
 }
 
 bool InputFileNameParser::hasInputFileBlockLengthColumn(const DB::Block & block)
 {
-    auto names = block.getNames();
-    return std::find(names.begin(), names.end(), INPUT_FILE_BLOCK_LENGTH) != names.end();
+    return block.findByName(FormatFile::INPUT_FILE_BLOCK_LENGTH) != nullptr;
 }
 
 void InputFileNameParser::addInputFileColumnsToChunk(
@@ -150,7 +145,7 @@ void InputFileNameParser::addInputFileColumnsToChunk(
     for (size_t i = 0; i < header.columns(); ++i)
     {
         const auto & column = header.getByPosition(i);
-        if (column.name == INPUT_FILE_NAME)
+        if (column.name == FormatFile::INPUT_FILE_NAME)
         {
             if (!file_name.has_value())
                 throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Input file name is not set");
@@ -158,7 +153,7 @@ void InputFileNameParser::addInputFileColumnsToChunk(
             auto file_name_column = type_string->createColumnConst(chunk.getNumRows(), file_name.value());
             output_columns.insert(output_columns.begin() + i, std::move(file_name_column));
         }
-        else if (column.name == INPUT_FILE_BLOCK_START)
+        else if (column.name == FormatFile::INPUT_FILE_BLOCK_START)
         {
             if (!block_start.has_value())
                 throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "block_start is not set");
@@ -166,7 +161,7 @@ void InputFileNameParser::addInputFileColumnsToChunk(
             auto block_start_column = type_int64->createColumnConst(chunk.getNumRows(), block_start.value());
             output_columns.insert(output_columns.begin() + i, std::move(block_start_column));
         }
-        else if (column.name == INPUT_FILE_BLOCK_LENGTH)
+        else if (column.name == FormatFile::INPUT_FILE_BLOCK_LENGTH)
         {
             if (!block_length.has_value())
                 throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "block_length is not set");
@@ -188,7 +183,7 @@ DB::Block InputFileNameParser::removeInputFileColumn(const DB::Block & block)
     const auto & columns = block.getColumnsWithTypeAndName();
     DB::ColumnsWithTypeAndName result_columns;
     for (const auto & column : columns)
-        if (!INPUT_FILE_COLUMNS_SET.contains(column.name))
+        if (!FormatFile::INPUT_FILE_COLUMNS_SET.contains(column.name))
             result_columns.push_back(column);
     return result_columns;
 }

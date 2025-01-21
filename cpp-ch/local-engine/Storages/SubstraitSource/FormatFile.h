@@ -41,6 +41,26 @@ namespace local_engine
 class FormatFile
 {
 public:
+    inline static const std::string FILE_PATH = "file_path";
+    inline static const std::string FILE_NAME = "file_name";
+    inline static const std::string FILE_BLOCK_START = "file_block_start";
+    inline static const std::string FILE_BLOCK_LENGTH = "file_block_length";
+    inline static const std::string FILE_SIZE = "file_size";
+    inline static const std::string FILE_MODIFICATION_TIME = "file_modification_time";
+    inline static const std::string METADATA_NAME = "_metadata";
+    static inline const std::string INPUT_FILE_NAME = "input_file_name";
+    static inline const std::string INPUT_FILE_BLOCK_START = "input_file_block_start";
+    static inline const std::string INPUT_FILE_BLOCK_LENGTH = "input_file_block_length";
+
+    static inline std::unordered_set INPUT_FILE_COLUMNS_SET = {INPUT_FILE_NAME, INPUT_FILE_BLOCK_START, INPUT_FILE_BLOCK_LENGTH};
+
+protected:
+    static std::map<std::string, std::function<DB::Field(const std::string &)>> BASE_METADATA_EXTRACTORS;
+
+    /// InputFileName, InputFileBlockStart and InputFileBlockLength,
+    static std::map<std::string, std::function<DB::Field(const FormatFile &)>> INPUT_FUNCTION_EXTRACTORS;
+
+public:
     struct InputFormat
     {
         std::unique_ptr<DB::ReadBuffer> read_buffer;
@@ -86,6 +106,8 @@ protected:
     /// partition keys are normalized to lower cases for partition column case-insensitive matching
     std::map<String, String> normalized_partition_values;
     std::shared_ptr<const DB::KeyCondition> key_condition;
+
+    std::unordered_map<String, DB::Field> metadata_columns_map;
 };
 using FormatFilePtr = std::shared_ptr<FormatFile>;
 using FormatFiles = std::vector<FormatFilePtr>;

@@ -19,7 +19,7 @@
 
 namespace DB
 {
-    class Chunk;
+class Chunk;
 }
 
 namespace local_engine
@@ -27,11 +27,6 @@ namespace local_engine
 class InputFileNameParser
 {
 public:
-    static inline const String & INPUT_FILE_NAME = "input_file_name";
-    static inline const String & INPUT_FILE_BLOCK_START = "input_file_block_start";
-    static inline const String & INPUT_FILE_BLOCK_LENGTH = "input_file_block_length";
-    static inline std::unordered_set INPUT_FILE_COLUMNS_SET = {INPUT_FILE_NAME, INPUT_FILE_BLOCK_START, INPUT_FILE_BLOCK_LENGTH};
-
     static bool hasInputFileNameColumn(const DB::Block & block);
     static bool hasInputFileBlockStartColumn(const DB::Block & block);
     static bool hasInputFileBlockLengthColumn(const DB::Block & block);

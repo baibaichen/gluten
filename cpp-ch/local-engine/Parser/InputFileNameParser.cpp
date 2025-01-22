@@ -194,9 +194,4 @@ std::optional<DB::IQueryPlanStep *> InputFileNameParser::addInputFileProjectStep
     return result;
 }
 
-void InputFileNameParser::addInputFileColumnsToChunk(const DB::Block & header, DB::Chunk & chunk) const
-{
-    assert(meta_columns.has_value());
-    meta_columns->addInputFileColumnsToChunk(header, chunk);
-}
 }

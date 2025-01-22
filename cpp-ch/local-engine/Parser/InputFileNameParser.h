@@ -45,15 +45,11 @@ public:
     void setBlockStart(const Int64 block_start) { this->block_start = block_start; }
     void setBlockLength(const Int64 block_length) { this->block_length = block_length; }
 
-    void setMetaColumns(const FileMetaColumns & meta_columns) { this->meta_columns = meta_columns; }
     [[nodiscard]] std::optional<DB::IQueryPlanStep *> addInputFileProjectStep(DB::QueryPlan & plan);
-    void addInputFileColumnsToChunk(const DB::Block & header, DB::Chunk & chunk) const;
 
 private:
     std::optional<String> file_name;
     std::optional<Int64> block_start;
     std::optional<Int64> block_length;
-
-    std::optional<FileMetaColumns> meta_columns;
 };
 } // local_engine

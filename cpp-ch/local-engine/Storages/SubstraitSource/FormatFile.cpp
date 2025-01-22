@@ -87,6 +87,7 @@ FileMetaColumns::FileMetaColumns(const FormatFile & file)
         metadata_columns_map[inputExtractor.first] = inputExtractor.second(file);
     }
 }
+
 void FileMetaColumns::addInputFileColumnsToChunk(const DB::Block & header, DB::Chunk & chunk) const
 {
     UInt64 rows = chunk.getNumRows();
@@ -103,7 +104,7 @@ void FileMetaColumns::addInputFileColumnsToChunk(const DB::Block & header, DB::C
         if (INPUT_FILE_COLUMNS_SET.contains(column.name))
         {
             /// copied from InputFileNameParser::addInputFileColumnsToChunk()
-            /// TODO: check whether this is correct or not
+            /// TODO: check whether using const column is correct or not.
             column_ptr = column.type->createColumnConst(rows, field);
         }
         else

@@ -19,12 +19,10 @@
 #include <Columns/IColumn.h>
 #include <Core/Block.h>
 #include <Core/Field.h>
-#include <Parser/InputFileNameParser.h>
 #include <Processors/Chunk.h>
 #include <Storages/Parquet/ColumnIndexFilter.h>
 #include <Storages/Parquet/VectorizedParquetRecordReader.h>
 #include <Storages/SubstraitSource/FormatFile.h>
-#include <Storages/SubstraitSource/ReadBufferBuilder.h>
 #include <base/types.h>
 
 namespace local_engine
@@ -32,9 +30,8 @@ namespace local_engine
 class FileReaderWrapper
 {
 public:
-    explicit FileReaderWrapper(const FormatFilePtr & file_) : file(file_) { }
+    explicit FileReaderWrapper(const FormatFilePtr & file_) : file(file_), meta_columns(*file_) { }
     virtual ~FileReaderWrapper() = default;
-    virtual bool pull(DB::Chunk & chunk) = 0;
 
     void cancel()
     {
@@ -43,6 +40,7 @@ public:
             onCancel();
     }
 
+    bool pull(DB::Chunk & chunk) { return onPull(chunk); }
     bool isCancelled() const { return is_cancelled.load(std::memory_order_acquire); }
 
     /// Apply key condition to the reader, if use_local_format is true, column_index_filter will be used
@@ -52,10 +50,18 @@ public:
     {
     }
 
+    void addInputFileColumnsToChunk(const DB::Block & header, DB::Chunk & chunk) const
+    {
+        meta_columns.addInputFileColumnsToChunk(header, chunk);
+    }
+
 protected:
     virtual void onCancel() { };
+    virtual bool onPull(DB::Chunk & chunk) = 0;
 
     FormatFilePtr file;
+    const FileMetaColumns meta_columns;
+
     std::atomic<bool> is_cancelled{false};
 
 
@@ -71,7 +77,8 @@ public:
         const FormatFilePtr & file_, const DB::ContextPtr & context_, const DB::Block & to_read_header_, const DB::Block & output_header_);
     ~NormalFileReader() override = default;
 
-    bool pull(DB::Chunk & chunk) override;
+protected:
+    bool onPull(DB::Chunk & chunk) override;
 
     void applyKeyCondition(
         const std::shared_ptr<const DB::KeyCondition> & key_condition, const ColumnIndexFilterPtr & column_index_filter) override
@@ -91,14 +98,6 @@ private:
     FormatFile::InputFormatPtr input_format;
 };
 
-class EmptyFileReader : public FileReaderWrapper
-{
-public:
-    explicit EmptyFileReader(FormatFilePtr file_) : FileReaderWrapper(file_) { }
-    ~EmptyFileReader() override = default;
-    bool pull(DB::Chunk &) override { return false; }
-};
-
 class ConstColumnsFileReader : public FileReaderWrapper
 {
 public:
@@ -109,7 +108,8 @@ public:
         size_t block_size_ = DB::DEFAULT_BLOCK_SIZE);
     ~ConstColumnsFileReader() override = default;
 
-    bool pull(DB::Chunk & chunk) override;
+protected:
+    bool onPull(DB::Chunk & chunk) override;
 
 private:
     DB::ContextPtr context;
@@ -139,12 +139,11 @@ private:
     DB::ContextPtr context;
     DB::Block output_header; /// Sample header may contain partitions keys
     DB::Block to_read_header; // Sample header doesn't include partition keys
-    FormatFiles files;
-    InputFileNameParser input_file_name_parser;
 
+    FormatFiles files;
     UInt32 current_file_index = 0;
+
     std::unique_ptr<FileReaderWrapper> file_reader;
-    ReadBufferBuilderPtr read_buffer_builder;
     ColumnIndexFilterPtr column_index_filter;
 };
 }

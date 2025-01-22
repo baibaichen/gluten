@@ -17,26 +17,25 @@
 #include <functional>
 #include <memory>
 
-#include <boost/algorithm/string/case_conv.hpp>
-#include <substrait/plan.pb.h>
-#include <magic_enum.hpp>
-#include <Poco/URI.h>
-
 #include <Columns/ColumnNullable.h>
 #include <Columns/ColumnTuple.h>
 #include <Columns/ColumnsNumber.h>
 #include <DataTypes/DataTypeDecimalBase.h>
 #include <DataTypes/DataTypeNullable.h>
+#include <DataTypes/DataTypesDecimal.h>
 #include <IO/ReadBufferFromString.h>
 #include <IO/ReadHelpers.h>
+#include <Parser/InputFileNameParser.h>
 #include <QueryPipeline/Pipe.h>
 #include <Storages/SubstraitSource/FormatFile.h>
 #include <Storages/SubstraitSource/SubstraitFileSource.h>
+#include <boost/algorithm/string/case_conv.hpp>
+#include <substrait/plan.pb.h>
+#include <Poco/URI.h>
 #include <Common/CHUtil.h>
 #include <Common/Exception.h>
 #include <Common/GlutenStringUtils.h>
 #include <Common/typeid_cast.h>
-#include "DataTypes/DataTypesDecimal.h"
 
 namespace DB
 {
@@ -77,7 +76,7 @@ SubstraitFileSource::SubstraitFileSource(
     {
         /// Initialize files
         const Poco::URI file_uri(file_infos.items().Get(0).uri_file());
-        read_buffer_builder = ReadBufferBuilderFactory::instance().createBuilder(file_uri.getScheme(), context);
+        ReadBufferBuilderPtr read_buffer_builder = ReadBufferBuilderFactory::instance().createBuilder(file_uri.getScheme(), context);
         for (const auto & item : file_infos.items())
             files.emplace_back(FormatFileUtil::createFile(context, read_buffer_builder, item));
 
@@ -110,7 +109,7 @@ DB::Chunk SubstraitFileSource::generate()
         if (file_reader->pull(chunk))
         {
             if (input_file_name)
-                input_file_name_parser.addInputFileColumnsToChunk(output.getHeader(), chunk);
+                file_reader->addInputFileColumnsToChunk(output.getHeader(), chunk);
             return chunk;
         }
 
@@ -127,39 +126,33 @@ bool SubstraitFileSource::tryPrepareReader()
     if (file_reader)
         return true;
 
-    if (current_file_index >= files.size())
-        return false;
-
-    auto current_file = files[current_file_index];
-    current_file_index += 1;
-
-    if (!current_file->supportSplit() && current_file->getStartOffset())
+    while (current_file_index < files.size())
     {
+        auto current_file = files[current_file_index];
+        current_file_index += 1;
         /// For the files do not support split strategy, the task with not 0 offset will generate empty data
-        file_reader = std::make_unique<EmptyFileReader>(current_file);
+        if (!current_file->supportSplit() && current_file->getStartOffset())
+            continue;
+
+        if (!to_read_header)
+        {
+            auto total_rows = current_file->getTotalRows();
+            if (total_rows.has_value())
+                file_reader = std::make_unique<ConstColumnsFileReader>(current_file, context, output_header, *total_rows);
+            else
+            {
+                /// For text/json format file, we can't get total rows from file metadata.
+                /// So we add a dummy column to indicate the number of rows.
+                file_reader = std::make_unique<NormalFileReader>(
+                    current_file, context, getRealHeader(to_read_header), getRealHeader(output_header));
+            }
+        }
+        else
+            file_reader = std::make_unique<NormalFileReader>(current_file, context, to_read_header, output_header);
+        file_reader->applyKeyCondition(key_condition, column_index_filter);
         return true;
     }
-
-    if (!to_read_header)
-    {
-        auto total_rows = current_file->getTotalRows();
-        if (total_rows.has_value())
-            file_reader = std::make_unique<ConstColumnsFileReader>(current_file, context, output_header, *total_rows);
-        else
-        {
-            /// For text/json format file, we can't get total rows from file metadata.
-            /// So we add a dummy column to indicate the number of rows.
-            file_reader
-                = std::make_unique<NormalFileReader>(current_file, context, getRealHeader(to_read_header), getRealHeader(output_header));
-        }
-    }
-    else
-        file_reader = std::make_unique<NormalFileReader>(current_file, context, to_read_header, output_header);
-
-    input_file_name_parser.setMetaColumns(FileMetaColumns(*current_file));
-
-    file_reader->applyKeyCondition(key_condition, column_index_filter);
-    return true;
+    return false;
 }
 
 
@@ -272,25 +265,25 @@ DB::Field FileReaderWrapper::buildFieldFromString(const String & str_value, DB::
         DB::WhichDataType which(nested_type->getTypeId());
         if (which.isDecimal32())
         {
-            auto & dataTypeDecimal = static_cast<const DB::DataTypeDecimal<DB::Decimal32> &>(*nested_type);
+            const auto & dataTypeDecimal = static_cast<const DB::DataTypeDecimal<DB::Decimal32> &>(*nested_type);
             DB::Decimal32 value = dataTypeDecimal.parseFromString(str_value);
             return DB::DecimalField<DB::Decimal32>(value, dataTypeDecimal.getScale());
         }
         else if (which.isDecimal64())
         {
-            auto & dataTypeDecimal = static_cast<const DB::DataTypeDecimal<DB::Decimal64> &>(*nested_type);
+            const auto & dataTypeDecimal = static_cast<const DB::DataTypeDecimal<DB::Decimal64> &>(*nested_type);
             DB::Decimal64 value = dataTypeDecimal.parseFromString(str_value);
             return DB::DecimalField<DB::Decimal64>(value, dataTypeDecimal.getScale());
         }
         else if (which.isDecimal128())
         {
-            auto & dataTypeDecimal = static_cast<const DB::DataTypeDecimal<DB::Decimal128> &>(*nested_type);
+            const auto & dataTypeDecimal = static_cast<const DB::DataTypeDecimal<DB::Decimal128> &>(*nested_type);
             DB::Decimal128 value = dataTypeDecimal.parseFromString(str_value);
             return DB::DecimalField<DB::Decimal128>(value, dataTypeDecimal.getScale());
         }
         else if (which.isDecimal256())
         {
-            auto & dataTypeDecimal = static_cast<const DB::DataTypeDecimal<DB::Decimal256> &>(*nested_type);
+            const auto & dataTypeDecimal = static_cast<const DB::DataTypeDecimal<DB::Decimal256> &>(*nested_type);
             DB::Decimal256 value = dataTypeDecimal.parseFromString(str_value);
             return DB::DecimalField<DB::Decimal256>(value, dataTypeDecimal.getScale());
         }
@@ -310,7 +303,7 @@ ConstColumnsFileReader::ConstColumnsFileReader(
     remained_rows = *rows;
 }
 
-bool ConstColumnsFileReader::pull(DB::Chunk & chunk)
+bool ConstColumnsFileReader::onPull(DB::Chunk & chunk)
 {
     if (isCancelled())
         return false;
@@ -365,7 +358,7 @@ NormalFileReader::NormalFileReader(
     input_format = file->createInputFormat(to_read_header);
 }
 
-bool NormalFileReader::pull(DB::Chunk & chunk)
+bool NormalFileReader::onPull(DB::Chunk & chunk)
 {
     if (isCancelled())
         return false;

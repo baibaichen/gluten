@@ -82,14 +82,16 @@ TEST(TestFunction, toDateTime64)
     auto result = executable->execute(block.getColumnsWithTypeAndName(), executable->getResultType(), block.rows(), false);
     std::cerr << "output:\n";
     debug::headColumn(result);
-    Field resultFiled;
-    result->get(0, resultFiled);
 
-    DB::ReadBufferFromString in(std::string("2025-01-21 12:58:13.106"));
     DateTime64 time = 0;
-    readDateTime64Text(time, 6, in, DateLUT::instance("UTC"));
+    {
+        std::string parsedTimeStamp = "2025-01-21 12:58:13.106";
+        DB::ReadBufferFromString in(parsedTimeStamp);
+        readDateTime64Text(time, 6, in, DateLUT::instance("UTC"));
+    }
+    Field expected = Field(DecimalField<DateTime64>(time, 6));
 
-    ASSERT_EQ(resultFiled, Field(DecimalField<DateTime64>(time, 6)));
+    ASSERT_EQ((*result.get())[0], expected);
 }
 
 TEST(TestFunction, In)

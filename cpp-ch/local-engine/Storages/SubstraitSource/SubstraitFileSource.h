@@ -27,11 +27,14 @@
 
 namespace local_engine
 {
-class FileReaderWrapper
+class BaseReader
 {
 public:
-    explicit FileReaderWrapper(const FormatFilePtr & file_) : file(file_), meta_columns(*file_) { }
-    virtual ~FileReaderWrapper() = default;
+    explicit BaseReader(const FormatFilePtr & file_, const DB::Block & to_read_header_, const DB::Block & header_)
+        : file(file_), readHeader(to_read_header_), outputHeader(header_)
+    {
+    }
+    virtual ~BaseReader() = default;
 
     void cancel()
     {
@@ -40,7 +43,7 @@ public:
             onCancel();
     }
 
-    bool pull(DB::Chunk & chunk) { return onPull(chunk); }
+    virtual bool pull(DB::Chunk & chunk) = 0;
     bool isCancelled() const { return is_cancelled.load(std::memory_order_acquire); }
 
     /// Apply key condition to the reader, if use_local_format is true, column_index_filter will be used
@@ -50,36 +53,32 @@ public:
     {
     }
 
-    void addInputFileColumnsToChunk(const DB::Block & header, DB::Chunk & chunk) const
-    {
-        meta_columns.addInputFileColumnsToChunk(header, chunk);
-    }
-
 protected:
     virtual void onCancel() { };
-    virtual bool onPull(DB::Chunk & chunk) = 0;
+
+    DB::Columns addVirtualColumn(DB::Chunk dataChunk, size_t rowNum = 0) const;
 
     FormatFilePtr file;
-    const FileMetaColumns meta_columns;
+    DB::Block readHeader;
+    DB::Block outputHeader;
 
     std::atomic<bool> is_cancelled{false};
 
 
     static DB::ColumnPtr createConstColumn(DB::DataTypePtr type, const DB::Field & field, size_t rows);
-    static DB::ColumnPtr createColumn(const String & value, DB::DataTypePtr type, size_t rows);
+    static DB::ColumnPtr createPartitionColumn(const String & value, const DB::DataTypePtr & type, size_t rows);
     static DB::Field buildFieldFromString(const String & value, DB::DataTypePtr type);
 };
 
-class NormalFileReader : public FileReaderWrapper
+class NormalFileReader : public BaseReader
 {
 public:
-    NormalFileReader(
-        const FormatFilePtr & file_, const DB::ContextPtr & context_, const DB::Block & to_read_header_, const DB::Block & output_header_);
+    NormalFileReader(const FormatFilePtr & file_, const DB::Block & to_read_header_, const DB::Block & output_header_);
     ~NormalFileReader() override = default;
 
-protected:
-    bool onPull(DB::Chunk & chunk) override;
+    bool pull(DB::Chunk & chunk) override;
 
+protected:
     void applyKeyCondition(
         const std::shared_ptr<const DB::KeyCondition> & key_condition, const ColumnIndexFilterPtr & column_index_filter) override
     {
@@ -91,31 +90,20 @@ protected:
 
 private:
     void onCancel() override { input_format->input->cancel(); }
-
-    DB::ContextPtr context;
-    DB::Block to_read_header;
-    DB::Block output_header;
     FormatFile::InputFormatPtr input_format;
 };
 
-class ConstColumnsFileReader : public FileReaderWrapper
+class ConstColumnsFileReader : public BaseReader
 {
 public:
-    ConstColumnsFileReader(
-        const FormatFilePtr & file_,
-        const DB::ContextPtr & context_,
-        const DB::Block & header_,
-        size_t block_size_ = DB::DEFAULT_BLOCK_SIZE);
+    ConstColumnsFileReader(const FormatFilePtr & file_, const DB::Block & header_, size_t blockSize = DB::DEFAULT_BLOCK_SIZE);
     ~ConstColumnsFileReader() override = default;
 
-protected:
-    bool onPull(DB::Chunk & chunk) override;
+    bool pull(DB::Chunk & chunk) override;
 
 private:
-    DB::ContextPtr context;
-    DB::Block header;
     size_t remained_rows;
-    size_t block_size;
+    const size_t block_size;
 };
 
 class SubstraitFileSource : public DB::SourceWithKeyCondition
@@ -134,16 +122,14 @@ protected:
 private:
     bool tryPrepareReader();
     void onCancel() noexcept override;
-    bool input_file_name = false;
-
-    DB::ContextPtr context;
-    DB::Block output_header; /// Sample header may contain partitions keys
-    DB::Block to_read_header; // Sample header doesn't include partition keys
-
     FormatFiles files;
+
+    DB::Block outputHeader; /// Sample header may contain partitions columns and file meta-columns
+    DB::Block readHeader; /// Sample header doesn't include partition columns and file meta-columns
+
     UInt32 current_file_index = 0;
 
-    std::unique_ptr<FileReaderWrapper> file_reader;
+    std::unique_ptr<BaseReader> file_reader;
     ColumnIndexFilterPtr column_index_filter;
 };
 }

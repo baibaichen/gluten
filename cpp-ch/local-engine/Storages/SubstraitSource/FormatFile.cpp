@@ -65,14 +65,14 @@ std::map<std::string, std::function<Field(const std::string &)>> FileMetaColumns
         }}};
 
 // Initialize the static variable outside the class definition
-std::map<std::string, std::function<DB::Field(const FormatFile &)>> FileMetaColumns::INPUT_FUNCTION_EXTRACTORS
-    = {{INPUT_FILE_NAME, [](const FormatFile & file) { return file.getURIPath(); }},
-       {INPUT_FILE_BLOCK_START, [](const FormatFile & file) { return file.getStartOffset(); }},
-       {INPUT_FILE_BLOCK_LENGTH, [](const FormatFile & file) { return file.getLength(); }}};
+std::map<std::string, std::function<DB::Field(const substraitInputFile &)>> FileMetaColumns::INPUT_FUNCTION_EXTRACTORS
+    = {{INPUT_FILE_NAME, [](const substraitInputFile & file) { return file.uri_file(); }},
+       {INPUT_FILE_BLOCK_START, [](const substraitInputFile & file) { return file.start(); }},
+       {INPUT_FILE_BLOCK_LENGTH, [](const substraitInputFile & file) { return file.length(); }}};
 
-FileMetaColumns::FileMetaColumns(const FormatFile & file)
+FileMetaColumns::FileMetaColumns(const substraitInputFile & file)
 {
-    for (const auto & column : file.getFileInfo().metadata_columns())
+    for (const auto & column : file.metadata_columns())
     {
         if (!BASE_METADATA_EXTRACTORS.contains(column.key()))
             continue;
@@ -88,41 +88,24 @@ FileMetaColumns::FileMetaColumns(const FormatFile & file)
     }
 }
 
-void FileMetaColumns::addInputFileColumnsToChunk(const DB::Block & header, DB::Chunk & chunk) const
+DB::ColumnPtr FileMetaColumns::createMetaColumn(const String & columnName, const DB::DataTypePtr & type, size_t rows) const
 {
-    UInt64 rows = chunk.getNumRows();
-    auto output_columns = chunk.getColumns();
-    for (size_t i = 0; i < header.columns(); ++i)
-    {
-        const auto & column = header.getByPosition(i);
-        if (!isVirtualColumn(column.name))
-            continue;
-        assert(metadata_columns_map.contains(column.name));
-        auto field = metadata_columns_map.at(column.name);
+    assert(metadata_columns_map.contains(columnName));
+    const auto field = metadata_columns_map.at(columnName);
 
-        ColumnPtr column_ptr;
-        if (INPUT_FILE_COLUMNS_SET.contains(column.name))
-        {
-            /// copied from InputFileNameParser::addInputFileColumnsToChunk()
-            /// TODO: check whether using const column is correct or not.
-            column_ptr = column.type->createColumnConst(rows, field);
-        }
-        else
-        {
-            auto mutable_column = column.type->createColumn();
-            mutable_column->insertMany(field, rows);
-            column_ptr = std::move(mutable_column);
-        }
-        output_columns.insert(output_columns.begin() + i, std::move(column_ptr));
+    if (INPUT_FILE_COLUMNS_SET.contains(columnName))
+    {
+        /// copied from InputFileNameParser::addInputFileColumnsToChunk()
+        /// TODO: check whether using const column is correct or not.
+        return type->createColumnConst(rows, field);
     }
-    chunk.setColumns(output_columns, rows);
+    auto mutable_column = type->createColumn();
+    mutable_column->insertMany(field, rows);
+    return mutable_column;
 }
 
-FormatFile::FormatFile(
-    DB::ContextPtr context_,
-    const substrait::ReadRel::LocalFiles::FileOrFiles & file_info_,
-    const ReadBufferBuilderPtr & read_buffer_builder_)
-    : context(context_), file_info(file_info_), read_buffer_builder(read_buffer_builder_)
+FormatFile::FormatFile(DB::ContextPtr context_, const substraitInputFile & file_info_, const ReadBufferBuilderPtr & read_buffer_builder_)
+    : context(context_), file_info(file_info_), read_buffer_builder(read_buffer_builder_), meta_columns(file_info_)
 {
     if (file_info.partition_columns_size())
     {
@@ -135,7 +118,6 @@ FormatFile::FormatFile(
             Poco::URI::decode(partition_column.key(), unescaped_key);
             Poco::URI::decode(partition_column.value(), unescaped_value);
 
-            partition_keys.push_back(unescaped_key);
             partition_values[unescaped_key] = unescaped_value;
 
             std::string normalized_key = unescaped_key;

@@ -25,7 +25,6 @@
 #include <DataTypes/DataTypesDecimal.h>
 #include <IO/ReadBufferFromString.h>
 #include <IO/ReadHelpers.h>
-#include <Parser/InputFileNameParser.h>
 #include <QueryPipeline/Pipe.h>
 #include <Storages/SubstraitSource/FormatFile.h>
 #include <Storages/SubstraitSource/SubstraitFileSource.h>
@@ -53,44 +52,46 @@ namespace local_engine
 /// To handle these cases, we build blocks with a const virtual column to indicate how many rows are in it.
 static DB::Block getRealHeader(const DB::Block & header)
 {
-    auto header_without_input_file_columns = InputFileNameParser::removeInputFileColumn(header);
-    auto result_header = header;
-    if (!header_without_input_file_columns.columns())
-    {
-        auto virtual_header = BlockUtil::buildRowCountHeader();
-        for (const auto & column_with_type_and_name : virtual_header.getColumnsWithTypeAndName())
-            result_header.insert(column_with_type_and_name);
-    }
-    return result_header;
+    return header ? header : BlockUtil::buildRowCountHeader();
+}
+
+static std::vector<FormatFilePtr> initializeFiles(const substrait::ReadRel::LocalFiles & file_infos, const DB::ContextPtr & context)
+{
+    assert(file_infos.items().size());
+    std::vector<FormatFilePtr> files;
+    const Poco::URI file_uri(file_infos.items().Get(0).uri_file());
+    ReadBufferBuilderPtr read_buffer_builder = ReadBufferBuilderFactory::instance().createBuilder(file_uri.getScheme(), context);
+    for (const auto & item : file_infos.items())
+        files.emplace_back(FormatFileUtil::createFile(context, read_buffer_builder, item));
+    return files;
+}
+
+static DB::Block initReadHeader(const DB::Block & block, const FormatFiles & files)
+{
+    assert(files.size());
+    const auto & partitions = files[0]->getFilePartitionValues();
+    const auto & fileMetaColumns = files[0]->fileMetaColumns();
+    DB::ColumnsWithTypeAndName result_columns;
+    std::ranges::copy_if(
+        block.getColumnsWithTypeAndName(),
+        std::back_inserter(result_columns),
+        [&partitions, &fileMetaColumns](const auto & column)
+        { return !partitions.contains(column.name) && !fileMetaColumns.virtualColumn(column.name); });
+    return result_columns;
 }
 
 SubstraitFileSource::SubstraitFileSource(
-    const DB::ContextPtr & context_, const DB::Block & header_, const substrait::ReadRel::LocalFiles & file_infos)
-    : DB::SourceWithKeyCondition(getRealHeader(header_), false)
-    , input_file_name(InputFileNameParser::containsInputFileColumns(header_))
-    , context(context_)
-    , output_header(input_file_name ? InputFileNameParser::removeInputFileColumn(header_) : header_)
-    , to_read_header(output_header)
+    const DB::ContextPtr & context_, const DB::Block & outputHeader_, const substrait::ReadRel::LocalFiles & file_infos)
+    : DB::SourceWithKeyCondition(getRealHeader(outputHeader_), false)
+    , files(initializeFiles(file_infos, context_))
+    , outputHeader(outputHeader_)
+    , readHeader(initReadHeader(outputHeader, files))
 {
-    if (file_infos.items_size())
-    {
-        /// Initialize files
-        const Poco::URI file_uri(file_infos.items().Get(0).uri_file());
-        ReadBufferBuilderPtr read_buffer_builder = ReadBufferBuilderFactory::instance().createBuilder(file_uri.getScheme(), context);
-        for (const auto & item : file_infos.items())
-            files.emplace_back(FormatFileUtil::createFile(context, read_buffer_builder, item));
-
-        /// File partition keys are read from the file path
-        const auto partition_keys = files[0]->getFilePartitionKeys();
-        for (const auto & key : partition_keys)
-            if (const auto * col = to_read_header.findByName(key, true))
-                to_read_header.erase(col->name);
-    }
 }
 
 void SubstraitFileSource::setKeyCondition(const std::optional<DB::ActionsDAG> & filter_actions_dag, DB::ContextPtr context_)
 {
-    setKeyConditionImpl(filter_actions_dag, context_, to_read_header);
+    setKeyConditionImpl(filter_actions_dag, context_, readHeader);
     if (filter_actions_dag)
         column_index_filter = std::make_shared<ColumnIndexFilter>(filter_actions_dag.value(), context_);
 }
@@ -107,11 +108,7 @@ DB::Chunk SubstraitFileSource::generate()
 
         DB::Chunk chunk;
         if (file_reader->pull(chunk))
-        {
-            if (input_file_name)
-                file_reader->addInputFileColumnsToChunk(output.getHeader(), chunk);
             return chunk;
-        }
 
         /// try to read from next file
         file_reader.reset();
@@ -134,21 +131,19 @@ bool SubstraitFileSource::tryPrepareReader()
         if (!current_file->supportSplit() && current_file->getStartOffset())
             continue;
 
-        if (!to_read_header)
+        if (!readHeader)
         {
-            auto total_rows = current_file->getTotalRows();
-            if (total_rows.has_value())
-                file_reader = std::make_unique<ConstColumnsFileReader>(current_file, context, output_header, *total_rows);
+            if (auto totalRows = current_file->getTotalRows())
+                file_reader = std::make_unique<ConstColumnsFileReader>(current_file, outputHeader, *totalRows);
             else
             {
-                /// For text/json format file, we can't get total rows from file metadata.
-                /// So we add a dummy column to indicate the number of rows.
-                file_reader = std::make_unique<NormalFileReader>(
-                    current_file, context, getRealHeader(to_read_header), getRealHeader(output_header));
+                /// If we can't get total rows from file metadata (i.e. text/json format file), adding a dummy column to
+                /// indicate the number of rows.
+                file_reader = std::make_unique<NormalFileReader>(current_file, getRealHeader(readHeader), getRealHeader(outputHeader));
             }
         }
         else
-            file_reader = std::make_unique<NormalFileReader>(current_file, context, to_read_header, output_header);
+            file_reader = std::make_unique<NormalFileReader>(current_file, readHeader, outputHeader);
         file_reader->applyKeyCondition(key_condition, column_index_filter);
         return true;
     }
@@ -162,7 +157,36 @@ void SubstraitFileSource::onCancel() noexcept
         file_reader->cancel();
 }
 
-DB::ColumnPtr FileReaderWrapper::createConstColumn(DB::DataTypePtr data_type, const DB::Field & field, size_t rows)
+DB::Columns BaseReader::addVirtualColumn(DB::Chunk dataChunk, size_t rowNum) const
+{
+    // dataChunk may be empty
+    const size_t rows = dataChunk.empty() ? rowNum : dataChunk.getNumRows();
+    assert(rows && "read 0 rows from file");
+
+    auto read_columns = dataChunk.detachColumns();
+    const auto & columns = outputHeader.getColumnsWithTypeAndName();
+    const auto & normalized_partition_values = file->getFileNormalizedPartitionValues();
+
+    DB::Columns res_columns;
+    res_columns.reserve(columns.size());
+    std::ranges::transform(
+        columns,
+        std::back_inserter(res_columns),
+        [&](const auto & column) -> DB::ColumnPtr
+        {
+            if (readHeader.has(column.name))
+                return read_columns[readHeader.getPositionByName(column.name)];
+            if (auto it = normalized_partition_values.find(boost::to_lower_copy(column.name)); it != normalized_partition_values.end())
+                return createPartitionColumn(it->second, column.type, rows);
+            if (file->fileMetaColumns().virtualColumn(column.name))
+                return file->fileMetaColumns().createMetaColumn(column.name, column.type, rows);
+            throw DB::Exception(
+                DB::ErrorCodes::LOGICAL_ERROR, "Not found column = {} when reading file: {}.", column.name, file->getURIPath());
+        });
+    return res_columns;
+}
+
+DB::ColumnPtr BaseReader::createConstColumn(DB::DataTypePtr data_type, const DB::Field & field, size_t rows)
 {
     auto nested_type = DB::removeNullable(data_type);
     auto column = nested_type->createColumnConst(rows, field);
@@ -172,7 +196,7 @@ DB::ColumnPtr FileReaderWrapper::createConstColumn(DB::DataTypePtr data_type, co
     return column;
 }
 
-DB::ColumnPtr FileReaderWrapper::createColumn(const String & value, DB::DataTypePtr type, size_t rows)
+DB::ColumnPtr BaseReader::createPartitionColumn(const String & value, const DB::DataTypePtr & type, size_t rows)
 {
     if (GlutenStringUtils::isNullPartitionValue(value))
     {
@@ -205,7 +229,7 @@ DB::ColumnPtr FileReaderWrapper::createColumn(const String & value, DB::DataType
         return DB::Field(value); \
     }
 
-DB::Field FileReaderWrapper::buildFieldFromString(const String & str_value, DB::DataTypePtr type)
+DB::Field BaseReader::buildFieldFromString(const String & str_value, DB::DataTypePtr type)
 {
     using FieldBuilder = std::function<DB::Field(DB::ReadBuffer &, const String &)>;
     static std::map<std::string, FieldBuilder> field_builders
@@ -293,17 +317,12 @@ DB::Field FileReaderWrapper::buildFieldFromString(const String & str_value, DB::
     return it->second(read_buffer, str_value);
 }
 
-ConstColumnsFileReader::ConstColumnsFileReader(
-    const FormatFilePtr & file_, const DB::ContextPtr & context_, const DB::Block & header_, size_t block_size_)
-    : FileReaderWrapper(file_), context(context_), header(header_), remained_rows(0), block_size(block_size_)
+ConstColumnsFileReader::ConstColumnsFileReader(const FormatFilePtr & file_, const DB::Block & header_, size_t blockSize)
+    : BaseReader(file_, {}, header_), remained_rows(file->getTotalRows().value()), block_size(blockSize)
 {
-    const auto rows = file->getTotalRows();
-    if (!rows)
-        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Cannot get total rows number from file : {}", file->getURIPath());
-    remained_rows = *rows;
 }
 
-bool ConstColumnsFileReader::onPull(DB::Chunk & chunk)
+bool ConstColumnsFileReader::pull(DB::Chunk & chunk)
 {
     if (isCancelled())
         return false;
@@ -323,76 +342,30 @@ bool ConstColumnsFileReader::onPull(DB::Chunk & chunk)
         remained_rows -= block_size;
     }
 
-    DB::Columns res_columns;
-    if (const size_t col_num = header.columns())
-    {
-        res_columns.reserve(col_num);
-        const auto & normalized_partition_values = file->getFileNormalizedPartitionValues();
-        for (size_t pos = 0; pos < col_num; ++pos)
-        {
-            const auto & column = header.getByPosition(pos);
-            const auto & type = column.type;
-            const auto & name = column.name;
-
-            auto it = normalized_partition_values.find(boost::to_lower_copy(name));
-            if (it == normalized_partition_values.end())
-                throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Unknown partition column : {}", name);
-
-            res_columns.emplace_back(createColumn(it->second, type, to_read_rows));
-        }
-    }
-    else
-    {
-        // the original header is empty, build a block to represent the row count.
-        res_columns = BlockUtil::buildRowCountChunk(to_read_rows).detachColumns();
-    }
+    /// If the original output header is empty, build a block to represent the row count.
+    DB::Columns res_columns
+        = outputHeader.columns() > 0 ? addVirtualColumn({}, to_read_rows) : BlockUtil::buildRowCountChunk(to_read_rows).detachColumns();
 
     chunk = DB::Chunk(std::move(res_columns), to_read_rows);
     return true;
 }
 
-NormalFileReader::NormalFileReader(
-    const FormatFilePtr & file_, const DB::ContextPtr & context_, const DB::Block & to_read_header_, const DB::Block & output_header_)
-    : FileReaderWrapper(file_), context(context_), to_read_header(to_read_header_), output_header(output_header_)
+NormalFileReader::NormalFileReader(const FormatFilePtr & file_, const DB::Block & to_read_header_, const DB::Block & output_header_)
+    : BaseReader(file_, to_read_header_, output_header_), input_format(file_->createInputFormat(to_read_header_))
 {
-    input_format = file->createInputFormat(to_read_header);
 }
 
-bool NormalFileReader::onPull(DB::Chunk & chunk)
+bool NormalFileReader::pull(DB::Chunk & chunk)
 {
     if (isCancelled())
         return false;
 
-    DB::Chunk raw_chunk = input_format->input->generate();
-    const size_t rows = raw_chunk.getNumRows();
+    /// read read real data chunk from input.
+    DB::Chunk dataChunk = input_format->input->generate();
+    const size_t rows = dataChunk.getNumRows();
     if (!rows)
         return false;
-
-    auto read_columns = raw_chunk.detachColumns();
-    const auto & columns = output_header.getColumnsWithTypeAndName();
-    const auto & normalized_partition_values = file->getFileNormalizedPartitionValues();
-
-    DB::Columns res_columns;
-    res_columns.reserve(columns.size());
-    for (const auto & column : columns)
-    {
-        if (to_read_header.has(column.name))
-        {
-            auto pos = to_read_header.getPositionByName(column.name);
-            res_columns.push_back(read_columns[pos]);
-        }
-        else
-        {
-            auto it = normalized_partition_values.find(boost::to_lower_copy(column.name));
-            if (it == normalized_partition_values.end())
-                throw DB::Exception(
-                    DB::ErrorCodes::LOGICAL_ERROR, "Not found column({}) from file({}) partition keys.", column.name, file->getURIPath());
-
-            res_columns.push_back(createColumn(it->second, column.type, rows));
-        }
-    }
-
-    chunk = DB::Chunk(std::move(res_columns), rows);
+    chunk = DB::Chunk(addVirtualColumn(std::move(dataChunk)), rows);
     return true;
 }
 

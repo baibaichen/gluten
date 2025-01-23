@@ -39,6 +39,7 @@ namespace local_engine
 {
 
 class FormatFile;
+using substraitInputFile = substrait::ReadRel::LocalFiles::FileOrFiles;
 
 class FileMetaColumns
 {
@@ -60,6 +61,8 @@ public:
     static inline std::unordered_set METADATA_COLUMNS_SET
         = {FILE_PATH, FILE_NAME, FILE_BLOCK_START, FILE_BLOCK_LENGTH, FILE_SIZE, FILE_MODIFICATION_TIME};
 
+    /// Caution: only used in InputFileNameParser
+    ///
     static bool isVirtualColumn(const std::string & column_name)
     {
         return METADATA_COLUMNS_SET.contains(column_name) || INPUT_FILE_COLUMNS_SET.contains(column_name);
@@ -78,16 +81,18 @@ public:
             [](const auto & column) { return !isVirtualColumn(column.name); });
         return result_columns;
     }
+    ///
 
-    explicit FileMetaColumns(const FormatFile & file);
+    explicit FileMetaColumns(const substraitInputFile & file);
+    DB::ColumnPtr createMetaColumn(const String & columnName, const DB::DataTypePtr & type, size_t rows) const;
 
-    void addInputFileColumnsToChunk(const DB::Block & header, DB::Chunk & chunk) const;
+    bool virtualColumn(const std::string & column_name) const { return metadata_columns_map.contains(column_name); }
 
 protected:
     static std::map<std::string, std::function<DB::Field(const std::string &)>> BASE_METADATA_EXTRACTORS;
 
     /// InputFileName, InputFileBlockStart and InputFileBlockLength,
-    static std::map<std::string, std::function<DB::Field(const FormatFile &)>> INPUT_FUNCTION_EXTRACTORS;
+    static std::map<std::string, std::function<DB::Field(const substraitInputFile &)>> INPUT_FUNCTION_EXTRACTORS;
 
     std::unordered_map<String, DB::Field> metadata_columns_map;
 };
@@ -102,10 +107,7 @@ public:
     };
     using InputFormatPtr = std::shared_ptr<InputFormat>;
 
-    FormatFile(
-        DB::ContextPtr context_,
-        const substrait::ReadRel::LocalFiles::FileOrFiles & file_info_,
-        const ReadBufferBuilderPtr & read_buffer_builder_);
+    FormatFile(DB::ContextPtr context_, const substraitInputFile & file_info_, const ReadBufferBuilderPtr & read_buffer_builder_);
     virtual ~FormatFile() = default;
 
     /// Create a new input format for reading this file
@@ -121,27 +123,22 @@ public:
     virtual String getFileFormat() const = 0;
 
     /// Get partition keys from a file path
-    const std::vector<String> & getFilePartitionKeys() const { return partition_keys; }
-
     const std::map<String, String> & getFilePartitionValues() const { return partition_values; }
-
     const std::map<String, String> & getFileNormalizedPartitionValues() const { return normalized_partition_values; }
 
     String getURIPath() const { return file_info.uri_file(); }
     size_t getStartOffset() const { return file_info.start(); }
-    size_t getLength() const { return file_info.length(); }
-    int64_t getModificationTime() const { return file_info.properties().modificationtime(); }
-    const substrait::ReadRel::LocalFiles::FileOrFiles & getFileInfo() const { return file_info; }
+    const FileMetaColumns & fileMetaColumns() const { return meta_columns; }
 
 protected:
     DB::ContextPtr context;
-    substrait::ReadRel::LocalFiles::FileOrFiles file_info;
+    const substraitInputFile file_info;
     ReadBufferBuilderPtr read_buffer_builder;
-    std::vector<String> partition_keys;
     std::map<String, String> partition_values;
     /// partition keys are normalized to lower cases for partition column case-insensitive matching
     std::map<String, String> normalized_partition_values;
     std::shared_ptr<const DB::KeyCondition> key_condition;
+    const FileMetaColumns meta_columns;
 };
 
 using FormatFilePtr = std::shared_ptr<FormatFile>;

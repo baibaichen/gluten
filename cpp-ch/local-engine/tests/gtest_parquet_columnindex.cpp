@@ -30,6 +30,7 @@
 #include <Storages/Parquet/ParquetConverter.h>
 #include <Storages/Parquet/RowRanges.h>
 #include <Storages/Parquet/VectorizedParquetRecordReader.h>
+#include <Storages/Parquet/VirtualColumnRowIndexReader.h>
 #include <boost/iterator/counting_iterator.hpp>
 #include <gtest/gtest.h>
 #include <parquet/page_index.h>
@@ -508,8 +509,8 @@ TEST(ColumnIndex, Filtering)
 TEST(RowIndex, VirtualColumnRowIndexReader)
 {
     local_engine::RowRanges row_ranges = calculateRowRangesForTest("column1 in (7)");
-    local_engine::DefaultRowRangesProvider provider({row_ranges}, {0});
-    local_engine::VirtualColumnRowIndexReader reader(&provider, {0}, local_engine::BIGINT());
+    local_engine::DefaultRowRangesProvider provider({row_ranges}, {0}, {0});
+    local_engine::VirtualColumnRowIndexReader reader(provider, local_engine::BIGINT());
     DB::ColumnPtr col = reader.readBatch(TOTALSIZE);
     const auto & col_str = typeid_cast<const ColumnInt64 &>(*col);
     std::vector<size_t> result;

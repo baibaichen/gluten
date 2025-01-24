@@ -109,6 +109,7 @@ public:
     virtual ~IRowRangesProvider() = default;
     virtual std::optional<RowRanges> getRowRanges(Int32 row_group_index) const = 0;
     virtual UInt64 getRowGroupStartIndex(Int32 row_group_index) const = 0;
+    virtual const std::vector<Int32> & getReadRowGroups() const = 0;
 };
 
 class IColumnIndexStoreProvider : public IRowRangesProvider
@@ -116,6 +117,28 @@ class IColumnIndexStoreProvider : public IRowRangesProvider
 public:
     ~IColumnIndexStoreProvider() override = default;
     virtual const ColumnIndexStore & getColumnIndexStore(Int32 row_group) const = 0;
+};
+
+struct DefaultRowRangesProvider : IRowRangesProvider
+{
+    const std::vector<RowRanges> rowRangePerRG;
+    const std::vector<UInt64> startIndexPerRG;
+    const std::vector<Int32> readRowGroups;
+    explicit DefaultRowRangesProvider(
+        const std::vector<RowRanges> & row_ranges, const std::vector<UInt64> & startIndexes, const std::vector<Int32> & readRowGroups_)
+        : rowRangePerRG(row_ranges), startIndexPerRG(startIndexes), readRowGroups(readRowGroups_)
+    {
+        assert(rowRangePerRG.size() == startIndexPerRG.size());
+    }
+    std::optional<RowRanges> getRowRanges(Int32 row_group_index) const override
+    {
+        if (row_group_index < 0 || row_group_index >= static_cast<Int32>(rowRangePerRG.size()))
+            return std::nullopt;
+        return rowRangePerRG[row_group_index];
+    }
+
+    UInt64 getRowGroupStartIndex(Int32 row_group_index) const override { return startIndexPerRG[row_group_index]; }
+    const std::vector<Int32> & getReadRowGroups() const override { return readRowGroups; };
 };
 
 class ColumnIndexRowRangesProvider : public IColumnIndexStoreProvider
@@ -144,6 +167,7 @@ public:
     }
     UInt64 getRowGroupStartIndex(Int32 row_group_index) const override { return startIndexPerRG_.at(row_group_index); }
     const ColumnIndexStore & getColumnIndexStore(Int32 row_group) const override { return *columnIndexStorePerRG_.at(row_group); }
+    const std::vector<Int32> & getReadRowGroups() const override { return readRowGroups; };
 
 private:
     const ColumnIndexStoreMap columnIndexStorePerRG_;

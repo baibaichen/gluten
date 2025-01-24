@@ -23,9 +23,6 @@
 #include <Formats/FormatSettings.h>
 #include <Processors/Formats/IInputFormat.h>
 #include <Processors/Formats/Impl/ArrowColumnToCHColumn.h>
-#include <Storages/Parquet/ColumnIndexFilter.h>
-#include <Storages/Parquet/VirtualColumnRowIndexReader.h>
-#include <absl/container/flat_hash_map.h>
 #include <parquet/arrow/reader_internal.h>
 #include <parquet/arrow/schema.h>
 
@@ -51,8 +48,8 @@ using ReadSequence = std::vector<int64_t>;
 using ColumnReadState = std::pair<ReadRanges, ReadSequence>;
 using ColumnChunkPageRead = std::pair<std::unique_ptr<parquet::PageReader>, ReadSequence>;
 
-class ColumnIndexFilter;
 class VectorizedParquetBlockInputFormat;
+class ColumnIndexRowRangesProvider;
 
 ColumnReadState buildAllRead(int64_t rg_count, const arrow::io::ReadRange & chunk_range);
 ColumnReadState buildRead(
@@ -115,7 +112,6 @@ public:
 
 using BuildRead = std::function<ColumnReadState(const arrow::io::ReadRange & col_range)>;
 
-
 class ParquetFileReaderExt
 {
     /// Members
@@ -123,17 +119,11 @@ class ParquetFileReaderExt
     int64_t source_size_;
     std::unique_ptr<parquet::ParquetFileReader> file_reader_;
     const DB::FormatSettings & format_settings_;
-
     const ColumnIndexRowRangesProvider & row_ranges_provider_;
-    std::unique_ptr<parquet::RowGroupMetaData> rowGroup(const Int32 row_group) const
-    {
-        const auto file_metadata = file_reader_->metadata();
-        return file_metadata->RowGroup(row_group);
-    }
-    const ColumnIndex & getColumnIndex(Int32 row_group, const std::string & column_name) const;
+
+    std::shared_ptr<parquet::FileMetaData> fileMeta() const { return file_reader_->metadata(); }
     ColumnChunkPageRead
     readColumnChunkPageBase(const parquet::RowGroupMetaData & rg, Int32 column_index, const BuildRead & build_read) const;
-    std::optional<RowRanges> getRowRanges(Int32 row_group_index) const { return row_ranges_provider_.getRowRanges(row_group_index); }
 
 public:
     ParquetFileReaderExt(
@@ -180,7 +170,6 @@ public:
 
 class VectorizedParquetRecordReader
 {
-    const DB::Block original_header_;
     const DB::Block parquet_header_;
     const DB::FormatSettings format_settings_;
     DB::ArrowColumnToCHColumn arrow_column_to_ch_column_;
@@ -190,7 +179,6 @@ class VectorizedParquetRecordReader
     // parquet::arrow::SchemaManifest manifest_;
     /// columns to read from Parquet file.
     std::vector<VectorizedColumnReader> column_readers_;
-    std::optional<VirtualColumnRowIndexReader> row_index_reader_ = std::nullopt;
 
     friend class VectorizedParquetBlockInputFormat;
 

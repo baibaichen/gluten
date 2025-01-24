@@ -20,7 +20,6 @@
 #include <optional>
 #include <Columns/ColumnNullable.h>
 #include <Columns/ColumnsNumber.h>
-#include <Core/Block.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/IDataType.h>
 #include <Storages/Parquet/ParquetMeta.h>
@@ -29,27 +28,6 @@
 
 namespace local_engine
 {
-
-/// used for
-struct DefaultRowRangesProvider : IRowRangesProvider
-{
-    const std::vector<RowRanges> rowRangePerRG;
-    const std::vector<UInt64> startIndexPerRG;
-    explicit DefaultRowRangesProvider(const std::vector<RowRanges> & row_ranges, const std::vector<UInt64> & startIndexes)
-        : rowRangePerRG(row_ranges), startIndexPerRG(startIndexes)
-    {
-        assert(rowRangePerRG.size() == startIndexPerRG.size());
-    }
-    std::optional<RowRanges> getRowRanges(Int32 row_group_index) const override
-    {
-        if (row_group_index < 0 || row_group_index >= static_cast<Int32>(rowRangePerRG.size()))
-            return std::nullopt;
-        return rowRangePerRG[row_group_index];
-    }
-
-    UInt64 getRowGroupStartIndex(Int32 row_group_index) const override { return startIndexPerRG[row_group_index]; }
-};
-
 
 class RowIndexGenerator
 {
@@ -89,7 +67,7 @@ public:
 
 class VirtualColumnRowIndexReader
 {
-    const IRowRangesProvider * row_ranges_provider_;
+    const IRowRangesProvider & row_ranges_provider_;
     std::deque<Int32> row_groups_;
     std::optional<RowIndexGenerator> row_index_generator_;
     DB::DataTypePtr column_type_;
@@ -99,10 +77,10 @@ class VirtualColumnRowIndexReader
         while (!row_groups_.empty())
         {
             const Int32 row_group_index = row_groups_.front();
-            auto result = row_ranges_provider_->getRowRanges(row_group_index);
+            auto result = row_ranges_provider_.getRowRanges(row_group_index);
             row_groups_.pop_front();
             if (result)
-                return RowIndexGenerator{result.value(), row_ranges_provider_->getRowGroupStartIndex(row_group_index)};
+                return RowIndexGenerator{result.value(), row_ranges_provider_.getRowGroupStartIndex(row_group_index)};
         }
         return std::nullopt;
     }
@@ -121,10 +99,9 @@ public:
         // TODO: row_index_generator_ = nextRowGroup();
     }*/
 
-    VirtualColumnRowIndexReader(
-        const IRowRangesProvider * row_ranges_provider, const std::vector<Int32> & row_groups, const DB::DataTypePtr & column_type)
+    VirtualColumnRowIndexReader(const IRowRangesProvider & row_ranges_provider, const DB::DataTypePtr & column_type)
         : row_ranges_provider_(row_ranges_provider)
-        , row_groups_(row_groups.begin(), row_groups.end())
+        , row_groups_(row_ranges_provider.getReadRowGroups().begin(), row_ranges_provider.getReadRowGroups().end())
         , row_index_generator_(nextRowGroup())
         , column_type_(column_type)
     {

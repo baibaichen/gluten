@@ -36,9 +36,9 @@ public:
         bool use_local_format_);
     ~ParquetFormatFile() override = default;
 
-    InputFormatPtr createInputFormat(const DB::Block & header) override
+    InputFormatPtr createInputFormat(const DB::Block & /*header*/) override
     {
-        throw new DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Use createInputFormat with key_condition and column_index_filter");
+        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Use createInputFormat with key_condition and column_index_filter");
     }
 
     InputFormatPtr createInputFormat(

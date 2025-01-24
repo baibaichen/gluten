@@ -174,33 +174,6 @@ parquet::arrow::SchemaManifest VectorizedParquetRecordReader::createSchemaManife
     return manifest;
 }
 
-std::vector<Int32> VectorizedParquetRecordReader::pruneColumn(const DB::Block & header, const parquet::FileMetaData & metadata) const
-{
-    std::shared_ptr<arrow::Schema> schema;
-    THROW_ARROW_NOT_OK(parquet::arrow::FromParquetSchema(metadata.schema(), &schema));
-
-    DB::ArrowFieldIndexUtil field_util(
-        format_settings_.parquet.case_insensitive_column_matching, format_settings_.parquet.allow_missing_columns);
-    auto index_mapping = field_util.findRequiredIndices(header, *schema, metadata);
-
-    std::vector<Int32> column_indices;
-    for (const auto & [clickhouse_header_index, parquet_indexes] : index_mapping)
-        for (auto parquet_index : parquet_indexes)
-            column_indices.push_back(parquet_index);
-    return column_indices;
-}
-
-std::vector<Int32> VectorizedParquetRecordReader::pruneRowGroups(const parquet::FileMetaData & file_metadata) const
-{
-    std::vector<Int32> row_groups(boost::counting_iterator<Int32>(0), boost::counting_iterator<Int32>(file_metadata.num_row_groups()));
-    if (!format_settings_.parquet.skip_row_groups.empty())
-    {
-        row_groups.erase(
-            std::ranges::remove_if(row_groups, [&](const Int32 i) { return format_settings_.parquet.skip_row_groups.contains(i); }).begin(),
-            row_groups.end());
-    }
-    return row_groups;
-}
 
 VectorizedParquetRecordReader::VectorizedParquetRecordReader(const DB::Block & header, const DB::FormatSettings & format_settings)
     : original_header_(header)
@@ -218,25 +191,22 @@ VectorizedParquetRecordReader::VectorizedParquetRecordReader(const DB::Block & h
 
 bool VectorizedParquetRecordReader::initialize(
     const std::shared_ptr<arrow::io::RandomAccessFile> & arrow_file,
-    const ColumnIndexFilterPtr & column_index_filter,
+    const ColumnIndexRowRangesProvider & row_ranges_provider,
     const std::shared_ptr<parquet::FileMetaData> & metadata)
 {
     auto file_reader = parquet::ParquetFileReader::Open(arrow_file, parquet::default_reader_properties(), metadata);
-    const parquet::FileMetaData & file_metadata = *(file_reader->metadata());
+    const parquet::FileMetaData & file_metadata = *file_reader->metadata();
 
-    /// column pruning
-    std::vector<Int32> column_indices = pruneColumn(parquet_header_, file_metadata);
 
-    /// row groups pruning
-    std::vector<Int32> row_groups = pruneRowGroups(file_metadata);
+    const std::vector<Int32> & column_indices = row_ranges_provider.readColumns;
+    const std::vector<Int32> & row_groups = row_ranges_provider.readRowGroups;
     if (row_groups.empty())
         return false;
 
     // initialize File Reader
     parquet::arrow::SchemaManifest manifest = createSchemaManifest(file_metadata);
     THROW_ARROW_NOT_OK_OR_ASSIGN(std::vector<int> field_indices, manifest.GetFieldIndices(column_indices));
-    file_reader_
-        = std::make_unique<ParquetFileReaderExt>(arrow_file, std::move(file_reader), column_index_filter, field_indices, format_settings_);
+    file_reader_ = std::make_unique<ParquetFileReaderExt>(arrow_file, std::move(file_reader), row_ranges_provider, format_settings_);
     column_readers_.reserve(field_indices.size());
 
     for (auto const & column_index : field_indices)
@@ -253,8 +223,8 @@ bool VectorizedParquetRecordReader::initialize(
     }
 
     if (hasMetaColumns(original_header_))
-        row_index_reader_ = std::make_optional<VirtualColumnRowIndexReader>(
-            file_reader_.get(), row_groups, calculateRowGroupOffsets(file_metadata), getMetaColumnType(original_header_));
+        row_index_reader_
+            = std::make_optional<VirtualColumnRowIndexReader>(&row_ranges_provider, row_groups, getMetaColumnType(original_header_));
 
     return true;
 }
@@ -299,14 +269,12 @@ DB::Chunk VectorizedParquetRecordReader::nextBatch()
 ParquetFileReaderExt::ParquetFileReaderExt(
     const std::shared_ptr<arrow::io::RandomAccessFile> & source,
     std::unique_ptr<parquet::ParquetFileReader> parquetFileReader,
-    const ColumnIndexFilterPtr & column_index_filter,
-    const std::vector<Int32> & column_indices,
+    const ColumnIndexRowRangesProvider & row_ranges_provider,
     const DB::FormatSettings & format_settings)
     : source_(source)
     , file_reader_(std::move(parquetFileReader))
-    , column_index_filter_(column_index_filter)
     , format_settings_(format_settings)
-    , column_indices_(column_indices.begin(), column_indices.end())
+    , row_ranges_provider_(row_ranges_provider)
 {
     THROW_ARROW_NOT_OK_OR_ASSIGN(const int64_t source_size, source_->GetSize());
     source_size_ = source_size;
@@ -326,7 +294,7 @@ std::optional<ColumnChunkPageRead> PageIterator::nextRowGroup()
 }
 
 std::optional<ColumnChunkPageRead>
-ParquetFileReaderExt::nextRowGroup(int32_t row_group_index, int32_t column_index, const std::string & column_name)
+ParquetFileReaderExt::nextRowGroup(int32_t row_group_index, int32_t column_index, const std::string & column_name) const
 {
     return getRowRanges(row_group_index)
         .transform(
@@ -337,13 +305,18 @@ ParquetFileReaderExt::nextRowGroup(int32_t row_group_index, int32_t column_index
                 const BuildRead readAll = [&](const arrow::io::ReadRange & col_range) { return buildAllRead(rg_count, col_range); };
                 const BuildRead read = row_ranges.rowCount() == rg_count ? readAll : [&](const arrow::io::ReadRange & col_range)
                 {
-                    const ColumnIndexStore & column_index_store = getColumnIndexStore(row_group_index);
-                    const ColumnIndex & index = *(column_index_store.find(lowerColumnNameIfNeed(column_name, format_settings_))->second);
+                    const ColumnIndex & index = getColumnIndex(row_group_index, column_name);
                     return buildRead(rg_count, col_range, index.offsetIndex().page_locations(), row_ranges);
                 };
 
                 return readColumnChunkPageBase(*rg, column_index, read);
             });
+}
+
+const ColumnIndex & ParquetFileReaderExt::getColumnIndex(Int32 row_group, const std::string & column_name) const
+{
+    const ColumnIndexStore & column_index_store = row_ranges_provider_.getColumnIndexStore(row_group);
+    return *(column_index_store.find(lowerColumnNameIfNeed(column_name, format_settings_))->second);
 }
 
 ColumnChunkPageRead ParquetFileReaderExt::readColumnChunkPageBase(
@@ -366,48 +339,13 @@ ColumnChunkPageRead ParquetFileReaderExt::readColumnChunkPageBase(
         read_sequence);
 }
 
-const RowRanges & ParquetFileReaderExt::internalGetRowRanges(const Int32 row_group)
-{
-    if (!row_group_row_ranges_.contains(row_group))
-    {
-        const auto rowGroupMeta = rowGroup(row_group);
-        const ColumnIndexStore & column_index_store = getColumnIndexStore(row_group);
-        row_group_row_ranges_[row_group] = calculateRowRanges(column_index_store, rowGroupMeta->num_rows());
-    }
-    return *(row_group_row_ranges_[row_group]);
-}
-
-const ColumnIndexStore & ParquetFileReaderExt::getColumnIndexStore(const Int32 row_group)
-{
-    if (!row_group_column_index_stores_.contains(row_group))
-    {
-        const auto rowGroupMeta = rowGroup(row_group);
-        const auto rowGroupIndex = rowGroupPageIndexReader(row_group);
-
-        auto result = std::make_unique<ColumnIndexStore>();
-        ColumnIndexStore & column_index_store = *result;
-        column_index_store.reserve(column_indices_.size());
-
-        for (auto const column_index : column_indices_)
-        {
-            const auto * col_desc = rowGroupMeta->schema()->Column(column_index);
-            const auto col_index = rowGroupIndex->GetColumnIndex(column_index);
-            const auto offset_index = rowGroupIndex->GetOffsetIndex(column_index);
-            column_index_store[lowerColumnNameIfNeed(col_desc->name(), format_settings_)]
-                = ColumnIndex::create(col_desc, col_index, offset_index);
-        }
-        row_group_column_index_stores_[row_group] = std::move(result);
-    }
-    return *(row_group_column_index_stores_[row_group]);
-}
-
 /// input format
 VectorizedParquetBlockInputFormat::VectorizedParquetBlockInputFormat(
     DB::ReadBuffer & in_,
     const DB::Block & header_,
-    const ColumnIndexFilterPtr & column_index_filter,
+    const ColumnIndexRowRangesProvider & row_ranges_provider,
     const DB::FormatSettings & format_settings)
-    : DB::IInputFormat(header_, &in_), record_reader_(getPort().getHeader(), format_settings), column_index_filter_(column_index_filter)
+    : DB::IInputFormat(header_, &in_), record_reader_(getPort().getHeader(), format_settings), row_ranges_provider_(row_ranges_provider)
 {
 }
 
@@ -427,7 +365,7 @@ DB::Chunk VectorizedParquetBlockInputFormat::read()
         const auto arrow_file = DB::asArrowFile(*in, record_reader_.format_settings_, is_stopped, "Parquet", PARQUET_MAGIC_BYTES);
         if (is_stopped != 0)
             return {};
-        if (!record_reader_.initialize(arrow_file, column_index_filter_))
+        if (!record_reader_.initialize(arrow_file, row_ranges_provider_))
             return {};
     }
     return record_reader_.nextBatch();

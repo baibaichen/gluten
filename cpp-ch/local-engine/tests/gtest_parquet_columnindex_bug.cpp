@@ -51,12 +51,13 @@ TEST(ColumnIndex, Decimal182)
     debug::headBlock(x);
 }
 
+//TODO: set input_format_parquet_allow_missing_columns to true
 void readFile(
     std::string_view json_plan,
     std::string_view split_template,
     std::string_view file,
     const std::function<void(LocalExecutor &)> & callback,
-    const TestSettings & test_settings = {{"input_format_parquet_allow_missing_columns", false}})
+    const TestSettings & test_settings = {{"input_format_parquet_allow_missing_columns", true}})
 {
     auto query_id = QueryContext::instance().initializeQuery("RowIndex");
     SCOPE_EXIT({ local_engine::QueryContext::instance().finalizeQuery(query_id); });

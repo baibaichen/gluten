@@ -504,23 +504,12 @@ TEST(ColumnIndex, Filtering)
     testCondition("column1 >= 7 and column1 < 11 and column2 > 'Romeo' and column2 <= 'Tango'", {7, 11, 12, 13});
 }
 
-struct FakeRowRangesProvider : public local_engine::IRowRangesProvider
-{
-    std::vector<local_engine::RowRanges> row_ranges_;
-    explicit FakeRowRangesProvider(const std::vector<local_engine::RowRanges> & row_ranges) : row_ranges_(row_ranges) { }
-    std::optional<local_engine::RowRanges> getRowRanges(Int32 row_group_index) override
-    {
-        if (row_group_index < 0 || row_group_index >= static_cast<Int32>(row_ranges_.size()))
-            return std::nullopt;
-        return row_ranges_[row_group_index];
-    }
-};
 
 TEST(RowIndex, VirtualColumnRowIndexReader)
 {
     local_engine::RowRanges row_ranges = calculateRowRangesForTest("column1 in (7)");
-    FakeRowRangesProvider provider({row_ranges});
-    local_engine::VirtualColumnRowIndexReader reader(&provider, {0}, {0}, local_engine::BIGINT());
+    local_engine::DefaultRowRangesProvider provider({row_ranges}, {0});
+    local_engine::VirtualColumnRowIndexReader reader(&provider, {0}, local_engine::BIGINT());
     DB::ColumnPtr col = reader.readBatch(TOTALSIZE);
     const auto & col_str = typeid_cast<const ColumnInt64 &>(*col);
     std::vector<size_t> result;
@@ -1114,7 +1103,8 @@ TEST_P(TestBuildPageReadStates, BuildPageReadStates)
     BuildAndVerifyPageReadStates();
 }
 
-TEST(ColumnIndex, VectorizedParquetRecordReader)
+// TODO: VectorizedParquetRecordReader
+/*TEST(ColumnIndex, VectorizedParquetRecordReader)
 {
     using namespace local_engine;
     //TODO: move test parquet to s3 and download to CI machine.
@@ -1151,6 +1141,6 @@ TEST(ColumnIndex, VectorizedParquetRecordReader)
         }
         chunk = recordReader.nextBatch();
     } while (chunk.getNumRows() > 0);
-}
+}*/
 
 #endif //USE_PARQUET

@@ -1115,10 +1115,6 @@ class ClickHouseTestSettings extends BackendTestSettings {
   enableSuite[GlutenDatasetOptimizationSuite]
   enableSuite[GlutenDatasetPrimitiveSuite]
   enableSuite[GlutenDatasetSerializerRegistratorSuite]
-  enableSuite[GlutenDatasetSuite]
-    // Rewrite the following two tests in GlutenDatasetSuite.
-    .exclude("dropDuplicates: columns with same column name")
-    .exclude("groupBy.as")
   enableSuite[GlutenDateFunctionsSuite]
     // The below two are replaced by two modified versions.
     .exclude("unix_timestamp")

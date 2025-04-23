@@ -25,6 +25,7 @@ import org.apache.spark.sql.SaveMode
 import org.apache.spark.sql.delta.MergeTreeConf
 import org.apache.spark.sql.delta.sources.DeltaSQLConf
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
+import org.apache.spark.sql.internal.SQLConf
 
 import io.delta.tables.ClickhouseTable
 import org.apache.commons.io.FileUtils
@@ -51,13 +52,13 @@ class GlutenClickHouseMergeTreeOptimizeSuite
     super.sparkConf
       .set("spark.shuffle.manager", "org.apache.spark.shuffle.sort.ColumnarShuffleManager")
       .set("spark.io.compression.codec", "LZ4")
-      .set("spark.sql.shuffle.partitions", "5")
+      .set(SQLConf.SHUFFLE_PARTITIONS, 5)
       .set("spark.sql.autoBroadcastJoinThreshold", "10MB")
       .set("spark.sql.adaptive.enabled", "true")
       .set(RuntimeConfig.LOGGER_LEVEL.key, "error")
       .set(GlutenConfig.NATIVE_WRITER_ENABLED.key, "true")
       .set(CHConfig.ENABLE_ONEPIPELINE_MERGETREE_WRITE, spark35)
-      .set(RuntimeSettings.MIN_INSERT_BLOCK_SIZE_ROWS, 10000)
+      .set(RuntimeSettings.MIN_INSERT_BLOCK_SIZE_ROWS, 10000L)
       .set(
         "spark.databricks.delta.retentionDurationCheck.enabled",
         "false"

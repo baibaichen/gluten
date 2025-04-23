@@ -29,7 +29,7 @@ object RuntimeSettings {
     buildConf(runtimeSettings("min_insert_block_size_rows"))
       .doc("https://clickhouse.com/docs/en/operations/settings/settings#min_insert_block_size_rows")
       .longConf
-      .createWithDefault(1048449)
+      .createWithDefault(1048449L)
 
   val MAX_BYTES_BEFORE_EXTERNAL_SORT =
     buildConf(runtimeSettings("max_bytes_before_external_sort"))

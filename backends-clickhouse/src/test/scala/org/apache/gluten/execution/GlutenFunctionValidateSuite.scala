@@ -16,7 +16,7 @@
  */
 package org.apache.gluten.execution
 
-import org.apache.gluten.backendsapi.clickhouse.CHConfig
+import org.apache.gluten.backendsapi.clickhouse.RuntimeConfig
 import org.apache.gluten.expression.{FlattenedAnd, FlattenedOr}
 
 import org.apache.spark.SparkConf
@@ -1348,7 +1348,7 @@ class GlutenFunctionValidateSuite extends GlutenClickHouseWholeStageTransformerS
       assert(projects.head.projectList(2).asInstanceOf[Alias].child.isInstanceOf[Multiply])
     }
 
-    withSQLConf((CHConfig.runtimeConfig("enable_simplify_sum"), "true")) {
+    withSQLConf((RuntimeConfig("enable_simplify_sum"), "true")) {
       compareResultsAgainstVanillaSpark(sql, compareResult = true, checkSimplifiedSum)
     }
   }
@@ -1373,7 +1373,7 @@ class GlutenFunctionValidateSuite extends GlutenClickHouseWholeStageTransformerS
       }
     }
 
-    withSQLConf((CHConfig.runtimeConfig("enable_aggregate_if_to_filter"), "true")) {
+    withSQLConf((RuntimeConfig("enable_aggregate_if_to_filter"), "true")) {
       compareResultsAgainstVanillaSpark(sql, compareResult = true, checkAggregateWithFilter)
     }
   }

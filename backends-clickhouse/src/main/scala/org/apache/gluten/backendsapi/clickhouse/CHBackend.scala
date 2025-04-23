@@ -142,7 +142,7 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
   // Same as default value in clickhouse
   private val GLUTEN_MAX_BLOCK_SIZE_DEFAULT = 65409
   private val GLUTEN_MAX_SHUFFLE_READ_BYTES: String =
-    CHConfig.runtimeConfig("max_source_concatenate_bytes")
+    RuntimeConfig("max_source_concatenate_bytes")
   private val GLUTEN_MAX_SHUFFLE_READ_BYTES_DEFAULT = GLUTEN_MAX_BLOCK_SIZE_DEFAULT * 256
 
   val GLUTEN_AQE_PROPAGATEEMPTY: String = CHBackend.prefixOf("aqe.propagate.empty.relation")
@@ -389,14 +389,14 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
   // It could reduce the overhead of pre-aggregate node.
   def enableLazyAggregateExpand(): Boolean = {
     SparkEnv.get.conf.getBoolean(
-      CHConfig.runtimeConfig("enable_lazy_aggregate_expand"),
+      RuntimeConfig("enable_lazy_aggregate_expand"),
       defaultValue = true
     )
   }
 
   def enablePreProjectionForJoinConditions(): Boolean = {
     SparkEnv.get.conf.getBoolean(
-      CHConfig.runtimeConfig("enable_pre_projection_for_join_conditions"),
+      RuntimeConfig("enable_pre_projection_for_join_conditions"),
       defaultValue = true
     )
   }
@@ -404,35 +404,35 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
   // If the partition keys are high cardinality, the aggregation method is slower.
   def enableConvertWindowGroupLimitToAggregate(): Boolean = {
     SparkEnv.get.conf.getBoolean(
-      CHConfig.runtimeConfig("enable_window_group_limit_to_aggregate"),
+      RuntimeConfig("enable_window_group_limit_to_aggregate"),
       defaultValue = true
     )
   }
 
   def enableReplaceFromJsonWithGetJsonObject(): Boolean = {
     SparkEnv.get.conf.getBoolean(
-      CHConfig.runtimeConfig("enable_replace_from_json_with_get_json_object"),
+      RuntimeConfig("enable_replace_from_json_with_get_json_object"),
       defaultValue = true
     )
   }
 
   def eliminateDeduplicateAggregateWithAnyJoin(): Boolean = {
     SparkEnv.get.conf.getBoolean(
-      CHConfig.runtimeConfig("eliminate_deduplicate_aggregate_with_any_join"),
+      RuntimeConfig("eliminate_deduplicate_aggregate_with_any_join"),
       defaultValue = true
     )
   }
 
   def enableSimplifySum(): Boolean = {
     SparkEnv.get.conf.getBoolean(
-      CHConfig.runtimeConfig("enable_simplify_sum"),
+      RuntimeConfig("enable_simplify_sum"),
       defaultValue = true
     )
   }
 
   def enableAggregateIfToFilter(): Boolean = {
     SparkEnv.get.conf.getBoolean(
-      CHConfig.runtimeConfig("enable_aggregate_if_to_filter"),
+      RuntimeConfig("enable_aggregate_if_to_filter"),
       defaultValue = true
     )
   }

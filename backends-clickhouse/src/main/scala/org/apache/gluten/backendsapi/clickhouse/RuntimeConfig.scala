@@ -16,15 +16,23 @@
  */
 package org.apache.gluten.backendsapi.clickhouse
 
+import org.apache.gluten.config.GlutenConfig
+
 import org.apache.spark.sql.internal.SQLConf
 
 object RuntimeConfig {
-  import CHConfig.runtimeConfig
-  import SQLConf._
+
+  private val RUNTIME_CONFIG = CHBackend.prefixOf(s"runtime_config")
+  private def buildConf(k: String) = GlutenConfig.buildConf(apply(k))
+
+  def get: RuntimeConfig = new RuntimeConfig(SQLConf.get)
+
+  /** CH configuration prefix at Java side */
+  def apply(key: String): String = s"$RUNTIME_CONFIG.$key"
 
   /** Clickhouse Configuration */
   val PATH =
-    buildConf(runtimeConfig("path"))
+    buildConf("path")
       .doc(
         "https://clickhouse.com/docs/en/operations/server-configuration-parameters/settings#path")
       .stringConf
@@ -32,15 +40,16 @@ object RuntimeConfig {
 
   // scalastyle:off line.size.limit
   val TMP_PATH =
-    buildConf(runtimeConfig("tmp_path"))
-      .doc("https://clickhouse.com/docs/en/operations/server-configuration-parameters/settings#tmp-path")
+    buildConf("tmp_path")
+      .doc(
+        "https://clickhouse.com/docs/en/operations/server-configuration-parameters/settings#tmp-path")
       .stringConf
       .createWithDefault("/tmp/libch")
   // scalastyle:on line.size.limit
 
   // scalastyle:off line.size.limit
   val LOGGER_LEVEL =
-    buildConf(runtimeConfig("logger.level"))
+    buildConf("logger.level")
       .doc(
         "https://clickhouse.com/docs/en/operations/server-configuration-parameters/settings#logger")
       .stringConf
@@ -49,14 +58,35 @@ object RuntimeConfig {
 
   /** Gluten Configuration */
   val USE_CURRENT_DIRECTORY_AS_TMP =
-    buildConf(runtimeConfig("use_current_directory_as_tmp"))
+    buildConf("use_current_directory_as_tmp")
       .doc("Use the current directory as the temporary directory.")
       .booleanConf
       .createWithDefault(false)
 
   val DUMP_PIPELINE =
-    buildConf(runtimeConfig("dump_pipeline"))
+    buildConf("dump_pipeline")
       .doc("Dump pipeline to file after execution")
       .booleanConf
       .createWithDefault(false)
+
+  val ENABLE_GLUTEN_LOCAL_FILE_CACHE =
+    buildConf("gluten_cache.local.enabled")
+      .internal()
+      .doc("Enable local cache for CH backend.")
+      .booleanConf
+      .createWithDefault(false)
+
+  // We can't use gluten_cache.local.enabled
+  // because FileCacheSettings doesn't contain this field.
+  // So we pass it to CH backend by runtime_config
+  val ENABLE_GLUTEN_LOCAL_FILE_CACHE_BACKEND =
+    buildConf("enable.gluten_cache.local")
+      .internal()
+      .doc("Enable local cache for CH backend.")
+      .booleanConf
+      .createWithDefault(false)
+}
+
+class RuntimeConfig(conf: SQLConf) extends GlutenConfig(conf) {
+  def enableGlutenLocalFileCache: Boolean = getConf(RuntimeConfig.ENABLE_GLUTEN_LOCAL_FILE_CACHE)
 }

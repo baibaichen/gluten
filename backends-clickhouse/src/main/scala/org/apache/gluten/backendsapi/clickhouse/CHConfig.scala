@@ -25,7 +25,7 @@ import org.apache.spark.sql.internal.SQLConf
 object CHConfig {
 
   private val RUNTIME_SETTINGS: String = CHBackend.prefixOf("runtime_settings")
-  private val RUNTIME_CONFIG = CHBackend.prefixOf(s"runtime_config")
+
   implicit class GlutenCHConf(conf: SparkConf) {
     def setCHSettings(settings: (String, String)*): SparkConf = {
       settings.foreach { case (k, v) => conf.set(runtimeSettings(k), v) }
@@ -38,18 +38,17 @@ object CHConfig {
     }
 
     def setCHConfig(config: (String, String)*): SparkConf = {
-      config.foreach { case (k, v) => conf.set(runtimeConfig(k), v) }
+      config.foreach { case (k, v) => conf.set(RuntimeConfig(k), v) }
       conf
     }
 
     def setCHConfig[T](k: String, v: T): SparkConf = {
-      conf.set(runtimeConfig(k), v.toString)
+      conf.set(RuntimeConfig(k), v.toString)
       conf
     }
   }
 
   /** CH configuration prefix at Java side */
-  def runtimeConfig(key: String): String = s"$RUNTIME_CONFIG.$key"
   def runtimeSettings(key: String): String = s"$RUNTIME_SETTINGS.$key"
 
   def startWithSettingsPrefix(key: String): Boolean = key.startsWith(RUNTIME_SETTINGS)
@@ -95,13 +94,6 @@ object CHConfig {
           + " will be rewritten to `to_date(stringType)`")
       .booleanConf
       .createWithDefault(true)
-
-  val ENABLE_GLUTEN_LOCAL_FILE_CACHE =
-    buildConf(runtimeConfig("gluten_cache.local.enabled"))
-      .internal()
-      .doc("Enable local cache for CH backend.")
-      .booleanConf
-      .createWithDefault(false)
 }
 
 class CHConfig(conf: SQLConf) extends GlutenConfig(conf) {
@@ -127,5 +119,4 @@ class CHConfig(conf: SQLConf) extends GlutenConfig(conf) {
   def enableCHRewriteDateConversion: Boolean =
     getConf(ENABLE_CH_REWRITE_DATE_CONVERSION)
 
-  def enableGlutenLocalFileCache: Boolean = getConf(ENABLE_GLUTEN_LOCAL_FILE_CACHE)
 }

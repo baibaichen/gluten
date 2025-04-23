@@ -135,7 +135,7 @@ class CHTransformerApi extends TransformerApi with Logging {
       }
     }
 
-    val hdfsConfigPrefix = CHConfig.runtimeConfig("hdfs")
+    val hdfsConfigPrefix = RuntimeConfig("hdfs")
     injectConfig("spark.hadoop.input.connect.timeout", s"$hdfsConfigPrefix.input_connect_timeout")
     injectConfig("spark.hadoop.input.read.timeout", s"$hdfsConfigPrefix.input_read_timeout")
     injectConfig("spark.hadoop.input.write.timeout", s"$hdfsConfigPrefix.input_write_timeout")
@@ -164,13 +164,13 @@ class CHTransformerApi extends TransformerApi with Logging {
       }
     }
 
-    if (nativeConfMap.containsKey(CHConfig.ENABLE_GLUTEN_LOCAL_FILE_CACHE.key)) {
+    if (nativeConfMap.containsKey(RuntimeConfig.ENABLE_GLUTEN_LOCAL_FILE_CACHE.key)) {
       // We can't use gluten_cache.local.enabled
       // because FileCacheSettings doesn't contain this field.
       nativeConfMap.put(
-        CHConfig.runtimeConfig("enable.gluten_cache.local"),
-        nativeConfMap.get(CHConfig.ENABLE_GLUTEN_LOCAL_FILE_CACHE.key))
-      nativeConfMap.remove(CHConfig.ENABLE_GLUTEN_LOCAL_FILE_CACHE.key)
+        RuntimeConfig.ENABLE_GLUTEN_LOCAL_FILE_CACHE_BACKEND.key,
+        nativeConfMap.get(RuntimeConfig.ENABLE_GLUTEN_LOCAL_FILE_CACHE.key))
+      nativeConfMap.remove(RuntimeConfig.ENABLE_GLUTEN_LOCAL_FILE_CACHE.key)
     }
   }
 

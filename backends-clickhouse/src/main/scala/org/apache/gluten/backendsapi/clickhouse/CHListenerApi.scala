@@ -87,13 +87,14 @@ class CHListenerApi extends ListenerApi with Logging {
       val executorLibPath = conf.get(GlutenConfig.GLUTEN_EXECUTOR_LIB_PATH.key, libPath)
       JniLibLoader.loadFromPath(executorLibPath)
     }
-    CHListenerApi.addShutdownHook
+    CHListenerApi.addShutdownHook()
     // Add configs
-    import org.apache.gluten.backendsapi.clickhouse.CHConfig._
-    conf.setCHConfig(
-      "timezone" -> conf.get("spark.sql.session.timeZone", TimeZone.getDefault.getID),
-      "local_engine.settings.log_processors_profiles" -> "true")
-    conf.setCHSettings("spark_version", SPARK_VERSION)
+    conf.set(
+      RuntimeConfig("timezone"),
+      conf.get("spark.sql.session.timeZone", TimeZone.getDefault.getID))
+    conf.set(RuntimeConfig("local_engine.settings.log_processors_profiles"), "true")
+    conf.set(CHConfig.runtimeSettings("spark_version"), SPARK_VERSION)
+
     if (!conf.contains(RuntimeSettings.ENABLE_MEMORY_SPILL_SCHEDULER.key)) {
       // Enable adaptive memory spill scheduler for native by default
       conf.set(
@@ -136,9 +137,9 @@ class CHListenerApi extends ListenerApi with Logging {
 }
 
 object CHListenerApi {
-  var initialized = false
+  private var initialized = false
 
-  def addShutdownHook: Unit = {
+  private def addShutdownHook(): Unit = {
     if (!initialized) {
       initialized = true
       SparkShutdownManagerUtil.addHookForLibUnloading(

@@ -16,9 +16,8 @@
  */
 package org.apache.gluten.utils
 
-import org.apache.gluten.backendsapi.clickhouse.CHConfig.GlutenCHConf
-
 import org.apache.spark.SparkConf
+import org.apache.spark.gluten.GlutenConfHelper
 
 import io.minio.{BucketExistsArgs, ListObjectsArgs, MakeBucketArgs, MinioClient, RemoveBucketArgs, RemoveObjectsArgs}
 import io.minio.messages.DeleteObject
@@ -29,7 +28,7 @@ import java.util
 
 import scala.collection.JavaConverters._
 
-class MinioTestHelper(TMP_PREFIX: String) {
+class MinioTestHelper(TMP_PREFIX: String) extends GlutenConfHelper {
 
   // MINIO parameters
   val MINIO_ENDPOINT: String = "http://127.0.0.1:9000/"

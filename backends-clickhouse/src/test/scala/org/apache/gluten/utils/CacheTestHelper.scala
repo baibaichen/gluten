@@ -16,16 +16,16 @@
  */
 package org.apache.gluten.utils
 
-import org.apache.gluten.backendsapi.clickhouse.CHConfig._
 import org.apache.gluten.backendsapi.clickhouse.RuntimeConfig
 import org.apache.gluten.execution.CHNativeCacheManager
 
 import org.apache.spark.SparkConf
+import org.apache.spark.gluten.GlutenConfHelper
 import org.apache.spark.sql.SparkSession
 
 import org.apache.hadoop.fs.Path
 
-class CacheTestHelper(val TMP_PREFIX: String) {
+class CacheTestHelper(val TMP_PREFIX: String) extends GlutenConfHelper {
 
   val LOCAL_CACHE_PATH = s"$TMP_PREFIX/local/cache"
   val CACHE_NAME = "gluten_cache"

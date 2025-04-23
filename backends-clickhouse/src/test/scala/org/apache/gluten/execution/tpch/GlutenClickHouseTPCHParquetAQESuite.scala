@@ -40,7 +40,6 @@ class GlutenClickHouseTPCHParquetAQESuite
 
   /** Run Gluten + ClickHouse Backend with SortShuffleManager */
   override protected def sparkConf: SparkConf = {
-    import org.apache.gluten.backendsapi.clickhouse.CHConfig._
 
     super.sparkConf
       .set("spark.shuffle.manager", "sort")
@@ -227,7 +226,7 @@ class GlutenClickHouseTPCHParquetAQESuite
             case h: CHShuffledHashJoinExecTransformer if h.joinType == LeftSemi => h
           }
           assertResult(1)(shuffledHashJoinExecs.size)
-          assertResult(BuildLeft)(shuffledHashJoinExecs(0).buildSide)
+          assertResult(BuildLeft)(shuffledHashJoinExecs.head.buildSide)
       }
     }
   }

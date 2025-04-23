@@ -67,7 +67,6 @@ class GlutenClickHouseExcelFormatSuite
   override protected def createTPCHNotNullTables(): Unit = {}
 
   override protected def sparkConf: SparkConf = {
-    import org.apache.gluten.backendsapi.clickhouse.CHConfig._
 
     super.sparkConf
       .set("spark.sql.adaptive.enabled", "true")

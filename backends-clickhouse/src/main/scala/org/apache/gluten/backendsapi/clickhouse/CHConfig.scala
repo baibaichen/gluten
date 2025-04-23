@@ -16,42 +16,14 @@
  */
 package org.apache.gluten.backendsapi.clickhouse
 
-import org.apache.gluten.config.{ConfigEntry, GlutenConfig}
+import org.apache.gluten.config.GlutenConfig
 
-import org.apache.spark.SparkConf
 import org.apache.spark.network.util.ByteUnit
 import org.apache.spark.sql.internal.SQLConf
 
 object CHConfig {
 
   private val RUNTIME_SETTINGS: String = CHBackend.prefixOf("runtime_settings")
-
-  implicit class GlutenCHConf(conf: SparkConf) {
-    def setCHSettings(settings: (String, String)*): SparkConf = {
-      settings.foreach { case (k, v) => conf.set(runtimeSettings(k), v) }
-      conf
-    }
-
-    def setCHSettings[T](k: String, v: T): SparkConf = {
-      conf.set(runtimeSettings(k), v.toString)
-      conf
-    }
-
-    def setCHConfig(config: (String, String)*): SparkConf = {
-      config.foreach { case (k, v) => conf.set(RuntimeConfig(k), v) }
-      conf
-    }
-
-    def setCHConfig[T](k: String, v: T): SparkConf = {
-      conf.set(RuntimeConfig(k), v.toString)
-      conf
-    }
-
-    def set[T](entry: ConfigEntry[T], v: T): SparkConf = {
-      conf.set(entry.key, entry.stringConverter(v))
-      conf
-    }
-  }
 
   /** CH configuration prefix at Java side */
   def runtimeSettings(key: String): String = s"$RUNTIME_SETTINGS.$key"

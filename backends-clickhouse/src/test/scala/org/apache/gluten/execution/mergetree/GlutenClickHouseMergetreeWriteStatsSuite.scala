@@ -17,7 +17,6 @@
 package org.apache.gluten.execution.mergetree
 
 import org.apache.gluten.backendsapi.clickhouse.{CHConfig, RuntimeConfig}
-import org.apache.gluten.backendsapi.clickhouse.CHConfig.GlutenCHConf
 import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.execution.{FileSourceScanExecTransformer, GlutenClickHouseTPCDSAbstractSuite}
 

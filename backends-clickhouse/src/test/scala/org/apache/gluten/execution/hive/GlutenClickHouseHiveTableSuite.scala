@@ -41,7 +41,6 @@ class GlutenClickHouseHiveTableSuite
   with AdaptiveSparkPlanHelper {
 
   override protected def sparkConf: SparkConf = {
-    import org.apache.gluten.backendsapi.clickhouse.CHConfig._
 
     new SparkConf()
       .set("spark.plugins", "org.apache.gluten.GlutenPlugin")
@@ -1365,7 +1364,7 @@ class GlutenClickHouseHiveTableSuite
     val insert_sql = "insert into test_tbl_7502 values(1, cast('2024-10-09 20:00:00' as timestamp))"
     val select_sql = "select * from test_tbl_7502"
     spark.sql(create_table_sql)
-    spark.sql(insert_sql);
+    spark.sql(insert_sql)
     compareResultsAgainstVanillaSpark(select_sql, compareResult = true, _ => {})
     spark.sql("drop table test_tbl_7502")
   }
@@ -1629,7 +1628,7 @@ class GlutenClickHouseHiveTableSuite
       val create_table = create_table_sqls(i)
       spark.sql(create_table)
       spark.sql(insert_sql.format(table_name))
-      withSQLConf(("spark.sql.hive.convertMetastoreParquet" -> "false")) {
+      withSQLConf("spark.sql.hive.convertMetastoreParquet" -> "false") {
         compareResultsAgainstVanillaSpark(
           select_sql.format(table_name),
           compareResult = true,

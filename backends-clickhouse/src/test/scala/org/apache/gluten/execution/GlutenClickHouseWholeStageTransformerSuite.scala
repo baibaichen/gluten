@@ -20,6 +20,7 @@ import org.apache.gluten.backendsapi.clickhouse.RuntimeConfig
 import org.apache.gluten.utils.{HDFSTestHelper, MinioTestHelper, UTSystemParameters}
 
 import org.apache.spark.{SPARK_VERSION_SHORT, SparkConf}
+import org.apache.spark.gluten.GlutenConfHelper
 
 import org.apache.commons.io.FileUtils
 import org.scalatest.Tag
@@ -29,7 +30,9 @@ import java.io.File
 // Some sqls' line length exceeds 100
 // scalastyle:off line.size.limit
 
-class GlutenClickHouseWholeStageTransformerSuite extends WholeStageTransformerSuite {
+class GlutenClickHouseWholeStageTransformerSuite
+  extends WholeStageTransformerSuite
+  with GlutenConfHelper {
 
   val DBL_EPSILON = 2.2204460492503131e-16
   val DBL_RELAX_EPSILON: Double = Math.pow(10, -11)
@@ -67,8 +70,6 @@ class GlutenClickHouseWholeStageTransformerSuite extends WholeStageTransformerSu
   }
 
   override protected def sparkConf: SparkConf = {
-    import org.apache.gluten.backendsapi.clickhouse.CHConfig._
-
     val conf = super.sparkConf
       .set("spark.gluten.sql.enable.native.validation", "false")
       .set("spark.sql.warehouse.dir", warehouse)

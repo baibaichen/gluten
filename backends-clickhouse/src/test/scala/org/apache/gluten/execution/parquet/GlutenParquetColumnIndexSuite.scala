@@ -110,8 +110,6 @@ class GlutenParquetColumnIndexSuite
     assertResult(scanOutput)(chFileScan.longMetric("numOutputRows").value)
   }
   override protected def sparkConf: SparkConf = {
-    import org.apache.gluten.backendsapi.clickhouse.CHConfig._
-
     super.sparkConf
       .set(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key, "false")
       .set(RuntimeConfig.USE_LOCAL_FORMAT, true)

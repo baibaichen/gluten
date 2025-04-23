@@ -20,10 +20,11 @@ package org.apache.gluten.execution.iceberg
 import com.google.common.base.Strings
 import org.apache.gluten.backendsapi.clickhouse.RuntimeConfig
 import org.apache.spark.SparkConf
+import org.apache.spark.gluten.GlutenConfHelper
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.execution.datasources.v2.clickhouse.ClickHouseConfig
 
-class ClickHouseIcebergHiveTableSupport {
+class ClickHouseIcebergHiveTableSupport extends GlutenConfHelper {
 
   private val sparkConf: SparkConf = new SparkConf()
 
@@ -32,7 +33,6 @@ class ClickHouseIcebergHiveTableSupport {
   def spark: SparkSession = _hiveSpark
 
   def initSparkConf(url: String, catalog: String, path: String): SparkConf = {
-    import org.apache.gluten.backendsapi.clickhouse.CHConfig._
 
     sparkConf
       .set("spark.plugins", "org.apache.gluten.GlutenPlugin")

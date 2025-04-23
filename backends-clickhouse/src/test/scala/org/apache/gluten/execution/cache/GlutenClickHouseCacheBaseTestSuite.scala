@@ -17,7 +17,7 @@
 package org.apache.gluten.execution.cache
 
 import org.apache.gluten.backendsapi.clickhouse.{CHBackend, RuntimeConfig}
-import org.apache.gluten.backendsapi.clickhouse.CHConfig._
+import org.apache.gluten.backendsapi.clickhouse.CHConfig.runtimeSettings
 import org.apache.gluten.execution.{FileSourceScanExecTransformer, GlutenClickHouseTPCHAbstractSuite}
 import org.apache.gluten.utils.CacheTestHelper
 

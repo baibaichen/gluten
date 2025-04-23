@@ -16,15 +16,14 @@
  */
 package org.apache.gluten.utils
 
-import org.apache.gluten.backendsapi.clickhouse.CHConfig.GlutenCHConf
-
 import org.apache.spark.SparkConf
+import org.apache.spark.gluten.GlutenConfHelper
 
 import org.apache.commons.io.FileUtils
 
 import java.io.File
 
-class HDFSTestHelper(TMP_PREFIX: String) {
+class HDFSTestHelper(TMP_PREFIX: String) extends GlutenConfHelper {
 
   // HDFS parameters
   val HDFS_CACHE_PATH = s"$TMP_PREFIX/hdfs/cache"

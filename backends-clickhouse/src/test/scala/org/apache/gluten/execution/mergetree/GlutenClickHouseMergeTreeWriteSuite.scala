@@ -16,7 +16,7 @@
  */
 package org.apache.gluten.execution.mergetree
 
-import org.apache.gluten.backendsapi.clickhouse.{CHConfig, RuntimeSettings}
+import org.apache.gluten.backendsapi.clickhouse.{CHBackend, CHConfig, RuntimeSettings}
 import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.execution._
 import org.apache.gluten.utils.Arm
@@ -1594,7 +1594,7 @@ class GlutenClickHouseMergeTreeWriteSuite
     // GLUTEN-7670: fix enable 'files.per.partition.threshold'
     withSQLConf(
       CHConfig.runtimeSettings("enabled_driver_filter_mergetree_index") -> "true",
-      CHConfig.prefixOf("files.per.partition.threshold") -> "10"
+      CHBackend.prefixOf("files.per.partition.threshold") -> "10"
     ) {
       runTPCHQueryBySQL(6, q6("lineitem_mergetree_pk_pruning_by_driver")) {
         df =>

@@ -16,6 +16,7 @@
  */
 package org.apache.gluten.execution.cache
 
+import org.apache.gluten.backendsapi.clickhouse.CHBackend
 import org.apache.gluten.backendsapi.clickhouse.CHConfig._
 import org.apache.gluten.execution.{FileSourceScanExecTransformer, GlutenClickHouseTPCHAbstractSuite}
 import org.apache.gluten.utils.CacheTestHelper
@@ -54,7 +55,7 @@ abstract class GlutenClickHouseCacheBaseTestSuite
       .set("spark.sql.autoBroadcastJoinThreshold", "10MB")
       .set("spark.sql.adaptive.enabled", "true")
       .setCHConfig("use_local_format", true)
-      .set(prefixOf("shuffle.hash.algorithm"), "sparkMurmurHash3_32")
+      .set(CHBackend.prefixOf("shuffle.hash.algorithm"), "sparkMurmurHash3_32")
       .set("spark.sql.adaptive.enabled", "false")
 
     // Apply cache configuration using the helper

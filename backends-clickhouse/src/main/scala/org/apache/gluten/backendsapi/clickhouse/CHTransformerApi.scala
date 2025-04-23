@@ -95,13 +95,13 @@ class CHTransformerApi extends TransformerApi with Logging {
       nativeConfMap: util.Map[String, String],
       backendPrefix: String): Unit = {
 
-    require(backendPrefix == CHConfig.CONF_PREFIX)
+    require(backendPrefix == CHBackend.CONF_PREFIX)
     if (nativeConfMap.getOrDefault("spark.memory.offHeap.enabled", "false").toBoolean) {
       val offHeapSize =
         nativeConfMap.getOrDefault("spark.gluten.memory.offHeap.size.in.bytes", "0").toLong
       if (offHeapSize > 0) {
 
-        // Only set default max_bytes_before_external_group_by for CH when it is not set explicitly.
+        // Set the default max_bytes_before_external_group_by for CH when it is not set explicitly.
         val groupBySpillKey = CHConfig.runtimeSettings("max_bytes_before_external_group_by")
         if (!nativeConfMap.containsKey(groupBySpillKey)) {
           val groupBySpillValue = offHeapSize * 0.5
@@ -114,7 +114,7 @@ class CHTransformerApi extends TransformerApi with Logging {
           nativeConfMap.put(maxMemoryUsageKey, maxMemoryUsageValue.toString)
         }
 
-        // Only set default max_bytes_before_external_join for CH when join_algorithm is grace_hash
+        // Set the default max_bytes_before_external_join for CH when join_algorithm is grace_hash.
         val joinAlgorithmKey = CHConfig.runtimeSettings("join_algorithm")
         if (
           nativeConfMap.containsKey(joinAlgorithmKey) &&

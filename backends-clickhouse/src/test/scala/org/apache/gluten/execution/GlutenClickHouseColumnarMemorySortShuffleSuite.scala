@@ -16,7 +16,7 @@
  */
 package org.apache.gluten.execution
 
-import org.apache.gluten.backendsapi.clickhouse.CHConfig
+import org.apache.gluten.backendsapi.clickhouse.CHBackend
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
@@ -37,7 +37,7 @@ class GlutenClickHouseColumnarMemorySortShuffleSuite
       .set("spark.sql.shuffle.partitions", "5")
       .set("spark.sql.autoBroadcastJoinThreshold", "10MB")
       .set("spark.sql.adaptive.enabled", "true")
-      .set(CHConfig.prefixOf("forceMemorySortShuffle"), "true")
+      .set(CHBackend.prefixOf("forceMemorySortShuffle"), "true")
 
     // TODO: forceMemorySortShuffle
   }

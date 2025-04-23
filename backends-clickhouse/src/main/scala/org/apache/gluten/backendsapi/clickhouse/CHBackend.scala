@@ -53,7 +53,7 @@ import scala.util.control.Breaks.{break, breakable}
 
 class CHBackend extends SubstraitBackend {
   import CHBackend._
-  override def name(): String = CHConfig.BACKEND_NAME
+  override def name(): String = CHBackend.BACKEND_NAME
   override def buildInfo(): BuildInfo =
     BuildInfo("ClickHouse", CH_BRANCH, CH_COMMIT, "UNKNOWN")
   override def iteratorApi(): IteratorApi = new CHIteratorApi
@@ -69,6 +69,10 @@ class CHBackend extends SubstraitBackend {
 }
 
 object CHBackend {
+  private[clickhouse] val BACKEND_NAME: String = "ch"
+  private[clickhouse] val CONF_PREFIX: String = GlutenConfig.prefixOf(BACKEND_NAME)
+  def prefixOf(key: String): String = s"$CONF_PREFIX.$key"
+
   private class ConvFunc() extends ConventionFunc.Override {
     override def batchTypeOf: PartialFunction[SparkPlan, Convention.BatchType] = {
       case a: AdaptiveSparkPlanExec if a.supportsColumnar =>
@@ -83,14 +87,14 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
   private val GLUTEN_CLICKHOUSE_SEP_SCAN_RDD = "spark.gluten.sql.columnar.separate.scan.rdd.for.ch"
   private val GLUTEN_CLICKHOUSE_SEP_SCAN_RDD_DEFAULT = "false"
 
-  // experimental: when the files count per partition exceeds this threshold,
+  // experimental: when the files count per partition exceed this threshold,
   // it will put the files into one partition.
   val GLUTEN_CLICKHOUSE_FILES_PER_PARTITION_THRESHOLD: String =
-    CHConfig.prefixOf("files.per.partition.threshold")
+    CHBackend.prefixOf("files.per.partition.threshold")
   val GLUTEN_CLICKHOUSE_FILES_PER_PARTITION_THRESHOLD_DEFAULT = "-1"
 
   private val GLUTEN_CLICKHOUSE_CUSTOMIZED_SHUFFLE_CODEC_ENABLE: String =
-    CHConfig.prefixOf("customized.shuffle.codec.enable")
+    CHBackend.prefixOf("customized.shuffle.codec.enable")
   private val GLUTEN_CLICKHOUSE_CUSTOMIZED_SHUFFLE_CODEC_ENABLE_DEFAULT = false
   lazy val useCustomizedShuffleCodec: Boolean = SparkEnv.get.conf.getBoolean(
     CHBackendSettings.GLUTEN_CLICKHOUSE_CUSTOMIZED_SHUFFLE_CODEC_ENABLE,
@@ -98,7 +102,7 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
   )
 
   private val GLUTEN_CLICKHOUSE_CUSTOMIZED_BUFFER_SIZE: String =
-    CHConfig.prefixOf("customized.buffer.size")
+    CHBackend.prefixOf("customized.buffer.size")
   private val GLUTEN_CLICKHOUSE_CUSTOMIZED_BUFFER_SIZE_DEFAULT = 4096
   lazy val customizeBufferSize: Int = SparkEnv.get.conf.getInt(
     CHBackendSettings.GLUTEN_CLICKHOUSE_CUSTOMIZED_BUFFER_SIZE,
@@ -106,7 +110,7 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
   )
 
   val GLUTEN_CLICKHOUSE_BROADCAST_CACHE_EXPIRED_TIME: String =
-    CHConfig.prefixOf("broadcast.cache.expired.time")
+    CHBackend.prefixOf("broadcast.cache.expired.time")
   // unit: SECONDS, default 1 day
   val GLUTEN_CLICKHOUSE_BROADCAST_CACHE_EXPIRED_TIME_DEFAULT: Int = 86400
 
@@ -114,7 +118,7 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
 
   // The algorithm for hash partition of the shuffle
   private val GLUTEN_CLICKHOUSE_SHUFFLE_HASH_ALGORITHM: String =
-    CHConfig.prefixOf("shuffle.hash.algorithm")
+    CHBackend.prefixOf("shuffle.hash.algorithm")
   // valid values are: cityHash64 or sparkMurmurHash3_32
   private val GLUTEN_CLICKHOUSE_SHUFFLE_HASH_ALGORITHM_DEFAULT = "sparkMurmurHash3_32"
   def shuffleHashAlgorithm: String = {
@@ -129,7 +133,7 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
     }
   }
 
-  private val GLUTEN_CLICKHOUSE_AFFINITY_MODE: String = CHConfig.prefixOf("affinity.mode")
+  private val GLUTEN_CLICKHOUSE_AFFINITY_MODE: String = CHBackend.prefixOf("affinity.mode")
   val SOFT: String = "soft"
   val FORCE: String = "force"
   private val GLUTEN_CLICKHOUSE_AFFINITY_MODE_DEFAULT = SOFT
@@ -141,30 +145,30 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
     CHConfig.runtimeConfig("max_source_concatenate_bytes")
   private val GLUTEN_MAX_SHUFFLE_READ_BYTES_DEFAULT = GLUTEN_MAX_BLOCK_SIZE_DEFAULT * 256
 
-  val GLUTEN_AQE_PROPAGATEEMPTY: String = CHConfig.prefixOf("aqe.propagate.empty.relation")
+  val GLUTEN_AQE_PROPAGATEEMPTY: String = CHBackend.prefixOf("aqe.propagate.empty.relation")
 
-  val GLUTEN_CLICKHOUSE_DELTA_SCAN_CACHE_SIZE: String = CHConfig.prefixOf("deltascan.cache.size")
+  val GLUTEN_CLICKHOUSE_DELTA_SCAN_CACHE_SIZE: String = CHBackend.prefixOf("deltascan.cache.size")
   val GLUTEN_CLICKHOUSE_ADDFILES_TO_MTPS_CACHE_SIZE: String =
-    CHConfig.prefixOf("addfiles.to.mtps.cache.size")
+    CHBackend.prefixOf("addfiles.to.mtps.cache.size")
   val GLUTEN_CLICKHOUSE_TABLE_PATH_TO_MTPS_CACHE_SIZE: String =
-    CHConfig.prefixOf("table.path.to.mtps.cache.size")
+    CHBackend.prefixOf("table.path.to.mtps.cache.size")
 
   val GLUTEN_CLICKHOUSE_DELTA_METADATA_OPTIMIZE: String =
-    CHConfig.prefixOf("delta.metadata.optimize")
+    CHBackend.prefixOf("delta.metadata.optimize")
   val GLUTEN_CLICKHOUSE_DELTA_METADATA_OPTIMIZE_DEFAULT_VALUE: String = "true"
 
   val GLUTEN_CLICKHOUSE_CONVERT_LEFT_ANTI_SEMI_TO_RIGHT: String =
-    CHConfig.prefixOf("convert.left.anti_semi.to.right")
+    CHBackend.prefixOf("convert.left.anti_semi.to.right")
   val GLUTEN_CLICKHOUSE_CONVERT_LEFT_ANTI_SEMI_TO_RIGHT_DEFAULT_VALUE: String = "false"
 
   val GLUTEN_ENABLE_COALESCE_AGGREGATION_UNION: String =
-    CHConfig.prefixOf("enable.coalesce.aggregation.union")
+    CHBackend.prefixOf("enable.coalesce.aggregation.union")
   val GLUTEN_ENABLE_COALESCE_PROJECT_UNION: String =
-    CHConfig.prefixOf("enable.coalesce.project.union")
+    CHBackend.prefixOf("enable.coalesce.project.union")
   val GLUTEN_JOIN_AGGREGATE_TO_AGGREGATE_UNION: String =
-    CHConfig.prefixOf("join.aggregate.to.aggregate.union")
+    CHBackend.prefixOf("join.aggregate.to.aggregate.union")
   val GLUTEN_ELIMINATE_DEDUPLICATE_AGGREGATE_WITH_ANY_JOIN: String =
-    CHConfig.prefixOf("eliminate_deduplicate_aggregate_with_any_join")
+    CHBackend.prefixOf("eliminate_deduplicate_aggregate_with_any_join")
 
   def affinityMode: String = {
     SparkEnv.get.conf
@@ -373,7 +377,7 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
   // for example, select a, b, sum(c+d) from t group by a, b with cube
   def enablePushdownPreProjectionAheadExpand(): Boolean = {
     SparkEnv.get.conf.getBoolean(
-      CHConfig.prefixOf("enable_pushdown_preprojection_ahead_expand"),
+      CHBackend.prefixOf("enable_pushdown_preprojection_ahead_expand"),
       defaultValue = true
     )
   }

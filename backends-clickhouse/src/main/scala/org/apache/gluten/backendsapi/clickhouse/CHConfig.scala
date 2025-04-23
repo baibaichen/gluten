@@ -23,10 +23,9 @@ import org.apache.spark.network.util.ByteUnit
 import org.apache.spark.sql.internal.SQLConf
 
 object CHConfig {
-  private[clickhouse] val BACKEND_NAME: String = "ch"
-  private[clickhouse] val CONF_PREFIX: String = GlutenConfig.prefixOf(BACKEND_NAME)
-  private val RUNTIME_SETTINGS: String = s"$CONF_PREFIX.runtime_settings"
-  private val RUNTIME_CONFIG = s"$CONF_PREFIX.runtime_config"
+
+  private val RUNTIME_SETTINGS: String = CHBackend.prefixOf("runtime_settings")
+  private val RUNTIME_CONFIG = CHBackend.prefixOf(s"runtime_config")
   implicit class GlutenCHConf(conf: SparkConf) {
     def setCHSettings(settings: (String, String)*): SparkConf = {
       settings.foreach { case (k, v) => conf.set(runtimeSettings(k), v) }
@@ -50,7 +49,6 @@ object CHConfig {
   }
 
   /** CH configuration prefix at Java side */
-  def prefixOf(key: String): String = s"$CONF_PREFIX.$key"
   def runtimeConfig(key: String): String = s"$RUNTIME_CONFIG.$key"
   def runtimeSettings(key: String): String = s"$RUNTIME_SETTINGS.$key"
 

@@ -56,8 +56,8 @@ class GlutenClickHouseMergeTreeOptimizeSuite
       .set("spark.sql.adaptive.enabled", "true")
       .set(RuntimeConfig.LOGGER_LEVEL.key, "error")
       .set(GlutenConfig.NATIVE_WRITER_ENABLED.key, "true")
-      .set(CHConfig.ENABLE_ONEPIPELINE_MERGETREE_WRITE.key, spark35.toString)
-      .set(RuntimeSettings.MIN_INSERT_BLOCK_SIZE_ROWS.key, "10000")
+      .set(CHConfig.ENABLE_ONEPIPELINE_MERGETREE_WRITE, spark35)
+      .set(RuntimeSettings.MIN_INSERT_BLOCK_SIZE_ROWS, 10000)
       .set(
         "spark.databricks.delta.retentionDurationCheck.enabled",
         "false"

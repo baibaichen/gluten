@@ -16,22 +16,24 @@
  */
 package org.apache.spark.gluten
 
-import org.apache.gluten.backendsapi.clickhouse.CHConfig.runtimeSettings
+import org.apache.gluten.backendsapi.clickhouse.CHConfig
 import org.apache.gluten.backendsapi.clickhouse.RuntimeConfig
-import org.apache.gluten.config.ConfigEntry
 
 import org.apache.spark.SparkConf
+
+import org.apache.gluten
+import org.apache.spark
 
 trait GlutenConfHelper {
 
   implicit class GlutenCHConf(conf: SparkConf) {
     def setCHSettings(settings: (String, String)*): SparkConf = {
-      settings.foreach { case (k, v) => conf.set(runtimeSettings(k), v) }
+      settings.foreach { case (k, v) => conf.set(CHConfig.runtimeSettings(k), v) }
       conf
     }
 
     def setCHSettings[T](k: String, v: T): SparkConf = {
-      conf.set(runtimeSettings(k), v.toString)
+      conf.set(CHConfig.runtimeSettings(k), v.toString)
       conf
     }
 
@@ -45,7 +47,12 @@ trait GlutenConfHelper {
       conf
     }
 
-    def set[T](entry: ConfigEntry[T], v: T): SparkConf = {
+    def set[T](entry: gluten.config.ConfigEntry[T], v: T): SparkConf = {
+      conf.set(entry.key, entry.stringConverter(v))
+      conf
+    }
+
+    def set[T](entry: spark.internal.config.ConfigEntry[T], v: T): SparkConf = {
       conf.set(entry.key, entry.stringConverter(v))
       conf
     }

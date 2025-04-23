@@ -52,7 +52,7 @@ class GlutenClickHouseMergetreeWriteStatsSuite
       .set(RuntimeConfig.LOGGER_LEVEL.key, "error")
       .set(GlutenConfig.NATIVE_WRITER_ENABLED.key, "true")
       .setCHSettings("mergetree.merge_after_insert", false)
-      .set(CHConfig.ENABLE_ONEPIPELINE_MERGETREE_WRITE.key, spark35.toString)
+      .set(CHConfig.ENABLE_ONEPIPELINE_MERGETREE_WRITE, spark35)
   }
 
   override protected def beforeEach(): Unit = {

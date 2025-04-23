@@ -73,8 +73,8 @@ class GlutenClickHouseWholeStageTransformerSuite extends WholeStageTransformerSu
       .set("spark.gluten.sql.enable.native.validation", "false")
       .set("spark.sql.warehouse.dir", warehouse)
       .setCHConfig("user_defined_path", "/tmp/user_defined")
-      .set(RuntimeConfig.PATH.key, UTSystemParameters.diskOutputDataPath)
-      .set(RuntimeConfig.TMP_PATH.key, s"/tmp/libch/$SPARK_DIR_NAME")
+      .set(RuntimeConfig.PATH, UTSystemParameters.diskOutputDataPath)
+      .set(RuntimeConfig.TMP_PATH, s"/tmp/libch/$SPARK_DIR_NAME")
     if (UTSystemParameters.testMergeTreeOnObjectStorage) {
       minioHelper.setHadoopFileSystemConfig(conf)
       minioHelper.setObjectStoreConfig(conf, BUCKET_NAME)

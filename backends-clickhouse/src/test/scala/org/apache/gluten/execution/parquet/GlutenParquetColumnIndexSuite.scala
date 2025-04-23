@@ -16,6 +16,7 @@
  */
 package org.apache.gluten.execution.parquet
 
+import org.apache.gluten.backendsapi.clickhouse.RuntimeConfig
 import org.apache.gluten.execution.{FileSourceScanExecTransformer, GlutenClickHouseWholeStageTransformerSuite}
 import org.apache.gluten.test.GlutenSQLTestUtils
 import org.apache.gluten.utils.UTSystemParameters
@@ -113,6 +114,6 @@ class GlutenParquetColumnIndexSuite
 
     super.sparkConf
       .set(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key, "false")
-      .setCHConfig("use_local_format", true)
+      .set(RuntimeConfig.USE_LOCAL_FORMAT, true)
   }
 }

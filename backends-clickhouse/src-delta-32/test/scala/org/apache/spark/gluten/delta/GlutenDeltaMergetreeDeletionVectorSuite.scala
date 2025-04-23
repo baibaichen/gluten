@@ -34,8 +34,6 @@ class GlutenDeltaMergetreeDeletionVectorSuite
   override protected val tpchQueries: String = rootPath + "queries/tpch-queries-ch"
   override protected val queriesResults: String = rootPath + "mergetree-queries-output"
 
-  // import org.apache.gluten.backendsapi.clickhouse.CHConfig._
-
   /** Run Gluten + ClickHouse Backend with SortShuffleManager */
   override protected def sparkConf: SparkConf = {
     super.sparkConf

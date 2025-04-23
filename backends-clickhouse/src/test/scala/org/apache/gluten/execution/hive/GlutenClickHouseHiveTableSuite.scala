@@ -16,6 +16,7 @@
  */
 package org.apache.gluten.execution.hive
 
+import org.apache.gluten.backendsapi.clickhouse.RuntimeConfig
 import org.apache.gluten.execution.{FileSourceScanExecTransformer, GlutenClickHouseWholeStageTransformerSuite, ProjectExecTransformer, TransformSupport}
 import org.apache.gluten.test.AllDataTypesWithComplexType
 
@@ -63,7 +64,7 @@ class GlutenClickHouseHiveTableSuite
         this.getClass.getResource("/").getPath + "tests-working-home/spark-warehouse")
       .set("spark.hive.exec.dynamic.partition.mode", "nonstrict")
       .set("spark.gluten.supported.hive.udfs", "my_add")
-      .setCHConfig("use_local_format", true)
+      .set(RuntimeConfig.USE_LOCAL_FORMAT, true)
       .set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
       .set(
         "spark.sql.catalog.spark_catalog",

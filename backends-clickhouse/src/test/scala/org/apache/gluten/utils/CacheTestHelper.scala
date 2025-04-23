@@ -33,7 +33,7 @@ class CacheTestHelper(val TMP_PREFIX: String) {
   /** Configure SparkConf with cache-related settings */
   def setCacheConfig(conf: SparkConf): SparkConf = {
     conf
-      .set(RuntimeConfig.ENABLE_GLUTEN_LOCAL_FILE_CACHE.key, "true")
+      .set(RuntimeConfig.ENABLE_GLUTEN_LOCAL_FILE_CACHE, true)
       .setCHConfig("gluten_cache.local.name", CACHE_NAME)
       .setCHConfig("gluten_cache.local.path", LOCAL_CACHE_PATH)
       .setCHConfig("gluten_cache.local.max_size", "10Gi")

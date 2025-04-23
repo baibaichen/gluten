@@ -16,7 +16,7 @@
  */
 package org.apache.gluten.backendsapi.clickhouse
 
-import org.apache.gluten.config.GlutenConfig
+import org.apache.gluten.config.{ConfigEntry, GlutenConfig}
 
 import org.apache.spark.SparkConf
 import org.apache.spark.network.util.ByteUnit
@@ -44,6 +44,11 @@ object CHConfig {
 
     def setCHConfig[T](k: String, v: T): SparkConf = {
       conf.set(RuntimeConfig(k), v.toString)
+      conf
+    }
+
+    def set[T](entry: ConfigEntry[T], v: T): SparkConf = {
+      conf.set(entry.key, entry.stringConverter(v))
       conf
     }
   }

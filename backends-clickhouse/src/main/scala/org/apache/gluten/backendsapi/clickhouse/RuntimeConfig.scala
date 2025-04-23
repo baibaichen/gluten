@@ -85,6 +85,12 @@ object RuntimeConfig {
       .doc("Enable local cache for CH backend.")
       .booleanConf
       .createWithDefault(false)
+
+  val USE_LOCAL_FORMAT =
+    buildConf("use_local_format")
+      .doc("Use `VectorizedParquetRecordReader` to decode parquet format.")
+      .booleanConf
+      .createWithDefault(false)
 }
 
 class RuntimeConfig(conf: SQLConf) extends GlutenConfig(conf) {

@@ -18,6 +18,7 @@
 package org.apache.gluten.execution.iceberg
 
 import com.google.common.base.Strings
+import org.apache.gluten.backendsapi.clickhouse.RuntimeConfig
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.execution.datasources.v2.clickhouse.ClickHouseConfig
@@ -57,7 +58,7 @@ class ClickHouseIcebergHiveTableSupport {
       .set("spark.memory.offHeap.size", "2g")
       .set("spark.unsafe.exceptionOnMemoryLeak", "true")
       .set("spark.sql.autoBroadcastJoinThreshold", "-1")
-      .setCHConfig("use_local_format", true)
+      .set(RuntimeConfig.USE_LOCAL_FORMAT, true)
       .set("spark.sql.extensions",
         "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
       .set("spark.sql.catalog.spark_catalog", "org.apache.iceberg.spark.SparkSessionCatalog")

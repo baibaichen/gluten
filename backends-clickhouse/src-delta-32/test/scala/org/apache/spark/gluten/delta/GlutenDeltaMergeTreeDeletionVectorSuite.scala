@@ -16,14 +16,11 @@
  */
 package org.apache.spark.gluten.delta
 
-import org.apache.gluten.execution.CreateMergeTreeSuite
+import org.apache.gluten.execution.ParquetSuite
 
 import org.apache.spark.SparkConf
 
-// Some sqls' line length exceeds 100
-// scalastyle:off line.size.limit
-
-class GlutenDeltaMergeTreeDeletionVectorSuite extends CreateMergeTreeSuite {
+class GlutenDeltaMergeTreeDeletionVectorSuite extends ParquetSuite {
 
   /** Run Gluten + ClickHouse Backend with SortShuffleManager */
   override protected def sparkConf: SparkConf = {
@@ -36,6 +33,8 @@ class GlutenDeltaMergeTreeDeletionVectorSuite extends CreateMergeTreeSuite {
       .set("spark.sql.files.maxPartitionBytes", "20000000")
       .set("spark.sql.storeAssignmentPolicy", "legacy")
       .set("spark.databricks.delta.retentionDurationCheck.enabled", "false")
+      .set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+      .set("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
   }
 
   test("Gluten-9334: column `_tmp_metadata_row_index` and `file_path` not found") {
@@ -50,7 +49,6 @@ class GlutenDeltaMergeTreeDeletionVectorSuite extends CreateMergeTreeSuite {
           spark.sql(s)
 
           spark.sql(s"insert into table $tableName select * from lineitem ")
-
           val df = sql(s"""
                           | select
                           |   _metadata.file_path,
@@ -58,10 +56,8 @@ class GlutenDeltaMergeTreeDeletionVectorSuite extends CreateMergeTreeSuite {
                           | from $tableName
                           | limit 1
                           |""".stripMargin)
-
           checkFallbackOperators(df, 0)
       }
     }
   }
 }
-// scalastyle:off line.size.limit

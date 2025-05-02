@@ -28,12 +28,13 @@ class DDLBuilder private (
     var tableKey: Option[String] = None,
     var clusterKey: Option[String] = None,
     var numberBuckets: Option[Int] = None,
-    var sortByOfBuckets: Seq[String] = Seq.empty
+    var sortByOfBuckets: Seq[String] = Seq.empty,
+    var partitionCols: Seq[String] = Seq.empty
 ) {
   def this(schema: TPCHCHSchema, tableName: String, format: String, location: String) =
     this(schema, tableName, format, location, true)
 
-  def withIsNull(isNull: Boolean): DDLBuilder = {
+  def nullable(isNull: Boolean): DDLBuilder = {
     this.isNull = isNull
     this
   }
@@ -60,6 +61,12 @@ class DDLBuilder private (
     if (sortByColsOfBuckets.nonEmpty) {
       this.sortByOfBuckets = sortByColsOfBuckets
     }
+    this
+  }
+
+  def withPartitionCols(partitionCols: Seq[String]): DDLBuilder = {
+    assert(partitionCols.nonEmpty)
+    this.partitionCols = partitionCols
     this
   }
 
@@ -100,7 +107,12 @@ class DDLBuilder private (
       }
       .getOrElse("")
 
-    s"$tableDefinition$cluster$tblProperties"
+    val partition = if (partitionCols.nonEmpty) {
+      s"\nPARTITIONED BY (${partitionCols.mkString(", ")})"
+    } else {
+      ""
+    }
+    s"$tableDefinition$partition$cluster$tblProperties"
   }
 }
 

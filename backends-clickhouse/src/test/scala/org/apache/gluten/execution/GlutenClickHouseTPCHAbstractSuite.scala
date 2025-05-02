@@ -16,7 +16,7 @@
  */
 package org.apache.gluten.execution
 
-import org.apache.gluten.test.TPCHCHSchema
+import org.apache.gluten.test.{DDLBuilder, TPCHCHSchema}
 
 import org.apache.spark.{SparkConf, SparkEnv}
 import org.apache.spark.sql.DataFrame
@@ -44,7 +44,7 @@ trait TPCHDatabase extends SharedSparkSession with TPCHCHSchema with TestDatabas
         spark.sql(s"DROP TABLE IF EXISTS $table")
         val s = createTableBuilder(table, format, s"$tablePath/$table")
           .withProps(props)
-          .withIsNull(isNull)
+          .nullable(isNull)
           .build()
         spark.sql(s)
     }
@@ -299,6 +299,9 @@ abstract class GlutenClickHouseTPCHAbstractSuite
   val testCases: Seq[Int] = Seq.empty
   val testCasesWithConfig: Map[Int, Seq[(String, String)]] = Map.empty
   def setupTestCase(): Unit = {
+
+    // TODO: Ensure `testCases.nonEmpty || testCasesWithConfig.nonEmpty`
+
     testCases.foreach {
       num =>
         test(s"TPCH Q$num") {
@@ -339,11 +342,29 @@ abstract class GlutenClickHouseTPCHAbstractSuite
  * This test suite is designed to validate the creation of MergeTree tables in ClickHouse. The
  * source data, based on the TPCH schema, is stored in Parquet format files referenced through
  * external tables in the default database.
+ *
+ * TODO: Don't inherit from `GlutenClickHouseTPCHAbstractSuite` as it is not needed.
  */
 class CreateMergeTreeSuite
   extends GlutenClickHouseTPCHAbstractSuite
   with TPCHMergeTreeResult
-  with TPCHParquetSource {}
+  with TPCHParquetSource {
+
+  def createLineItem(
+      table: String,
+      path: String,
+      f: DDLBuilder => Unit = _ => (),
+      insertData: Boolean = true): Unit = {
+    val builder = createTableBuilder(table, "clickhouse", path).withTableKey("lineitem")
+    f(builder)
+    spark.sql(s"DROP TABLE IF EXISTS $table")
+    val s = builder.build()
+    spark.sql(s)
+    if (insertData) {
+      spark.sql(s"insert into table $table select * from lineitem")
+    }
+  }
+}
 
 /**
  * `MergeTreeSuite` extends GlutenClickHouseTPCHAbstractSuite and integrates functionality

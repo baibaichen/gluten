@@ -56,42 +56,12 @@ class GlutenClickHouseMergeTreeWriteSuite extends CreateMergeTreeSuite {
   }
 
   test("test mergetree table write") {
-    spark.sql(s"""
-                 |DROP TABLE IF EXISTS lineitem_mergetree;
-                 |""".stripMargin)
-
-    // write.format.default = mergetree
-    spark.sql(s"""
-                 |CREATE TABLE IF NOT EXISTS lineitem_mergetree
-                 |(
-                 | l_orderkey      bigint,
-                 | l_partkey       bigint,
-                 | l_suppkey       bigint,
-                 | l_linenumber    bigint,
-                 | l_quantity      double,
-                 | l_extendedprice double,
-                 | l_discount      double,
-                 | l_tax           double,
-                 | l_returnflag    string,
-                 | l_linestatus    string,
-                 | l_shipdate      date,
-                 | l_commitdate    date,
-                 | l_receiptdate   date,
-                 | l_shipinstruct  string,
-                 | l_shipmode      string,
-                 | l_comment       string
-                 |)
-                 |USING clickhouse
-                 |TBLPROPERTIES (write.format.default = 'mergetree')
-                 |LOCATION '$dataHome/lineitem_mergetree'
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 | insert into table lineitem_mergetree
-                 | select * from lineitem
-                 |""".stripMargin)
-
-    customCheckQuery(q1("lineitem_mergetree")) {
+    val table = "lineitem_mergetree"
+    createLineItem(
+      table,
+      s"$dataHome/$table",
+      _.withProps(Map("write.format.default" -> "'mergetree'")))
+    customCheckQuery(q1(table)) {
       df =>
         val plans = collect(df.queryExecution.executedPlan) {
           case f: FileSourceScanExecTransformer => f
@@ -128,320 +98,105 @@ class GlutenClickHouseMergeTreeWriteSuite extends CreateMergeTreeSuite {
   }
 
   test("test mergetree insert overwrite") {
+    val table = "lineitem_mergetree_insertoverwrite"
+    createLineItem(table, s"$dataHome/$table")
     spark.sql(s"""
-                 |DROP TABLE IF EXISTS lineitem_mergetree_insertoverwrite;
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 |CREATE TABLE IF NOT EXISTS lineitem_mergetree_insertoverwrite
-                 |(
-                 | l_orderkey      bigint,
-                 | l_partkey       bigint,
-                 | l_suppkey       bigint,
-                 | l_linenumber    bigint,
-                 | l_quantity      double,
-                 | l_extendedprice double,
-                 | l_discount      double,
-                 | l_tax           double,
-                 | l_returnflag    string,
-                 | l_linestatus    string,
-                 | l_shipdate      date,
-                 | l_commitdate    date,
-                 | l_receiptdate   date,
-                 | l_shipinstruct  string,
-                 | l_shipmode      string,
-                 | l_comment       string
-                 |)
-                 |USING clickhouse
-                 |LOCATION '$dataHome/lineitem_mergetree_insertoverwrite'
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 | insert into table lineitem_mergetree_insertoverwrite
-                 | select * from lineitem
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 | insert overwrite table lineitem_mergetree_insertoverwrite
+                 | insert overwrite table $table
                  | select * from lineitem where mod(l_orderkey,2) = 1
                  |""".stripMargin)
-    val sql2 =
-      s"""
-         | select count(*) from lineitem_mergetree_insertoverwrite
-         |
-         |""".stripMargin
     assertResult(300001)(
       // total rows should remain unchanged
-      spark.sql(sql2).collect().apply(0).get(0)
+      spark.sql(s"select count(*) from $table").collect().apply(0).get(0)
     )
   }
 
   test("test mergetree insert overwrite partitioned table with small table, static") {
-    spark.sql(s"""
-                 |DROP TABLE IF EXISTS lineitem_mergetree_insertoverwrite2;
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 |CREATE TABLE IF NOT EXISTS lineitem_mergetree_insertoverwrite2
-                 |(
-                 | l_orderkey      bigint,
-                 | l_partkey       bigint,
-                 | l_suppkey       bigint,
-                 | l_linenumber    bigint,
-                 | l_quantity      double,
-                 | l_extendedprice double,
-                 | l_discount      double,
-                 | l_tax           double,
-                 | l_returnflag    string,
-                 | l_linestatus    string,
-                 | l_shipdate      date,
-                 | l_commitdate    date,
-                 | l_receiptdate   date,
-                 | l_shipinstruct  string,
-                 | l_shipmode      string,
-                 | l_comment       string
-                 |)
-                 |USING clickhouse
-                 |PARTITIONED BY (l_shipdate)
-                 |LOCATION '$dataHome/lineitem_mergetree_insertoverwrite2'
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 | insert into table lineitem_mergetree_insertoverwrite2
-                 | select * from lineitem
-                 |""".stripMargin)
+    val table = "lineitem_mergetree_insertoverwrite2"
+    createLineItem(table, s"$dataHome/$table", _.withPartitionCols(Seq("l_shipdate")))
 
     spark.sql(
       s"""
-         | insert overwrite table lineitem_mergetree_insertoverwrite2
+         | insert overwrite table $table
          | select * from lineitem where l_shipdate BETWEEN date'1993-02-01' AND date'1993-02-10'
          |""".stripMargin)
-    val sql2 =
-      s"""
-         | select count(*) from lineitem_mergetree_insertoverwrite2
-         |
-         |""".stripMargin
     assertResult(2418)(
       // total rows should remain unchanged
-      spark.sql(sql2).collect().apply(0).get(0)
+      spark.sql(s"select count(*) from $table").collect().apply(0).get(0)
     )
   }
 
   test("test mergetree insert overwrite partitioned table with small table, dynamic") {
     withSQLConf(("spark.sql.sources.partitionOverwriteMode", "dynamic")) {
-      spark.sql(s"""
-                   |DROP TABLE IF EXISTS lineitem_mergetree_insertoverwrite3 PURGE;
-                   |""".stripMargin)
-
-      spark.sql(s"""
-                   |CREATE TABLE IF NOT EXISTS lineitem_mergetree_insertoverwrite3
-                   |(
-                   | l_orderkey      bigint,
-                   | l_partkey       bigint,
-                   | l_suppkey       bigint,
-                   | l_linenumber    bigint,
-                   | l_quantity      double,
-                   | l_extendedprice double,
-                   | l_discount      double,
-                   | l_tax           double,
-                   | l_returnflag    string,
-                   | l_linestatus    string,
-                   | l_shipdate      date,
-                   | l_commitdate    date,
-                   | l_receiptdate   date,
-                   | l_shipinstruct  string,
-                   | l_shipmode      string,
-                   | l_comment       string
-                   |)
-                   |USING clickhouse
-                   |PARTITIONED BY (l_shipdate)
-                   |LOCATION '$dataHome/lineitem_mergetree_insertoverwrite3'
-                   |""".stripMargin)
-
-      spark.sql(s"""
-                   | insert into table lineitem_mergetree_insertoverwrite3
-                   | select * from lineitem
-                   |""".stripMargin)
-
+      val table = "lineitem_mergetree_insertoverwrite3"
+      spark.sql(s"DROP TABLE IF EXISTS $table PURGE")
+      createLineItem(table, s"$dataHome/$table", _.withPartitionCols(Seq("l_shipdate")))
       spark.sql(
         s"""
-           | insert overwrite table lineitem_mergetree_insertoverwrite3
+           | insert overwrite table $table
            | select * from lineitem where l_shipdate BETWEEN date'1993-02-01' AND date'1993-02-10'
            |""".stripMargin)
-      val sql2 =
-        s"""
-           | select count(*) from lineitem_mergetree_insertoverwrite3
-           |
-           |""".stripMargin
       assertResult(600572)(
         // total rows should remain unchanged
-        spark.sql(sql2).collect().apply(0).get(0)
+        spark.sql(s"select count(*) from $table").collect().apply(0).get(0)
       )
     }
   }
 
   test("test mergetree table update") {
+    val table = "lineitem_mergetree_update"
+    createLineItem(table, s"$dataHome/$table")
     spark.sql(s"""
-                 |DROP TABLE IF EXISTS lineitem_mergetree_update;
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 |CREATE TABLE IF NOT EXISTS lineitem_mergetree_update
-                 |(
-                 | l_orderkey      bigint,
-                 | l_partkey       bigint,
-                 | l_suppkey       bigint,
-                 | l_linenumber    bigint,
-                 | l_quantity      double,
-                 | l_extendedprice double,
-                 | l_discount      double,
-                 | l_tax           double,
-                 | l_returnflag    string,
-                 | l_linestatus    string,
-                 | l_shipdate      date,
-                 | l_commitdate    date,
-                 | l_receiptdate   date,
-                 | l_shipinstruct  string,
-                 | l_shipmode      string,
-                 | l_comment       string
-                 |)
-                 |USING clickhouse
-                 |LOCATION '$dataHome/lineitem_mergetree_update'
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 | insert into table lineitem_mergetree_update
-                 | select * from lineitem
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 | update lineitem_mergetree_update set l_returnflag = 'Z' where l_orderkey = 12647
+                 | update $table set l_returnflag = 'Z' where l_orderkey = 12647
                  |""".stripMargin)
 
     {
-      val sql1 =
-        s"""
-           | select count(*) from lineitem_mergetree_update where l_returnflag = 'Z'
-           |
-           |""".stripMargin
-
-      val df = spark.sql(sql1)
       assertResult(1)(
         // in test data, there are only 1 row with l_orderkey = 12647
-        df.collect().apply(0).get(0)
+        spark.sql(s"select count(*) from $table where l_returnflag = 'Z'").collect().apply(0).get(0)
       )
     }
 
-    val sql2 =
-      s"""
-         | select count(*) from lineitem_mergetree_update
-         |
-         |""".stripMargin
     assertResult(600572)(
       // total rows should remain unchanged
-      spark.sql(sql2).collect().apply(0).get(0)
+      spark.sql(s"select count(*) from $table").collect().apply(0).get(0)
     )
   }
 
   test("test mergetree table delete") {
-    spark.sql(s"""
-                 |DROP TABLE IF EXISTS lineitem_mergetree_delete;
-                 |""".stripMargin)
+    val table = "lineitem_mergetree_delete"
+    createLineItem(table, s"$dataHome/$table")
 
     spark.sql(s"""
-                 |CREATE TABLE IF NOT EXISTS lineitem_mergetree_delete
-                 |(
-                 | l_orderkey      bigint,
-                 | l_partkey       bigint,
-                 | l_suppkey       bigint,
-                 | l_linenumber    bigint,
-                 | l_quantity      double,
-                 | l_extendedprice double,
-                 | l_discount      double,
-                 | l_tax           double,
-                 | l_returnflag    string,
-                 | l_linestatus    string,
-                 | l_shipdate      date,
-                 | l_commitdate    date,
-                 | l_receiptdate   date,
-                 | l_shipinstruct  string,
-                 | l_shipmode      string,
-                 | l_comment       string
-                 |)
-                 |USING clickhouse
-                 |LOCATION '$dataHome/lineitem_mergetree_delete'
+                 | delete from $table where l_orderkey = 12647
                  |""".stripMargin)
-
-    spark.sql(s"""
-                 | insert into table lineitem_mergetree_delete
-                 | select * from lineitem
-                 |""".stripMargin)
-    val df1 = spark.sql(s"""
-                           | delete from lineitem_mergetree_delete where l_orderkey = 12647
-                           |""".stripMargin)
 
     {
-      val df = spark.sql(s"""
-                            | select count(*) from lineitem_mergetree_delete
-                            |""".stripMargin)
       assertResult(600571)(
-        df.collect().apply(0).get(0)
+        spark.sql(s"select count(*) from $table").collect().apply(0).get(0)
       )
     }
 
     {
       spark.sql(s"""
-                   | delete from lineitem_mergetree_delete where mod(l_orderkey, 3) = 2
+                   | delete from $table where mod(l_orderkey, 3) = 2
                    |""".stripMargin)
-      val df3 = spark.sql(s"""
-                             | select count(*) from lineitem_mergetree_delete
-                             |""".stripMargin)
-      assertResult(400089)(df3.collect().apply(0).get(0))
+      assertResult(400089)(
+        spark.sql(s"select count(*) from $table").collect().apply(0).get(0)
+      )
     }
   }
 
   test("test mergetree table upsert") {
-    spark.sql(s"""
-                 |DROP TABLE IF EXISTS lineitem_mergetree_upsert;
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 |CREATE TABLE IF NOT EXISTS lineitem_mergetree_upsert
-                 |(
-                 | l_orderkey      bigint,
-                 | l_partkey       bigint,
-                 | l_suppkey       bigint,
-                 | l_linenumber    bigint,
-                 | l_quantity      double,
-                 | l_extendedprice double,
-                 | l_discount      double,
-                 | l_tax           double,
-                 | l_returnflag    string,
-                 | l_linestatus    string,
-                 | l_shipdate      date,
-                 | l_commitdate    date,
-                 | l_receiptdate   date,
-                 | l_shipinstruct  string,
-                 | l_shipmode      string,
-                 | l_comment       string
-                 |)
-                 |USING clickhouse
-                 |LOCATION '$dataHome/lineitem_mergetree_upsert'
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 | insert into table lineitem_mergetree_upsert
-                 | select * from lineitem
-                 |""".stripMargin)
+    val table = "lineitem_mergetree_upsert"
+    createLineItem(table, s"$dataHome/$table")
 
     {
-      val df0 = spark.sql(s"""
-                             | select count(*) from lineitem_mergetree_upsert
-                             |""".stripMargin)
-      assertResult(600572)(df0.collect().apply(0).get(0))
+      assertResult(600572)(
+        spark.sql(s"select count(*) from $table").collect().apply(0).get(0)
+      )
     }
 
-    upsertSourceTableAndCheck("lineitem_mergetree_upsert")
+    upsertSourceTableAndCheck(table)
   }
 
   private def upsertSourceTableAndCheck(tableName: String) = {
@@ -500,40 +255,15 @@ class GlutenClickHouseMergeTreeWriteSuite extends CreateMergeTreeSuite {
   }
 
   test("test mergetree write with orderby keys / primary keys") {
-    spark.sql(s"""
-                 |DROP TABLE IF EXISTS lineitem_mergetree_orderbykey;
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 |CREATE TABLE IF NOT EXISTS lineitem_mergetree_orderbykey
-                 |(
-                 | l_orderkey      bigint,
-                 | l_partkey       bigint,
-                 | l_suppkey       bigint,
-                 | l_linenumber    bigint,
-                 | l_quantity      double,
-                 | l_extendedprice double,
-                 | l_discount      double,
-                 | l_tax           double,
-                 | l_returnflag    string,
-                 | l_linestatus    string,
-                 | l_shipdate      date,
-                 | l_commitdate    date,
-                 | l_receiptdate   date,
-                 | l_shipinstruct  string,
-                 | l_shipmode      string,
-                 | l_comment       string
-                 |)
-                 |USING clickhouse
-                 |TBLPROPERTIES (orderByKey='l_shipdate,l_orderkey',
-                 |               primaryKey='l_shipdate')
-                 |LOCATION '$dataHome/lineitem_mergetree_orderbykey'
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 | insert into table lineitem_mergetree_orderbykey
-                 | select * from lineitem
-                 |""".stripMargin)
+    val table = "lineitem_mergetree_orderbykey"
+    createLineItem(
+      table,
+      s"$dataHome/$table",
+      _.withProps(
+        Map(
+          "orderByKey" -> "'l_shipdate,l_orderkey'",
+          "primaryKey" -> "'l_shipdate'"
+        )))
 
     customCheckQuery(q1("lineitem_mergetree_orderbykey")) {
       df =>
@@ -1710,64 +1440,30 @@ class GlutenClickHouseMergeTreeWriteSuite extends CreateMergeTreeSuite {
       })
   }
 
-  test("GLUTEN-6378: Support delta count optimizer for the MergeTree format") {
-    spark.sql(s"""
-                 |DROP TABLE IF EXISTS lineitem_mergetree_count_opti;
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 |CREATE TABLE IF NOT EXISTS lineitem_mergetree_count_opti
-                 |(
-                 | l_orderkey      bigint,
-                 | l_partkey       bigint,
-                 | l_suppkey       bigint,
-                 | l_linenumber    bigint,
-                 | l_quantity      double,
-                 | l_extendedprice double,
-                 | l_discount      double,
-                 | l_tax           double,
-                 | l_returnflag    string,
-                 | l_linestatus    string,
-                 | l_shipdate      date,
-                 | l_commitdate    date,
-                 | l_receiptdate   date,
-                 | l_shipinstruct  string,
-                 | l_shipmode      string,
-                 | l_comment       string
-                 |)
-                 |USING clickhouse
-                 |PARTITIONED BY (l_shipdate, l_returnflag)
-                 |TBLPROPERTIES (orderByKey='l_orderkey',
-                 |               primaryKey='l_orderkey')
-                 |LOCATION '$dataHome/lineitem_mergetree_count_opti'
-                 |""".stripMargin)
-
-    // dynamic partitions
-    spark.sql(s"""
-                 | insert into table lineitem_mergetree_count_opti
-                 | select * from lineitem
-                 |""".stripMargin)
+  testWithMinSparkVersion(
+    "GLUTEN-6378: Support delta count optimizer for the MergeTree format",
+    "3.3") {
+    val table = "lineitem_mergetree_count_opti"
+    createLineItem(
+      table,
+      s"$dataHome/$table",
+      _.withPartitionCols(Seq("l_shipdate", "l_returnflag"))
+        .withProps(
+          Map(
+            "orderByKey" -> "'l_orderkey'",
+            "primaryKey" -> "'l_orderkey'"
+          ))
+    )
 
     Seq("true", "false").foreach {
       skip =>
         withSQLConf("spark.databricks.delta.stats.skipping" -> skip) {
-          val sqlStr =
-            s"""
-               |SELECT
-               |    count(*) AS count_order
-               |FROM
-               |    lineitem_mergetree_count_opti
-               |""".stripMargin
-          runSql(sqlStr)(
+          runSql(s"SELECT  count(*) AS count_order FROM $table")(
             df => {
               val result = df.collect()
               assertResult(1)(result.length)
               assertResult("600572")(result(0).getLong(0).toString)
-
-              // Spark 3.2 + Delta 2.0 does not support this feature
-              if (!spark32) {
-                assert(df.queryExecution.executedPlan.isInstanceOf[LocalTableScanExec])
-              }
+              assert(df.queryExecution.executedPlan.isInstanceOf[LocalTableScanExec])
             })
         }
     }
@@ -1841,45 +1537,13 @@ class GlutenClickHouseMergeTreeWriteSuite extends CreateMergeTreeSuite {
   }
 
   test("GLUTEN-7358: Optimize the strategy of the partition split according to the files count") {
-    spark.sql(s"""
-                 |DROP TABLE IF EXISTS lineitem_split;
-                 |""".stripMargin)
-    spark.sql(s"""
-                 |CREATE TABLE IF NOT EXISTS lineitem_split
-                 |(
-                 | l_orderkey      bigint,
-                 | l_partkey       bigint,
-                 | l_suppkey       bigint,
-                 | l_linenumber    bigint,
-                 | l_quantity      double,
-                 | l_extendedprice double,
-                 | l_discount      double,
-                 | l_tax           double,
-                 | l_returnflag    string,
-                 | l_linestatus    string,
-                 | l_shipdate      date,
-                 | l_commitdate    date,
-                 | l_receiptdate   date,
-                 | l_shipinstruct  string,
-                 | l_shipmode      string,
-                 | l_comment       string
-                 |)
-                 |USING clickhouse
-                 |LOCATION '$dataHome/lineitem_split'
-                 |""".stripMargin)
-    spark.sql(s"""
-                 | insert into table lineitem_split
-                 | select * from lineitem
-                 |""".stripMargin)
+    val table = "lineitem_mergetree_partition_split"
+    createLineItem(table, s"$dataHome/$table")
     Seq(("-1", 3), ("3", 3), ("6", 1)).foreach(
       conf => {
         withSQLConf(
           "spark.gluten.sql.columnar.backend.ch.files.per.partition.threshold" -> conf._1) {
-          val sql =
-            s"""
-               |select count(1), min(l_returnflag) from lineitem_split
-               |""".stripMargin
-          runSql(sql) {
+          runSql(s"select count(1), min(l_returnflag) from $table") {
             df =>
               val result = df.collect()
               assertResult(1)(result.length)
@@ -1893,85 +1557,81 @@ class GlutenClickHouseMergeTreeWriteSuite extends CreateMergeTreeSuite {
       })
   }
 
-  test(
-    "GLUTEN-7812: Fix the query failed for the mergetree format " +
-      "when the 'spark.databricks.delta.stats.skipping' is off") {
-    // Spark 3.2 + Delta 2.0 doesn't not support this feature
-    if (!spark32) {
-      withSQLConf(("spark.databricks.delta.stats.skipping", "false")) {
-        spark.sql(s"""
-                     |DROP TABLE IF EXISTS lineitem_mergetree_stats_skipping;
-                     |""".stripMargin)
+  testWithMinSparkVersion("GLUTEN-7812: Fix the query failed for the mergetree format ", "3.3") {
+    // Spark 3.2 + Delta 2.0 doesn't support this feature
+    withSQLConf(("spark.databricks.delta.stats.skipping", "false")) {
+      spark.sql(s"""
+                   |DROP TABLE IF EXISTS lineitem_mergetree_stats_skipping;
+                   |""".stripMargin)
 
-        spark.sql(s"""
-                     |CREATE TABLE IF NOT EXISTS lineitem_mergetree_stats_skipping
-                     |(
-                     | l_orderkey      bigint,
-                     | l_partkey       bigint,
-                     | l_suppkey       bigint,
-                     | l_linenumber    bigint,
-                     | l_quantity      double,
-                     | l_extendedprice double,
-                     | l_discount      double,
-                     | l_tax           double,
-                     | l_returnflag    string,
-                     | l_linestatus    string,
-                     | l_shipdate      date,
-                     | l_commitdate    date,
-                     | l_receiptdate   date,
-                     | l_shipinstruct  string,
-                     | l_shipmode      string,
-                     | l_comment       string
-                     |)
-                     |USING clickhouse
-                     |PARTITIONED BY (l_returnflag)
-                     |TBLPROPERTIES (orderByKey='l_orderkey',
-                     |               primaryKey='l_orderkey')
-                     |LOCATION '$dataHome/lineitem_mergetree_stats_skipping'
-                     |""".stripMargin)
+      spark.sql(s"""
+                   |CREATE TABLE IF NOT EXISTS lineitem_mergetree_stats_skipping
+                   |(
+                   | l_orderkey      bigint,
+                   | l_partkey       bigint,
+                   | l_suppkey       bigint,
+                   | l_linenumber    bigint,
+                   | l_quantity      double,
+                   | l_extendedprice double,
+                   | l_discount      double,
+                   | l_tax           double,
+                   | l_returnflag    string,
+                   | l_linestatus    string,
+                   | l_shipdate      date,
+                   | l_commitdate    date,
+                   | l_receiptdate   date,
+                   | l_shipinstruct  string,
+                   | l_shipmode      string,
+                   | l_comment       string
+                   |)
+                   |USING clickhouse
+                   |PARTITIONED BY (l_returnflag)
+                   |TBLPROPERTIES (orderByKey='l_orderkey',
+                   |               primaryKey='l_orderkey')
+                   |LOCATION '$dataHome/lineitem_mergetree_stats_skipping'
+                   |""".stripMargin)
 
-        // dynamic partitions
-        spark.sql(s"""
-                     | insert into table lineitem_mergetree_stats_skipping
-                     | select * from lineitem
-                     |""".stripMargin)
+      // dynamic partitions
+      spark.sql(s"""
+                   | insert into table lineitem_mergetree_stats_skipping
+                   | select * from lineitem
+                   |""".stripMargin)
 
-        val sqlStr =
-          s"""
-             |SELECT
-             |    o_orderpriority,
-             |    count(*) AS order_count
-             |FROM
-             |    orders
-             |WHERE
-             |    o_orderdate >= date'1993-07-01'
-             |    AND o_orderdate < date'1993-07-01' + interval 3 month
-             |    AND EXISTS (
-             |        SELECT
-             |            *
-             |        FROM
-             |            lineitem
-             |        WHERE
-             |            l_orderkey = o_orderkey
-             |            AND l_commitdate < l_receiptdate)
-             |GROUP BY
-             |    o_orderpriority
-             |ORDER BY
-             |    o_orderpriority;
-             |
-             |""".stripMargin
-        runSql(sqlStr)(
-          df => {
-            val result = df.collect()
-            assertResult(5)(result.length)
-            assertResult("1-URGENT")(result(0).getString(0))
-            assertResult(999)(result(0).getLong(1))
-            assertResult("2-HIGH")(result(1).getString(0))
-            assertResult(997)(result(1).getLong(1))
-            assertResult("5-LOW")(result(4).getString(0))
-            assertResult(1077)(result(4).getLong(1))
-          })
-      }
+      val sqlStr =
+        s"""
+           |SELECT
+           |    o_orderpriority,
+           |    count(*) AS order_count
+           |FROM
+           |    orders
+           |WHERE
+           |    o_orderdate >= date'1993-07-01'
+           |    AND o_orderdate < date'1993-07-01' + interval 3 month
+           |    AND EXISTS (
+           |        SELECT
+           |            *
+           |        FROM
+           |            lineitem
+           |        WHERE
+           |            l_orderkey = o_orderkey
+           |            AND l_commitdate < l_receiptdate)
+           |GROUP BY
+           |    o_orderpriority
+           |ORDER BY
+           |    o_orderpriority;
+           |
+           |""".stripMargin
+      runSql(sqlStr)(
+        df => {
+          val result = df.collect()
+          assertResult(5)(result.length)
+          assertResult("1-URGENT")(result(0).getString(0))
+          assertResult(999)(result(0).getLong(1))
+          assertResult("2-HIGH")(result(1).getString(0))
+          assertResult(997)(result(1).getLong(1))
+          assertResult("5-LOW")(result(4).getString(0))
+          assertResult(1077)(result(4).getLong(1))
+        })
     }
   }
 }

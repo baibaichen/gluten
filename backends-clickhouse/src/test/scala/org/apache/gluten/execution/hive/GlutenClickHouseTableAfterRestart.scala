@@ -30,9 +30,6 @@ import org.apache.commons.io.FileUtils
 
 import java.io.File
 
-// Some sqls' line length exceeds 100
-// scalastyle:off line.size.limit
-
 // This suite is to make sure clickhouse commands works well even after spark restart
 class GlutenClickHouseTableAfterRestart extends CreateMergeTreeSuite with ReCreateHiveSession {
 
@@ -64,47 +61,22 @@ class GlutenClickHouseTableAfterRestart extends CreateMergeTreeSuite with ReCrea
     metaStorePathAbsolute + "/metastore_db_" + current_db_num
 
   test("test mergetree after restart") {
-    spark.sql(s"""
-                 |DROP TABLE IF EXISTS LINEITEM_MERGETREE;
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 |CREATE TABLE IF NOT EXISTS LINEITEM_MERGETREE
-                 |(
-                 | l_orderkey      bigint,
-                 | l_partkey       bigint,
-                 | l_suppkey       bigint,
-                 | l_linenumber    bigint,
-                 | l_quantity      double,
-                 | l_extendedprice double,
-                 | l_discount      double,
-                 | l_tax           double,
-                 | l_returnflag    string,
-                 | l_linestatus    string,
-                 | l_shipdate      date,
-                 | l_commitdate    date,
-                 | l_receiptdate   date,
-                 | l_shipinstruct  string,
-                 | l_shipmode      string,
-                 | l_comment       string
-                 |)
-                 |USING clickhouse
-                 |LOCATION '$dataHome/lineitem_mergetree'
-                 |""".stripMargin)
-
-    spark.sql(s"""
-                 | insert into table lineitem_mergetree
-                 | select * from lineitem
-                 |""".stripMargin)
+    val table = "LINEITEM_MERGETREE"
+    spark.sql(s"DROP TABLE IF EXISTS $table")
+    val s = createTableBuilder(table, "clickhouse", s"$dataHome/$table")
+      .withTableKey("lineitem")
+      .build()
+    spark.sql(s)
+    spark.sql(s"insert into table $table select * from lineitem")
 
     // before restart, check if cache works
     {
-      checkQuery(q1("lineitem_mergetree"))
+      checkQuery(q1(table))
       val oldMissingCount1 = ClickhouseSnapshot.deltaScanCache.stats().missCount()
       val oldMissingCount2 = ClickhouseSnapshot.addFileToAddMTPCache.stats().missCount()
 
       // for this run, missing count should not increase
-      checkQuery(q1("lineitem_mergetree"))
+      checkQuery(q1(table))
       val stats1 = ClickhouseSnapshot.deltaScanCache.stats()
       assertResult(oldMissingCount1)(stats1.missCount())
       val stats2 = ClickhouseSnapshot.addFileToAddMTPCache.stats()
@@ -116,7 +88,7 @@ class GlutenClickHouseTableAfterRestart extends CreateMergeTreeSuite with ReCrea
 
     restartSpark()
 
-    checkQuery(q1("lineitem_mergetree"))
+    checkQuery(q1(table))
 
     // after restart, additionally check stats of delta scan cache
     val stats1 = ClickhouseSnapshot.deltaScanCache.stats()
@@ -271,7 +243,8 @@ class GlutenClickHouseTableAfterRestart extends CreateMergeTreeSuite with ReCrea
     }
 
     val metaStoreDB = metaStorePathAbsolute + "/metastore_db_"
-    // use metastore_db2 to avoid issue: "Another instance of Derby may have already booted the database"
+    // use metastore_db2 to avoid issue:
+    // "Another instance of Derby may have already booted the database"
     current_db_num += 1
     val destDir = new File(metaStoreDB + current_db_num)
     destDir.mkdirs()
@@ -288,4 +261,3 @@ class GlutenClickHouseTableAfterRestart extends CreateMergeTreeSuite with ReCrea
     )
   }
 }
-// scalastyle:off line.size.limit

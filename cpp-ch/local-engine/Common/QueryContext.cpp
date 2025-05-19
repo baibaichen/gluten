@@ -142,11 +142,11 @@ void QueryContext::logCurrentPerformanceCounters(ProfileEvents::Counters & count
 {
     if (!CurrentThread::getGroup())
         return;
-    if (logger_->information())
+    if (logger_->debug())
     {
         std::ostringstream msg;
         msg << "\n---------------------Task Performance Counters(" << task_id << ")-----------------------------\n";
-        for (ProfileEvents::Event event = ProfileEvents::Event(0); event < counters.num_counters; event++)
+        for (auto event = ProfileEvents::Event(0); event < ProfileEvents::Counters::num_counters; event++)
         {
             const auto * name = ProfileEvents::getName(event);
             const auto * doc = ProfileEvents::getDocumentation(event);
@@ -156,7 +156,7 @@ void QueryContext::logCurrentPerformanceCounters(ProfileEvents::Counters & count
             msg << std::setw(50) << std::setfill(' ') << std::left << name << "|" << std::setw(20) << std::setfill(' ') << std::left
                 << count.load() << " | (" << doc << ")\n";
         }
-        LOG_INFO(logger_, "{}", msg.str());
+        LOG_DEBUG(logger_, "{}", msg.str());
     }
 }
 

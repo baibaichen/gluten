@@ -318,7 +318,7 @@ DB::QueryPlanPtr MergeTreeRelParser::parseReadRel(
     MergeTreeTableInstance merge_tree_table(extension_table);
     // ignore snapshot id for a query
     merge_tree_table.snapshot_id = "";
-    auto storage = merge_tree_table.restoreStorage(QueryContext::globalMutableContext());
+    auto storage = merge_tree_table.restoreStorage(QueryContext::instance().currentQueryContext());
 
     const DB::Block output = parseMergeTreeOutput(rel, storage);
     const bool has_delta_internal_is_row_deleted = DeltaVirtualMeta::hasMetaColumns(output);

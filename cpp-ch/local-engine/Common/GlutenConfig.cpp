@@ -86,7 +86,7 @@ StreamingAggregateConfig StreamingAggregateConfig::loadFromContext(const DB::Con
         = context->getConfigRef().getDouble(MAX_MEMORY_USAGE_RATIO_FOR_STREAMING_AGGREGATING, 0.9);
     config.high_cardinality_threshold_for_streaming_aggregating
         = context->getConfigRef().getDouble(HIGH_CARDINALITY_THRESHOLD_FOR_STREAMING_AGGREGATING, 0.8);
-    config.enable_streaming_aggregating = context->getConfigRef().getBool(ENABLE_STREAMING_AGGREGATING, true);
+    config.enable_streaming_aggregating = context->getConfigRef().getBool(ENABLE_STREAMING_AGGREGATING, false);
     return config;
 }
 

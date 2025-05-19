@@ -84,7 +84,7 @@ struct StreamingAggregateConfig
     size_t aggregated_keys_before_streaming_aggregating_evict = 1024;
     double max_memory_usage_ratio_for_streaming_aggregating = 0.9;
     double high_cardinality_threshold_for_streaming_aggregating = 0.8;
-    bool enable_streaming_aggregating = true;
+    bool enable_streaming_aggregating = false;
 
     static StreamingAggregateConfig loadFromContext(const DB::ContextPtr & context);
 };

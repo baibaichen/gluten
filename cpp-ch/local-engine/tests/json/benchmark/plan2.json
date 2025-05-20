@@ -1,0 +1,104 @@
+{
+  "relations": [
+    {
+      "root": {
+        "input": {
+          "read": {
+            "common": {
+              "direct": {}
+            },
+            "baseSchema": {
+              "names": [
+                "l_quantity",
+                "l_extendedprice",
+                "l_discount",
+                "l_returnflag",
+                "l_linestatus"
+              ],
+              "struct": {
+                "types": [
+                  {
+                    "fp64": {
+                      "nullability": "NULLABILITY_NULLABLE"
+                    }
+                  },
+                  {
+                    "fp64": {
+                      "nullability": "NULLABILITY_NULLABLE"
+                    }
+                  },
+                  {
+                    "fp64": {
+                      "nullability": "NULLABILITY_NULLABLE"
+                    }
+                  },
+                  {
+                    "string": {
+                      "nullability": "NULLABILITY_NULLABLE"
+                    }
+                  },
+                  {
+                    "string": {
+                      "nullability": "NULLABILITY_NULLABLE"
+                    }
+                  }
+                ]
+              },
+              "columnTypes": [
+                "NORMAL_COL",
+                "NORMAL_COL",
+                "NORMAL_COL",
+                "NORMAL_COL",
+                "NORMAL_COL"
+              ]
+            },
+            "streamKafka": false,
+            "advancedExtension": {
+              "optimization": {
+                "@type": "type.googleapis.com/google.protobuf.StringValue",
+                "value": "isMergeTree=1\n"
+              }
+            }
+          }
+        },
+        "names": [
+          "l_quantity#109",
+          "l_extendedprice#110",
+          "l_discount#111",
+          "l_returnflag#113",
+          "l_linestatus#114"
+        ],
+        "outputSchema": {
+          "types": [
+            {
+              "fp64": {
+                "nullability": "NULLABILITY_NULLABLE"
+              }
+            },
+            {
+              "fp64": {
+                "nullability": "NULLABILITY_NULLABLE"
+              }
+            },
+            {
+              "fp64": {
+                "nullability": "NULLABILITY_NULLABLE"
+              }
+            },
+            {
+              "string": {
+                "nullability": "NULLABILITY_NULLABLE"
+              }
+            },
+            {
+              "string": {
+                "nullability": "NULLABILITY_NULLABLE"
+              }
+            }
+          ],
+          "nullability": "NULLABILITY_REQUIRED"
+        }
+      }
+    }
+  ]
+}

@@ -23,6 +23,7 @@
 #include <Parser/SubstraitParserUtils.h>
 #include <gtest/gtest.h>
 #include <tests/utils/gluten_test_util.h>
+#include <utils/ReaderTestBase.h>
 #include <Common/DebugUtils.h>
 #include <Common/QueryContext.h>
 
@@ -119,4 +120,35 @@ TEST(Clickhouse, PR68131)
     EXPECT_TRUE(local_executor->hasNext());
     const Block & x = *local_executor->nextColumnar();
     debug::headBlock(x);
+}
+
+INCBIN(_bench_plan_, SOURCE_DIR "/utils/extern-local-engine/tests/json/benchmark/plan2.json");
+INCBIN(_bench_split_, SOURCE_DIR "/utils/extern-local-engine/tests/json/benchmark/split.json");
+
+class MergeTreeReader : public test::ReaderTestBase
+{
+};
+
+namespace DB
+{
+namespace Setting
+{
+extern const SettingsString local_filesystem_read_method;
+}
+}
+TEST_F(MergeTreeReader, Bench)
+{
+    QueryContext::globalMutableContext()->setSetting("local_filesystem_read_method", DB::Field("read"));
+
+    const auto plan = local_engine::JsonStringToMessage<substrait::Plan>(EMBEDDED_PLAN(_bench_plan_));
+    auto parser_context = ParserContext::build(QueryContext::globalContext(), plan);
+    SerializedPlanParser parser(parser_context);
+    parser.addSplitInfo(local_engine::JsonStringToBinary<substrait::ReadRel::ExtensionTable>(EMBEDDED_PLAN(_bench_split_)));
+    auto local_executor = parser.createExecutor(plan);
+    size_t total_rows = 0;
+    while(local_executor->hasNext())
+    {
+        total_rows += local_executor->nextColumnar()->rows();
+    }
+    EXPECT_EQ(total_rows, 600037902);
 }

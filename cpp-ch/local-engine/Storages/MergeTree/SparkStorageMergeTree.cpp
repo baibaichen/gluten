@@ -20,6 +20,7 @@
 #include <Disks/SingleDiskVolume.h>
 #include <Interpreters/ExpressionActions.h>
 #include <Interpreters/MergeTreeTransaction.h>
+#include <Processors/QueryPlan/QueryPlan.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskFull.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Storages/MergeTree/SparkMergeTreeSink.h>
@@ -166,6 +167,19 @@ std::atomic<int> SparkStorageMergeTree::part_num;
 void SparkStorageMergeTree::prefetchPartDataFile(const std::unordered_set<std::string> & parts) const
 {
     prefetchPartFiles(parts, CompactObjectStorageDiskTransaction::PART_DATA_FILE_NAME);
+}
+void SparkStorageMergeTree::read(
+    QueryPlan & query_plan,
+    const Names & column_names,
+    const StorageSnapshotPtr & storage_snapshot,
+    SelectQueryInfo & query_info,
+    ContextPtr context,
+    QueryProcessingStage::Enum /*processed_stage*/,
+    size_t max_block_size,
+    size_t num_streams)
+{
+    if (auto plan = reader.read(column_names, storage_snapshot, query_info, context, max_block_size, num_streams, nullptr, false))
+        query_plan = std::move(*plan);
 }
 
 void SparkStorageMergeTree::prefetchPartFiles(const std::unordered_set<std::string> & parts, String file_name) const

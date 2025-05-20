@@ -74,6 +74,16 @@ public:
     void removePartFromMemory(const MergeTreeData::DataPart & part_to_detach);
     void prefetchPartDataFile(const std::unordered_set<std::string> & parts) const;
 
+    void read(
+        DB::QueryPlan & query_plan,
+        const DB::Names & column_names,
+        const DB::StorageSnapshotPtr & storage_snapshot,
+        DB::SelectQueryInfo & query_info,
+        DB::ContextPtr context,
+        DB::QueryProcessingStage::Enum processed_stage,
+        size_t max_block_size,
+        size_t num_streams) override;
+
     DB::MergeTreeDataSelectExecutor reader;
     DB::MergeTreeDataMergerMutator merger_mutator;
 

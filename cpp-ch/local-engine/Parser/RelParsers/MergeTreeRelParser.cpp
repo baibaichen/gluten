@@ -343,33 +343,38 @@ MergeTreeRelParser::parseReadRel(const substrait::ReadRel & rel, const substrait
         query_info->prewhere_info = parsePreWhereInfo(rel.filter(), read_block);
     }
 
-    auto read_step = storage->reader.readFromParts(
-        RangesInDataParts({selected_parts}),
-        storage->getMutationsSnapshot({}),
+    storage_snapshot->data = std::make_unique<MergeTreeData::SnapshotData>();
+    auto & snapData = assert_cast<MergeTreeData::SnapshotData &>(*storage_snapshot->data);
+    snapData.parts = RangesInDataParts({selected_parts});
+    snapData.mutations_snapshot = storage->getMutationsSnapshot({});
+
+    auto query_plan = std::make_unique<DB::QueryPlan>();
+    storage->read(
+        *query_plan,
         names_and_types_list.getNames(),
         storage_snapshot,
         *query_info,
         context,
+        QueryProcessingStage::FetchColumns,
         context->getSettingsRef()[Setting::max_block_size],
         1);
 
-    auto * source_step_with_filter = static_cast<SourceStepWithFilterBase *>(read_step.get());
+    assert(query_plan->getRootNode()->step);
+
+    auto * source_step_with_filter = static_cast<SourceStepWithFilterBase *>(query_plan->getRootNode()->step.get());
     if (const auto & storage_preWhere_info = query_info->prewhere_info)
     {
         source_step_with_filter->addFilter(storage_preWhere_info->prewhere_actions.clone(), storage_preWhere_info->prewhere_column_name);
         source_step_with_filter->applyFilters();
     }
-
+    auto & read_from_merge_tree_step = static_cast<ReadFromMergeTree &>(*query_plan->getRootNode()->step.get());
     auto ranges = merge_tree_table.extractRange(selected_parts);
     if (settingsEqual(context->getSettingsRef(), "enabled_driver_filter_mergetree_index", "true"))
-        SparkStorageMergeTree::analysisPartsByRanges(*reinterpret_cast<ReadFromMergeTree *>(read_step.get()), ranges);
+        SparkStorageMergeTree::analysisPartsByRanges(read_from_merge_tree_step, ranges);
     else
-        SparkStorageMergeTree::wrapRangesInDataParts(*reinterpret_cast<ReadFromMergeTree *>(read_step.get()), ranges);
+       SparkStorageMergeTree::wrapRangesInDataParts(read_from_merge_tree_step, ranges);
+    steps.emplace_back(source_step_with_filter);
 
-    steps.emplace_back(read_step.get());
-
-    auto query_plan = std::make_unique<DB::QueryPlan>();
-    query_plan->addStep(std::move(read_step));
     if (!non_nullable_columns.empty())
     {
         auto input_header = query_plan->getCurrentHeader();

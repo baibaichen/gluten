@@ -70,7 +70,7 @@ ReadRelParser::parse(DB::QueryPlanPtr query_plan, const substrait::Rel & rel, st
         }
 
         MergeTreeRelParser merge_tree_parser(parser_context, getContext());
-        query_plan = merge_tree_parser.parseReadRel(std::make_unique<DB::QueryPlan>(), read, extension_table);
+        query_plan = merge_tree_parser.parseReadRel(read, extension_table);
         steps = merge_tree_parser.getSteps();
     }
     else if (isReadRelFromLocalFile(read) || isReadRelFromJavaIter(read) || isReadRelFromRange(read))

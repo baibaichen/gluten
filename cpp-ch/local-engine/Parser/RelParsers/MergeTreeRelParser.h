@@ -75,8 +75,7 @@ public:
         throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "MergeTreeRelParser can't call parse(), call parseReadRel instead.");
     }
 
-    DB::QueryPlanPtr parseReadRel(
-        DB::QueryPlanPtr query_plan, const substrait::ReadRel & read_rel, const substrait::ReadRel::ExtensionTable & extension_table);
+    DB::QueryPlanPtr parseReadRel(const substrait::ReadRel & read_rel, const substrait::ReadRel::ExtensionTable & extension_table);
 
     std::optional<const substrait::Rel *> getSingleInput(const substrait::Rel &) override
     {

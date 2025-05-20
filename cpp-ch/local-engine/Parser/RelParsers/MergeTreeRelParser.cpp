@@ -19,6 +19,7 @@
 
 #include <Core/Settings.h>
 #include <DataTypes/DataTypesDecimal.h>
+#include <Operator/FillingDeltaInternalRowDeletedStep.h>
 #include <Parser/ExpressionParser.h>
 #include <Parser/FunctionParser.h>
 #include <Parser/SubstraitParserUtils.h>
@@ -33,7 +34,6 @@
 #include <Common/BlockTypeUtils.h>
 #include <Common/GlutenSettings.h>
 #include <Common/PlanUtil.h>
-#include <Operator/FillingDeltaInternalRowDeletedStep.h>
 
 namespace DB
 {
@@ -312,8 +312,8 @@ void MergeTreeRelParser::recoverNodeWithCaseSensitive(DB::QueryPlan & query_plan
 }
 
 
-DB::QueryPlanPtr MergeTreeRelParser::parseReadRel(
-    DB::QueryPlanPtr query_plan, const substrait::ReadRel & rel, const substrait::ReadRel::ExtensionTable & extension_table)
+DB::QueryPlanPtr
+MergeTreeRelParser::parseReadRel(const substrait::ReadRel & rel, const substrait::ReadRel::ExtensionTable & extension_table)
 {
     MergeTreeTableInstance merge_tree_table(extension_table);
     // ignore snapshot id for a query
@@ -367,6 +367,8 @@ DB::QueryPlanPtr MergeTreeRelParser::parseReadRel(
         SparkStorageMergeTree::wrapRangesInDataParts(*reinterpret_cast<ReadFromMergeTree *>(read_step.get()), ranges);
 
     steps.emplace_back(read_step.get());
+
+    auto query_plan = std::make_unique<DB::QueryPlan>();
     query_plan->addStep(std::move(read_step));
     if (!non_nullable_columns.empty())
     {

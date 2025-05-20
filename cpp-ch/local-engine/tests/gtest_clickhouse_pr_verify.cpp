@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 #include <incbin.h>
+
 #include <Core/Settings.h>
 #include <Interpreters/Context.h>
 #include <Parser/LocalExecutor.h>
@@ -26,6 +27,7 @@
 #include <utils/ReaderTestBase.h>
 #include <Common/DebugUtils.h>
 #include <Common/QueryContext.h>
+#include "Processors/Executors/PullingAsyncPipelineExecutor.h"
 
 namespace DB::Setting
 {
@@ -145,10 +147,14 @@ TEST_F(MergeTreeReader, Bench)
     SerializedPlanParser parser(parser_context);
     parser.addSplitInfo(local_engine::JsonStringToBinary<substrait::ReadRel::ExtensionTable>(EMBEDDED_PLAN(_bench_split_)));
     auto local_executor = parser.createExecutor(plan);
+    DB::QueryPipeline query_pipeline = QueryPipelineBuilder::getPipeline(std::move(*local_executor->query_pipeline_builder));
+    auto executor = std::make_unique<DB::PullingAsyncPipelineExecutor>(query_pipeline);
+
     size_t total_rows = 0;
-    while(local_executor->hasNext())
+    Chunk chunk;
+    while(executor->pull(chunk))
     {
-        total_rows += local_executor->nextColumnar()->rows();
+        total_rows += chunk.getNumRows();
     }
     EXPECT_EQ(total_rows, 600037902);
 }

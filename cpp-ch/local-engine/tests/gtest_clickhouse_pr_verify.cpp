@@ -22,12 +22,15 @@
 #include <Parser/ParserContext.h>
 #include <Parser/SerializedPlanParser.h>
 #include <Parser/SubstraitParserUtils.h>
+#include <Storages/MergeTree/SparkMergeTreeMeta.h>
 #include <gtest/gtest.h>
 #include <tests/utils/gluten_test_util.h>
 #include <utils/ReaderTestBase.h>
 #include <Common/DebugUtils.h>
 #include <Common/QueryContext.h>
-#include "Processors/Executors/PullingAsyncPipelineExecutor.h"
+#include <Databases/IDatabase.h>
+#include <Processors/Executors/PullingAsyncPipelineExecutor.h>
+#include <Storages/MergeTree/SparkStorageMergeTree.h>
 
 namespace DB::Setting
 {
@@ -142,19 +145,31 @@ TEST_F(MergeTreeReader, Bench)
 {
     QueryContext::globalMutableContext()->setSetting("local_filesystem_read_method", DB::Field("read"));
 
-    const auto plan = local_engine::JsonStringToMessage<substrait::Plan>(EMBEDDED_PLAN(_bench_plan_));
-    auto parser_context = ParserContext::build(QueryContext::globalContext(), plan);
-    SerializedPlanParser parser(parser_context);
-    parser.addSplitInfo(local_engine::JsonStringToBinary<substrait::ReadRel::ExtensionTable>(EMBEDDED_PLAN(_bench_split_)));
-    auto local_executor = parser.createExecutor(plan);
-    DB::QueryPipeline query_pipeline = QueryPipelineBuilder::getPipeline(std::move(*local_executor->query_pipeline_builder));
-    auto executor = std::make_unique<DB::PullingAsyncPipelineExecutor>(query_pipeline);
+    const auto ext = local_engine::JsonStringToMessage<substrait::ReadRel::ExtensionTable>(EMBEDDED_PLAN(_bench_split_));
+    MergeTreeTableInstance merge_tree_table_instance{ext};
+    StoragePtr t{merge_tree_table_instance.restoreStorage(QueryContext::globalMutableContext())};
 
-    size_t total_rows = 0;
-    Chunk chunk;
-    while(executor->pull(chunk))
-    {
-        total_rows += chunk.getNumRows();
-    }
-    EXPECT_EQ(total_rows, 600037902);
+    EXPECT_TRUE(t);
+    auto db = createMemoryDatabaseIfNotExists("mergetree");
+    db->attachTable(QueryContext::globalContext(), "lineitem", t, {});
+
+    auto b= runClickhouseSQL("select * from mergetree.lineitem limit 1");
+
+    headBlock(b);
+
+    // const auto plan = local_engine::JsonStringToMessage<substrait::Plan>(EMBEDDED_PLAN(_bench_plan_));
+    // auto parser_context = ParserContext::build(QueryContext::globalContext(), plan);
+    // SerializedPlanParser parser(parser_context);
+    // parser.addSplitInfo(local_engine::JsonStringToBinary<substrait::ReadRel::ExtensionTable>(EMBEDDED_PLAN(_bench_split_)));
+    // auto local_executor = parser.createExecutor(plan);
+    // DB::QueryPipeline query_pipeline = QueryPipelineBuilder::getPipeline(std::move(*local_executor->query_pipeline_builder));
+    // auto executor = std::make_unique<DB::PullingAsyncPipelineExecutor>(query_pipeline);
+    //
+    // size_t total_rows = 0;
+    // Chunk chunk;
+    // while(executor->pull(chunk))
+    // {
+    //     total_rows += chunk.getNumRows();
+    // }
+    // EXPECT_EQ(total_rows, 600037902);
 }

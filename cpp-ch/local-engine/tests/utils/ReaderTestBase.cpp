@@ -17,10 +17,11 @@
 
 #include "ReaderTestBase.h"
 
+#include <Core/Settings.h>
 #include <Databases/DatabaseMemory.h>
 #include <Interpreters/Squashing.h>
 #include <Interpreters/executeQuery.h>
-#include <Processors/Executors/PullingPipelineExecutor.h>
+#include <Processors/Executors/PullingAsyncPipelineExecutor.h>
 #include <QueryPipeline/BlockIO.h>
 #include <Storages/ConstraintsDescription.h>
 #include <Storages/MemorySettings.h>
@@ -34,7 +35,7 @@
 #include <Common/DebugUtils.h>
 #include <Common/QueryContext.h>
 #include <Common/logger_useful.h>
-#include <Core/Settings.h>
+#include "QueryPipeline/printPipeline.h"
 
 namespace DB
 {
@@ -171,9 +172,31 @@ Block ReaderTestBase::collectResult(T & input) const
     return chunk.hasRows() ? header.cloneWithColumns(chunk.detachColumns()) : header.cloneEmpty();
 }
 
-template Block ReaderTestBase::collectResult<PullingPipelineExecutor>(PullingPipelineExecutor & input) const;
+template Block ReaderTestBase::collectResult<PullingAsyncPipelineExecutor>(PullingAsyncPipelineExecutor & input) const;
 template Block ReaderTestBase::collectResult<BaseReader>(BaseReader & input) const;
 template Block ReaderTestBase::collectResult<BaseReaders>(BaseReaders & input) const;
+
+static std::string dumpProcessor(const Processors & processors)
+{
+    for (const auto & processor : processors)
+    {
+        WriteBufferFromOwnString buffer;
+        auto data_stats = processor->getProcessorDataStats();
+        buffer << "(";
+        buffer << "\nexecution time: " << processor->getElapsedNs() / 1000U << " us.";
+        buffer << "\ninput wait time: " << processor->getInputWaitElapsedNs() / 1000U << " us.";
+        buffer << "\noutput wait time: " << processor->getOutputWaitElapsedNs() / 1000U << " us.";
+        buffer << "\ninput rows: " << data_stats.input_rows;
+        buffer << "\ninput bytes: " << data_stats.input_bytes;
+        buffer << "\noutput rows: " << data_stats.output_rows;
+        buffer << "\noutput bytes: " << data_stats.output_bytes;
+        buffer << ")";
+        processor->setDescription(buffer.str());
+    }
+    WriteBufferFromOwnString out;
+    DB::printPipeline(processors, out);
+    return out.str();
+}
 
 Block ReaderTestBase::runClickhouseSQL(const std::string & query) const
 {
@@ -181,8 +204,12 @@ Block ReaderTestBase::runClickhouseSQL(const std::string & query) const
 
     if (io.pipeline.pulling())
     {
-        auto executor = std::make_unique<DB::PullingPipelineExecutor>(io.pipeline);
-        return collectResult(*executor);
+        auto executor = std::make_unique<DB::PullingAsyncPipelineExecutor>(io.pipeline);
+        auto result = collectResult(*executor);
+
+        LOG_TRACE(test_logger, "\n{}", dumpProcessor(io.pipeline.getProcessors()));
+
+        return result;
     }
 
     if (io.pipeline.pushing() || io.pipeline.completed())

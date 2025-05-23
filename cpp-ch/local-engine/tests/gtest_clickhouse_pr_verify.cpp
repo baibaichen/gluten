@@ -147,15 +147,43 @@ TEST_F(MergeTreeReader, Bench)
 
     const auto ext = local_engine::JsonStringToMessage<substrait::ReadRel::ExtensionTable>(EMBEDDED_PLAN(_bench_split_));
     MergeTreeTableInstance merge_tree_table_instance{ext};
-    StoragePtr t{merge_tree_table_instance.restoreStorage(QueryContext::globalMutableContext())};
+    merge_tree_table_instance.snapshot_id = "";
+    StoragePtr t{merge_tree_table_instance.restoreStorageAndParts(QueryContext::globalMutableContext())};
 
     EXPECT_TRUE(t);
     auto db = createMemoryDatabaseIfNotExists("mergetree");
     db->attachTable(QueryContext::globalContext(), "lineitem", t, {});
 
-    auto b= runClickhouseSQL("select * from mergetree.lineitem limit 1");
+    constexpr std::string_view sql = R"(SELECT
+    l_returnflag,
+    l_linestatus,
+    sum(l_quantity) AS sum_qty,
+    sum(l_extendedprice) AS sum_base_price,
+    sum(l_extendedprice * (1 - l_discount)) AS sum_disc_price,
+    sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) AS sum_charge,
+    avg(l_quantity) AS avg_qty,
+    avg(l_extendedprice) AS avg_price,
+    avg(l_discount) AS avg_disc,
+    count(*) AS count_order
+FROM
+    mergetree.lineitem
+GROUP BY
+    l_returnflag,
+    l_linestatus
+ORDER BY
+    l_returnflag,
+    l_linestatus Settings max_threads=15,local_filesystem_read_method='read';)";
 
-    headBlock(b);
+    for (int i =0 ; i< 5 ; i++)
+    {
+        auto start_time = std::chrono::high_resolution_clock::now();
+        auto b= runClickhouseSQL(sql.data());
+        auto end_time = std::chrono::high_resolution_clock::now();
+
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+        std::cout << "执行时间: " << duration.count() << " 毫秒" << std::endl;
+        headBlock(b);
+    }
 
     // const auto plan = local_engine::JsonStringToMessage<substrait::Plan>(EMBEDDED_PLAN(_bench_plan_));
     // auto parser_context = ParserContext::build(QueryContext::globalContext(), plan);

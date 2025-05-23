@@ -311,27 +311,23 @@ void MergeTreeRelParser::recoverNodeWithCaseSensitive(DB::QueryPlan & query_plan
     query_plan.addStep(std::move(expression_step));
 }
 
-
 DB::QueryPlanPtr
 MergeTreeRelParser::parseReadRel(const substrait::ReadRel & rel, const substrait::ReadRel::ExtensionTable & extension_table)
 {
     MergeTreeTableInstance merge_tree_table(extension_table);
     // ignore snapshot id for a query
     merge_tree_table.snapshot_id = "";
-    auto storage = merge_tree_table.restoreStorage(QueryContext::instance().currentQueryContext());
+    auto storage = merge_tree_table.restoreStorageAndParts(QueryContext::instance().currentQueryContext());
 
     const DB::Block output = parseMergeTreeOutput(rel, storage);
     const bool has_delta_internal_is_row_deleted = DeltaVirtualMeta::hasMetaColumns(output);
     DB::Block read_block = replaceDeltaNameIfNeeded(output);
     replaceNodeWithCaseSensitive(read_block, storage);
 
-    std::vector<DataPartPtr> selected_parts = StorageMergeTreeFactory::getDataPartsByNames(
-        storage->getStorageID(), merge_tree_table.snapshot_id, merge_tree_table.getPartNames());
 
     for (const auto & [name, sizes] : storage->getColumnSizes())
         column_sizes[name] = sizes.data_compressed;
 
-    auto storage_snapshot = std::make_shared<StorageSnapshot>(*storage, storage->getInMemoryMetadataPtr());
     auto names_and_types_list = read_block.getNamesAndTypesList();
     auto query_info = buildQueryInfo(names_and_types_list);
 
@@ -343,11 +339,7 @@ MergeTreeRelParser::parseReadRel(const substrait::ReadRel & rel, const substrait
         query_info->prewhere_info = parsePreWhereInfo(rel.filter(), read_block);
     }
 
-    storage_snapshot->data = std::make_unique<MergeTreeData::SnapshotData>();
-    auto & snapData = assert_cast<MergeTreeData::SnapshotData &>(*storage_snapshot->data);
-    snapData.parts = RangesInDataParts({selected_parts});
-    snapData.mutations_snapshot = storage->getMutationsSnapshot({});
-
+    auto storage_snapshot = storage->getStorageSnapshot(storage->getInMemoryMetadataPtr(), context);
     auto query_plan = std::make_unique<DB::QueryPlan>();
     storage->read(
         *query_plan,
@@ -368,7 +360,7 @@ MergeTreeRelParser::parseReadRel(const substrait::ReadRel & rel, const substrait
         source_step_with_filter->applyFilters();
     }
     auto & read_from_merge_tree_step = static_cast<ReadFromMergeTree &>(*query_plan->getRootNode()->step.get());
-    auto ranges = merge_tree_table.extractRange(selected_parts);
+    auto ranges = merge_tree_table.extractRange(storage->parts);
     if (settingsEqual(context->getSettingsRef(), "enabled_driver_filter_mergetree_index", "true"))
         SparkStorageMergeTree::analysisPartsByRanges(read_from_merge_tree_step, ranges);
     else

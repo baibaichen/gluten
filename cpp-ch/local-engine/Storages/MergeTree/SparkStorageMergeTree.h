@@ -84,8 +84,12 @@ public:
         size_t max_block_size,
         size_t num_streams) override;
 
+    DB::StorageSnapshotPtr getStorageSnapshot(const DB::StorageMetadataPtr & metadata_snapshot, DB::ContextPtr query_context) const override;
+
     DB::MergeTreeDataSelectExecutor reader;
     DB::MergeTreeDataMergerMutator merger_mutator;
+
+    DataPartsVector parts;
 
 protected:
     SparkStorageMergeTree(

@@ -30,7 +30,7 @@
 
 namespace DB
 {
-class PullingPipelineExecutor;
+class PullingAsyncPipelineExecutor;
 class Block;
 }
 

@@ -181,6 +181,18 @@ void SparkStorageMergeTree::read(
     if (auto plan = reader.read(column_names, storage_snapshot, query_info, context, max_block_size, num_streams, nullptr, false))
         query_plan = std::move(*plan);
 }
+DB::StorageSnapshotPtr
+SparkStorageMergeTree::getStorageSnapshot(const DB::StorageMetadataPtr & metadata_snapshot, DB::ContextPtr /*query_context*/) const
+{
+    auto snapshot_data = std::make_unique<MergeTreeData::SnapshotData>();
+    snapshot_data->parts = RangesInDataParts(parts);
+    snapshot_data->mutations_snapshot = getMutationsSnapshot({});
+
+    auto storage_snapshot = std::make_shared<StorageSnapshot>(*this, metadata_snapshot);
+
+    storage_snapshot->data = std::move(snapshot_data);
+    return storage_snapshot;
+}
 
 void SparkStorageMergeTree::prefetchPartFiles(const std::unordered_set<std::string> & parts, String file_name) const
 {

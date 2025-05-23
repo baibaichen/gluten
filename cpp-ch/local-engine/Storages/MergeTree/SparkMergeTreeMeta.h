@@ -89,6 +89,7 @@ struct MergeTreeTableInstance : MergeTreeTable
     DB::RangesInDataParts extractRange(DB::DataPartsVector parts_vector) const;
 
     SparkStorageMergeTreePtr restoreStorage(const DB::ContextMutablePtr & context) const;
+    SparkStorageMergeTreePtr restoreStorageAndParts(const DB::ContextMutablePtr & context) const;
 
     explicit MergeTreeTableInstance(const google::protobuf::Any & any);
     explicit MergeTreeTableInstance(const substrait::ReadRel::ExtensionTable & extension_table);

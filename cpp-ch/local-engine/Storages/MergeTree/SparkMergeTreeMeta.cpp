@@ -242,6 +242,15 @@ SparkStorageMergeTreePtr MergeTreeTableInstance::restoreStorage(const ContextMut
     restoreMetaData(result, *this, *context);
     return result;
 }
+SparkStorageMergeTreePtr MergeTreeTableInstance::restoreStorageAndParts(const DB::ContextMutablePtr & context) const
+{
+    auto result = restoreStorage(context);
+
+    assert(snapshot_id.empty()); // ignore snapshot id for a query
+    result->parts = StorageMergeTreeFactory::getDataPartsByNames(result->getStorageID(), snapshot_id, getPartNames());
+
+    return result;
+}
 
 std::shared_ptr<DB::StorageInMemoryMetadata> MergeTreeTable::buildMetaData(const DB::Block & header, const ContextPtr & context) const
 {

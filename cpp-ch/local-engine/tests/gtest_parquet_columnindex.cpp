@@ -40,6 +40,9 @@
 #include <Common/BlockTypeUtils.h>
 #include <Common/QueryContext.h>
 
+#include <Processors/Formats/Impl/Parquet/xsimd_wrapper.h>
+#include <Processors/Formats/Impl/Parquet/ColumnFilter.h>
+
 #define ASSERT_DURATION_LE(secs, stmt) \
     { \
         std::promise<bool> completed; \
@@ -505,7 +508,6 @@ TEST(ColumnIndex, Filtering)
     testCondition("column1 >= 7 and column1 < 11 and column2 > 'Romeo' and column2 <= 'Tango'", {7, 11, 12, 13});
 }
 
-
 TEST(RowIndex, VirtualColumnRowIndexReader)
 {
     local_engine::RowGroupInformation rg_info{
@@ -690,7 +692,6 @@ TEST(ColumnIndex, DecimalField)
     EXPECT_THROW(to_parquet.as(value, error), DB::Exception);
 #endif
 }
-
 
 TEST(ColumnIndex, Field)
 {
@@ -1159,5 +1160,33 @@ TEST(ColumnIndex, VectorizedParquetRecordReader)
         chunk = recordReader.nextBatch();
     } while (chunk.getNumRows() > 0);
 }
+
+void fillRowNumbersOriginal(
+    const RowSet & row_set,
+    const local_engine::RowRanges & row_ranges,
+    PaddedPODArray<Int64> & result)
+{
+    const auto & ranges = row_ranges.getRanges();
+
+    result.reserve(row_set.count());
+
+    size_t row_index = 0;
+
+    for (const auto & range : ranges)
+    {
+        size_t from = range.from;
+        size_t to = range.to;
+        size_t range_size = to - from + 1; // 闭区间，包含边界
+
+        for (size_t i = 0; i < range_size; ++i, ++row_index)
+        {
+            if (row_set.get(row_index))
+            {
+                result.push_back(static_cast<Int64>(from + i));
+            }
+        }
+    }
+}
+
 
 #endif //USE_PARQUET

@@ -227,7 +227,6 @@ bool VectorizedParquetRecordReader::initialize(
 DB::Chunk VectorizedParquetRecordReader::nextBatch()
 {
     assert(initialized());
-    ::arrow::ChunkedArrayVector columns(column_readers_.size());
     DB::ArrowColumnToCHColumn::NameToArrowColumn name_to_column_ptr;
     for (auto & vectorized_column_reader : column_readers_)
         name_to_column_ptr[lowerColumnNameIfNeed(vectorized_column_reader.columnName(), format_settings_)]

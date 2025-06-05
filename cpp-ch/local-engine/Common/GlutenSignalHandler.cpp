@@ -73,8 +73,7 @@ ALWAYS_INLINE int writeFD()
 
 static void addSignalHandler(const std::vector<int> & signals, signal_function handler, std::vector<int> * out_handled_signals)
 {
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
+    struct sigaction sa = {};
     sa.sa_sigaction = handler;
     sa.sa_flags = SA_SIGINFO;
 
@@ -111,7 +110,9 @@ static void writeSignalIDtoSignalPipe(int sig)
 
 static void call_default_signal_handler(int sig)
 {
-    if (SIG_ERR == signal(sig, SIG_DFL))
+    struct sigaction sa = {};
+    sa.sa_handler = SIG_DFL;
+    if (-1 == sigaction(sig, &sa, nullptr))
         throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler");
 
     if (0 != raise(sig))
@@ -405,9 +406,11 @@ struct SignalHandler::Impl
         writeSignalIDtoSignalPipe(GlutenSignalListener::StopThread);
         signal_listener_thread.join();
 
+        struct sigaction sa = {};
+        sa.sa_handler = SIG_DFL;
         /// Reset signals to SIG_DFL to avoid trying to write to the signal_pipe that will be closed after.
-        for (int sig : handled_signals)
-            if (SIG_ERR == signal(sig, SIG_DFL))
+        for (const int sig : handled_signals)
+            if (-1 == sigaction(sig, &sa, nullptr))
             {
                 try
                 {

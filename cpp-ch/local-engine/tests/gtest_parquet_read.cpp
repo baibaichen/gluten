@@ -382,6 +382,61 @@ TEST(ParquetRead, ArrowRead)
         EXPECT_EQ(col_b.getFloat64(i), i + 1);
 }
 
+TEST(ParquetRead, LowLevelReadList)
+{
+    const std::string sample("/home/chang/Desktop/hive_parquet_test/part-00000-ef23ba33-0a83-40ad-84f1-ef5220982d28-c000.snappy.parquet");
+    const std::unique_ptr<parquet::ParquetFileReader> parquet_reader = parquet::ParquetFileReader::OpenFile(sample, false);
+
+    // Get the File MetaData
+    const std::shared_ptr<parquet::FileMetaData> file_metadata = parquet_reader->metadata();
+    parquet::arrow::SchemaManifest manifest = VectorizedParquetRecordReader::createSchemaManifest(*file_metadata);
+
+    // Get the number of RowGroups
+    const int num_row_groups = file_metadata->num_row_groups();
+    EXPECT_EQ(num_row_groups, 1);
+    // Get the number of Columns
+    const int num_columns = file_metadata->num_columns();
+    EXPECT_EQ(num_columns, 2);
+
+    constexpr int col_a = 1;
+    const parquet::SchemaDescriptor & schema = *(file_metadata->schema());
+    const parquet::ColumnDescriptor & column_a_descr = *(schema.Column(col_a));
+    auto const & field_a = manifest.schema_fields[col_a];
+    EXPECT_EQ(field_a.field->name(), "array_field");
+
+    const auto reader = parquet::internal::RecordReader::Make(&column_a_descr, field_a.children[0].level_info);
+
+    for (int r = 0; r < num_row_groups; ++r)
+    {
+        parquet::Int32Reader * int32_reader = dynamic_cast<parquet::Int32Reader *>(reader.get());
+        std::shared_ptr<parquet::RowGroupReader> row_group_reader = parquet_reader->RowGroup(r);
+        reader->SetPageReader(row_group_reader->GetColumnPageReader(col_a));
+        reader->SkipRecords(30000);
+        EXPECT_EQ(reader->ReadRecords(1), 0);
+        EXPECT_FALSE(int32_reader->HasNext());
+
+        // int64_t records_read = reader->ReadRecords(1);
+        // EXPECT_EQ(records_read, 1);
+        // EXPECT_EQ(reader->values_written(), 3);
+        //
+        // reader->SkipRecords(1);
+        // EXPECT_EQ(reader->values_written(), 3);
+        //
+        // records_read += reader->ReadRecords(1);
+        // EXPECT_EQ(records_read, 2);
+        // EXPECT_EQ(reader->values_written(), 6);
+        //
+        // int32_t * read_values = reinterpret_cast<int32_t *>(reader->values());
+        //
+        // EXPECT_EQ(read_values[0], 1);
+        // EXPECT_EQ(read_values[1], 2);
+        // EXPECT_EQ(read_values[2], 3);
+        // EXPECT_EQ(read_values[3], 3);
+        // EXPECT_EQ(read_values[4], 4);
+        // EXPECT_EQ(read_values[5], 5);
+    }
+}
+
 TEST(ParquetRead, LowLevelRead)
 {
     const std::string sample(test::gtest_data("sample.parquet"));

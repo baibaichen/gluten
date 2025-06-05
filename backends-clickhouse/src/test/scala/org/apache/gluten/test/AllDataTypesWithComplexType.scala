@@ -30,17 +30,17 @@ case class AllDataTypesWithComplexType(
     decimal_field: java.math.BigDecimal = null,
     date_field: java.sql.Date = null,
     timestamp_field: java.sql.Timestamp = null,
-    array: Seq[Int] = null,
-    arrayContainsNull: Seq[Option[Int]] = null,
-    map: Map[Int, Long] = null,
-    mapValueContainsNull: Map[Int, Option[Long]] = null
+    array_field: Seq[Int] = null,
+    array_field_with_null: Seq[Option[Int]] = null,
+    map_field: Map[Int, Long] = null,
+    field_with_null: Map[Int, Option[Long]] = null
 )
 
 object AllDataTypesWithComplexType {
-  def genTestData(): Seq[AllDataTypesWithComplexType] = {
-    (0 to 199).map {
+  def genTestData(count: Int = 200, allowNull: Boolean = true): Seq[AllDataTypesWithComplexType] = {
+    (0 until count).map {
       i =>
-        if (i % 100 == 1) {
+        if (i % 100 == 1 && allowNull) {
           AllDataTypesWithComplexType()
         } else {
           AllDataTypesWithComplexType(

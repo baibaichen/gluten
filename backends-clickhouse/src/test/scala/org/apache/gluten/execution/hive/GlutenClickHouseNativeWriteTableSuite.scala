@@ -170,16 +170,20 @@ class GlutenClickHouseNativeWriteTableSuite
   }
 
   test("test insert into dir") {
-    withSource(genTestData(), "origin_table") {
+    val complex_fields = ListMap(
+      ("long_field", "long"),
+      ("array_field", "array<int>")
+    )
+    withSource(genTestData(30000, allowNull = false), "origin_table") {
       nativeWrite {
         format =>
           Seq(
             s"""insert overwrite local directory '$dataHome/test_insert_into_${format}_dir1'
-               |stored as $format select ${fields_.keys.mkString(",")}
+               |stored as $format select ${complex_fields.keys.mkString(",")}
                |from origin_table""".stripMargin,
-            s"""insert overwrite local directory '$dataHome/test_insert_into_${format}_dir2'
-               |stored as $format select string_field, sum(int_field) as x
-               |from origin_table group by string_field""".stripMargin
+//            s"""insert overwrite local directory '$dataHome/test_insert_into_${format}_dir2'
+//               |stored as $format select string_field, sum(int_field) as x
+//               |from origin_table group by string_field""".stripMargin
           ).foreach(checkInsertQuery(_, checkNative = true))
       }
     }

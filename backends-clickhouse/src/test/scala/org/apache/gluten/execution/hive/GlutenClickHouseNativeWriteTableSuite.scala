@@ -174,7 +174,7 @@ class GlutenClickHouseNativeWriteTableSuite
       ("long_field", "long"),
       ("array_field", "array<int>")
     )
-    withSource(genTestData(300000, allowNull = false), "origin_table") {
+    withSource(genTestData(30000, allowNull = true), "origin_table") {
       nativeWrite {
         format =>
           Seq(

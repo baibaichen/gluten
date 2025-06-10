@@ -975,7 +975,7 @@ TEST_F(IcebergTest, basic_utils_test)
     /*const  std::string sql =
         R"(SELECT l_returnflag, l_linestatus FROM file('/home/chang/test/perf/tpch100/lineitem/*.parquet','Parquet') where l_orderkey = 100 Settings max_threads=1)";*/
     const  std::string sql =
-            R"(SELECT * FROM file('/home/chang/Desktop/hive_parquet_test/*.parquet','Parquet') Settings max_threads=1)";
+            R"(SELECT array_field FROM file('/home/chang/Desktop/hive_parquet_test/*.parquet','Parquet') Settings max_threads=1)";
     auto x = runClickhouseSQL(sql);
     headBlock(x);
 

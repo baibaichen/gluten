@@ -14,6 +14,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <Storages/Parquet/ParquetReadState.h>
+#include "Processors/Formats/Impl/Parquet/PageReader.h"
+
+
 #include "config.h"
 #if USE_PARQUET
 #include <charconv>
@@ -27,6 +31,7 @@
 #include <Parsers/ExpressionListParsers.h>
 #include <Storages/Parquet/ArrowUtils.h>
 #include <Storages/Parquet/ColumnIndexFilter.h>
+#include <Storages/Parquet/ColumnIndexFilterUtils.h>
 #include <Storages/Parquet/ParquetConverter.h>
 #include <Storages/Parquet/RowRanges.h>
 #include <Storages/Parquet/VectorizedParquetRecordReader.h>
@@ -40,8 +45,8 @@
 #include <Common/BlockTypeUtils.h>
 #include <Common/QueryContext.h>
 
-#include <Processors/Formats/Impl/Parquet/xsimd_wrapper.h>
 #include <Processors/Formats/Impl/Parquet/ColumnFilter.h>
+#include <Processors/Formats/Impl/Parquet/xsimd_wrapper.h>
 
 #define ASSERT_DURATION_LE(secs, stmt) \
     { \
@@ -789,6 +794,149 @@ void PrintTo(const ReadRange & infos, std::ostream * os)
 }
 }
 
+struct TestPage : parquet::Page
+{
+public:
+    const int32_t rowCount_;
+    explicit TestPage(int32_t rowCount) : Page(nullptr, parquet::PageType::UNDEFINED), rowCount_(rowCount) { }
+
+    virtual ~TestPage() = default;
+};
+
+class TestPageReader : public parquet::PageReader
+{
+public:
+    static std::shared_ptr<TestPageReader> create(const local_engine::OffsetIndex & offset_index, int64_t numRows)
+    {
+        std::vector<std::shared_ptr<TestPage>> pages;
+        pages.reserve(offset_index.getPageCount());
+        for (int i = 0; i < offset_index.getPageCount(); ++i)
+        {
+            auto firstRowIndex = offset_index.getFirstRowIndex(i);
+            auto lastRowIndex = offset_index.getLastRowIndex(i, numRows);
+            int32_t rowCount = lastRowIndex - firstRowIndex + 1;
+            pages.emplace_back(std::make_shared<TestPage>(rowCount));
+        }
+        return std::make_shared<TestPageReader>(pages);
+    }
+
+    explicit TestPageReader(const std::vector<std::shared_ptr<TestPage>> & pages) : pages_(pages), page_index_(0) { }
+
+    std::shared_ptr<parquet::Page> NextPage() override
+    {
+        if (page_index_ == static_cast<int>(pages_.size()))
+        {
+            // EOS to consumer
+            return std::shared_ptr<parquet::Page>(nullptr);
+        }
+
+        if (data_page_filter_)
+        {
+            parquet::DataPageStats stats{nullptr, 0, std::nullopt};
+            data_page_filter_(stats);
+        }
+        return std::static_pointer_cast<parquet::Page>(pages_[page_index_++]);
+    }
+
+    // No-op
+    void set_max_page_header_size(uint32_t size) override { }
+
+private:
+    std::vector<std::shared_ptr<TestPage>> pages_;
+    int page_index_;
+};
+
+struct ColumnReader
+{
+    static std::unique_ptr<ColumnReader>
+    create(const std::vector<parquet::PageLocation> & page_locations, const local_engine::RowRanges & row_ranges, int64_t numRows)
+    {
+        auto offset = local_engine::ColumnIndexFilterUtils::filterOffsetIndex(page_locations, row_ranges, numRows);
+        auto page_reader = TestPageReader::create(*offset, numRows);
+        return std::make_unique<ColumnReader>(std::move(page_reader), std::move(offset), row_ranges, numRows);
+    }
+
+    std::shared_ptr<parquet::PageReader> reader_;
+    std::unique_ptr<local_engine::OffsetIndex> offset_index_;
+    local_engine::ParquetReadState2 read_state_;
+    int32_t page_index_;
+    int64_t rowGroupCount_;
+
+    local_engine::ReadSequence read_sequence_;
+
+    bool OnNextPage(const parquet::DataPageStats & /*stats*/)
+    {
+        chassert(page_index_ >= 0 && page_index_ < offset_index_->getPageCount());
+        auto firstRowIndex = offset_index_->getFirstRowIndex(page_index_);
+        auto lastRowIndex = offset_index_->getLastRowIndex(page_index_, rowGroupCount_);
+        read_state_.resetForNewPage(lastRowIndex - firstRowIndex + 1, firstRowIndex);
+        page_index_ += 1;
+        return false;
+    }
+
+    ColumnReader(
+        std::shared_ptr<parquet::PageReader> reader,
+        std::unique_ptr<local_engine::OffsetIndex> offset_index,
+        const local_engine::RowRanges & row_ranges,
+        int64_t rowGroupCount)
+        : reader_(std::move(reader))
+        , offset_index_(std::move(offset_index))
+        , read_state_(row_ranges)
+        , page_index_(0)
+        , rowGroupCount_(rowGroupCount)
+    {
+        reader_->set_data_page_filter([this](const parquet::DataPageStats & stats) { return this->OnNextPage(stats); });
+
+        read_state_.setSkipFunc([this](size_t count) { this->skipRecord(count); });
+
+        read_state_.setReadFunc([this](size_t count) { this->readRecord(count); });
+    }
+
+    void readBatch(int64_t batch_size)
+    {
+        read_state_.resetForNewBatch(batch_size);
+        while (HasNext() && read_state_.getRowsToReadInBatch() > 0)
+            read_state_.read();
+    }
+
+    /// From parquet::ColumnReader
+    int32_t remained_page_row_count_ = 0;
+    bool HasNext()
+    {
+        chassert(remained_page_row_count_ >= 0);
+        if (remained_page_row_count_ == 0)
+        {
+            if (const auto page = std::static_pointer_cast<TestPage>(reader_->NextPage()))
+                remained_page_row_count_ = page->rowCount_;
+        }
+        return remained_page_row_count_ > 0;
+    }
+
+    void doRead(size_t count)
+    {
+        chassert(remained_page_row_count_ >= count);
+        remained_page_row_count_ -= count;
+    }
+    void skipRecord(size_t count)
+    {
+        assert(count > 0);
+        if (read_sequence_.empty() || read_sequence_.back() > 0)
+            read_sequence_.emplace_back(-count);
+        else
+            read_sequence_.back() -= count;
+        doRead(count);
+    }
+    void readRecord(size_t count)
+    {
+        assert(count > 0);
+        if (read_sequence_.empty() || read_sequence_.back() < 0)
+            read_sequence_.push_back(count);
+        else
+            read_sequence_.back() += count;
+        doRead(count);
+    }
+};
+
 class TestBuildPageReadStates : public ::testing::TestWithParam<ReadStatesParam>
 {
 protected:
@@ -819,6 +967,15 @@ protected:
         const auto & expected_read_info = param_.read_states->second;
         ASSERT_EQ(expected_read_ranges, actaul_read_ranges);
         ASSERT_EQ(expected_read_info, actaul_read_infos);
+
+        /// new algorithm
+        local_engine::ReadRanges read_ranges
+            = local_engine::ColumnIndexFilterUtils::calculateReadRanges(page_locations_, param_.row_ranges, num_rows_, chunk_range_);
+        ASSERT_EQ(read_ranges, expected_read_ranges);
+
+        auto colReader = ColumnReader::create(page_locations_, param_.row_ranges, num_rows_);
+        colReader->readBatch(100000);
+        ASSERT_EQ(colReader->read_sequence_, expected_read_info);
     }
 
 private:
@@ -1161,10 +1318,7 @@ TEST(ColumnIndex, VectorizedParquetRecordReader)
     } while (chunk.getNumRows() > 0);
 }
 
-void fillRowNumbersOriginal(
-    const RowSet & row_set,
-    const local_engine::RowRanges & row_ranges,
-    PaddedPODArray<Int64> & result)
+void fillRowNumbersOriginal(const RowSet & row_set, const local_engine::RowRanges & row_ranges, PaddedPODArray<Int64> & result)
 {
     const auto & ranges = row_ranges.getRanges();
 
@@ -1179,12 +1333,8 @@ void fillRowNumbersOriginal(
         size_t range_size = to - from + 1; // 闭区间，包含边界
 
         for (size_t i = 0; i < range_size; ++i, ++row_index)
-        {
             if (row_set.get(row_index))
-            {
                 result.push_back(static_cast<Int64>(from + i));
-            }
-        }
     }
 }
 

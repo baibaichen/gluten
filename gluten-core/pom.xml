@@ -27,6 +27,10 @@
   <packaging>jar</packaging>
   <name>Gluten Core</name>
 
+  <properties>
+    <gluten.build.info.skip>false</gluten.build.info.skip>
+  </properties>
+
   <dependencies>
     <dependency>
       <groupId>org.apache.gluten</groupId>
@@ -171,6 +175,7 @@
               <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
               <protoSourceRoot>src/main/resources/org/apache/gluten/proto</protoSourceRoot>
               <clearOutputDirectory>false</clearOutputDirectory>
+              <checkStaleness>true</checkStaleness>
             </configuration>
           </execution>
         </executions>
@@ -186,6 +191,7 @@
             </goals>
             <phase>generate-resources</phase>
             <configuration>
+              <skip>${gluten.build.info.skip}</skip>
               <target>
                 <exec executable="bash" osfamily="unix">
                   <arg value="${project.basedir}/../dev/gluten-build-info.sh"/>

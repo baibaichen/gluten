@@ -441,8 +441,8 @@ class VeloxTestSettings extends BackendTestSettings {
     .exclude("SPARK-16371 Do not push down filters when inner name and outer name are the same")
     .exclude("filter pushdown - StringPredicate")
     .exclude("SPARK-38825: in and notIn filters")
-    // TODO: fix in Spark-4.0
-    .exclude("SPARK-47120: subquery literal filter pushdown")
+  // TODO: fix in Spark-4.0
+  // .exclude("SPARK-47120: subquery literal filter pushdown")                  // +
   enableSuite[GlutenParquetV2FilterSuite]
     // Rewrite.
     .exclude("SPARK-23852: Broken Parquet push-down for partially-written stats")
@@ -461,8 +461,8 @@ class VeloxTestSettings extends BackendTestSettings {
     .exclude("SPARK-16371 Do not push down filters when inner name and outer name are the same")
     .exclude("filter pushdown - StringPredicate")
     .exclude("SPARK-38825: in and notIn filters")
-    // TODO: fix in Spark-4.0
-    .exclude("SPARK-47120: subquery literal filter pushdown")
+  // TODO: fix in Spark-4.0
+  // .exclude("SPARK-47120: subquery literal filter pushdown")                  // +
   enableSuite[GlutenParquetInteroperabilitySuite]
     .exclude("parquet timestamp conversion")
   enableSuite[GlutenParquetIOSuite]
@@ -474,11 +474,11 @@ class VeloxTestSettings extends BackendTestSettings {
     .exclude("SPARK-35640: int as long should throw schema incompatible error")
     // Velox parquet reader not allow offset zero.
     .exclude("SPARK-40128 read DELTA_LENGTH_BYTE_ARRAY encoded strings")
-    // TODO: fix in Spark-4.0
-    .exclude("SPARK-49991: Respect 'mapreduce.output.basename' to generate file names")
-    .exclude("SPARK-6330 regression test")
-    .exclude("SPARK-7837 Do not close output writer twice when commitTask() fails")
-    .exclude("explode nested lists crossing a rowgroup boundary")
+  // TODO: fix in Spark-4.0
+  // .exclude("SPARK-49991: Respect 'mapreduce.output.basename' to generate file names") // +
+  // .exclude("SPARK-6330 regression test")                                              // =
+  // .exclude("SPARK-7837 Do not close output writer twice when commitTask() fails")     // =
+  // .exclude("explode nested lists crossing a rowgroup boundary")                       // +
   enableSuite[GlutenParquetV1PartitionDiscoverySuite]
   enableSuite[GlutenParquetV2PartitionDiscoverySuite]
   enableSuite[GlutenParquetProtobufCompatibilitySuite]
@@ -569,13 +569,13 @@ class VeloxTestSettings extends BackendTestSettings {
   enableSuite[GlutenVectorizedOrcReadSchemaSuite]
   enableSuite[GlutenMergedOrcReadSchemaSuite]
   enableSuite[GlutenParquetReadSchemaSuite]
-    // TODO: fix in Spark-4.0
-    .exclude("read float and double together")
-    .exclude("change column type from float to double")
+  // TODO: fix in Spark-4.0
+  // .exclude("read float and double together")              // =
+  // .exclude("change column type from float to double")     // =
   enableSuite[GlutenVectorizedParquetReadSchemaSuite]
-    // TODO: fix in Spark-4.0
-    .exclude("read float and double together")
-    .exclude("change column type from float to double")
+  // TODO: fix in Spark-4.0
+  // .exclude("read float and double together")              // =
+  // .exclude("change column type from float to double")     // =
   enableSuite[GlutenMergedParquetReadSchemaSuite]
   enableSuite[GlutenParquetCodecSuite]
   enableSuite[GlutenV1WriteCommandSuite]

@@ -460,8 +460,8 @@ class VeloxTestSettings extends BackendTestSettings {
     .exclude("SPARK-16371 Do not push down filters when inner name and outer name are the same")
     .exclude("filter pushdown - StringPredicate")
     .exclude("SPARK-38825: in and notIn filters")
-    // TODO: fix in Spark-4.0
-    .exclude("SPARK-47120: subquery literal filter pushdown")
+  // TODO: fix in Spark-4.0
+  // .exclude("SPARK-47120: subquery literal filter pushdown")                  // +
   enableSuite[GlutenParquetInteroperabilitySuite]
     .exclude("parquet timestamp conversion")
   enableSuite[GlutenParquetIOSuite]
@@ -565,13 +565,13 @@ class VeloxTestSettings extends BackendTestSettings {
   enableSuite[GlutenVectorizedOrcReadSchemaSuite]
   enableSuite[GlutenMergedOrcReadSchemaSuite]
   enableSuite[GlutenParquetReadSchemaSuite]
-    // TODO: fix in Spark-4.0
-    .exclude("read float and double together")
-    .exclude("change column type from float to double")
+  // TODO: fix in Spark-4.0
+  // .exclude("read float and double together")              // =
+  // .exclude("change column type from float to double")     // =
   enableSuite[GlutenVectorizedParquetReadSchemaSuite]
-    // TODO: fix in Spark-4.0
-    .exclude("read float and double together")
-    .exclude("change column type from float to double")
+  // TODO: fix in Spark-4.0
+  // .exclude("read float and double together")              // =
+  // .exclude("change column type from float to double")     // =
   enableSuite[GlutenMergedParquetReadSchemaSuite]
   enableSuite[GlutenParquetCodecSuite]
   enableSuite[GlutenV1WriteCommandSuite]

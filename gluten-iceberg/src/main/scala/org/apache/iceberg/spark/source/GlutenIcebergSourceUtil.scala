@@ -67,7 +67,7 @@ object GlutenIcebergSourceUtil {
           task =>
             paths.add(
               BackendsApiManager.getTransformerApiInstance
-                .encodeFilePathIfNeed(task.file().path().toString))
+                .encodeFilePathIfNeed(task.file().location()))
             starts.add(task.start())
             lengths.add(task.length())
             partitionColumns.add(getPartitionColumns(task, readPartitionSchema))

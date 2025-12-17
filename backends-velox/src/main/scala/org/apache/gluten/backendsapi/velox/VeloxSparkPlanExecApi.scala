@@ -67,6 +67,13 @@ import scala.collection.JavaConverters._
 
 class VeloxSparkPlanExecApi extends SparkPlanExecApi {
 
+  /**
+   * Returns the Velox backend-specific expression transformer. This PartialFunction is invoked just
+   * before falling back to GenericExpressionTransformer.
+   */
+  override def backendExpressionTransformer: BackendExpressionTransformer.TransformFunction =
+    VeloxBackendExpressionTransformer.transform
+
   /** Transform GetArrayItem to Substrait. */
   override def genGetArrayItemTransformer(
       substraitExprName: String,

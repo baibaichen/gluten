@@ -70,6 +70,13 @@ import scala.collection.mutable.ArrayBuffer
 
 class CHSparkPlanExecApi extends SparkPlanExecApi with Logging {
 
+  /**
+   * Returns the ClickHouse backend-specific expression transformer. This PartialFunction is
+   * invoked just before falling back to GenericExpressionTransformer.
+   */
+  override def backendExpressionTransformer: BackendExpressionTransformer.TransformFunction =
+    CHBackendExpressionTransformer.transform
+
   /** Transform GetArrayItem to Substrait. */
   override def genGetArrayItemTransformer(
       substraitExprName: String,

@@ -902,11 +902,19 @@ object ExpressionConverter extends SQLConfHelper with Logging {
           replaceWithExpressionTransformer0(errorMessage, attributeSeq, expressionsMap),
           re)
       case expr =>
-        GenericExpressionTransformer(
-          substraitExprName,
-          expr.children.map(replaceWithExpressionTransformer0(_, attributeSeq, expressionsMap)),
-          expr
-        )
+        // Try a backend-specific transformer before falling back to GenericExpressionTransformer
+        val context = ExpressionTransformContext(expr, substraitExprName, attributeSeq)
+        BackendsApiManager.getSparkPlanExecApiInstance.backendExpressionTransformer
+          .applyOrElse(
+            context,
+            (_: ExpressionTransformContext) =>
+              GenericExpressionTransformer(
+                substraitExprName,
+                expr.children.map(
+                  replaceWithExpressionTransformer0(_, attributeSeq, expressionsMap)),
+                expr
+              )
+          )
     }
   }
 

@@ -55,6 +55,22 @@ import scala.collection.JavaConverters._
 trait SparkPlanExecApi {
 
   /**
+   * Returns the backend-specific expression transformer as a PartialFunction. Backends can override
+   * this method to provide custom transformation logic for specific expressions.
+   *
+   * This transformer is invoked just before falling back to GenericExpressionTransformer, after all
+   * other specific transformations in ExpressionConverter.transformExpression have been tried.
+   *
+   * Using PartialFunction leverages Scala's pattern matching - if a pattern doesn't match, it means
+   * the backend doesn't handle that expression, and GenericExpressionTransformer will be used.
+   *
+   * @return
+   *   The backend expression transformer, defaults to empty (handles nothing)
+   */
+  def backendExpressionTransformer: BackendExpressionTransformer.TransformFunction =
+    BackendExpressionTransformer.empty
+
+  /**
    * Generate FilterExecTransformer.
    *
    * @param condition

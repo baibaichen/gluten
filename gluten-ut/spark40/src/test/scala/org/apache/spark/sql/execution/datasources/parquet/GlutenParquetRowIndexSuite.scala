@@ -42,7 +42,7 @@ class GlutenParquetRowIndexSuite extends ParquetRowIndexSuite with GlutenSQLTest
   import testImplicits._
 
   private def readRowGroupRowCounts(path: String): Seq[Long] = {
-    ParquetFooterReaderShim
+    ParquetFooterReader
       .readFooter(
         spark.sessionState.newHadoopConf(),
         new Path(path),

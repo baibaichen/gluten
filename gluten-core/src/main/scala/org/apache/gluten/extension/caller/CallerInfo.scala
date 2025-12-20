@@ -18,7 +18,7 @@ package org.apache.gluten.extension.caller
 
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
 import org.apache.spark.sql.execution.columnar.InMemoryRelation
-import org.apache.spark.util.SparkVersionUtil
+import org.apache.spark.sql.execution.streaming.StreamExecution
 
 /**
  * Helper API that stores information about the call site of the columnar rule. Specific columnar
@@ -70,12 +70,7 @@ object CallerInfo {
   }
 
   private def inStreamingCall(stack: Seq[StackTraceElement]): Boolean = {
-    val streamName = if (SparkVersionUtil.gteSpark41) {
-      "org.apache.spark.sql.execution.streaming.runtime.StreamExecution"
-    } else {
-      "org.apache.spark.sql.execution.streaming.StreamExecution"
-    }
-    stack.exists(_.getClassName.equals(streamName))
+    stack.exists(_.getClassName.equals(StreamExecution.getClass.getName.split('$').head))
   }
 
   private def inBloomFilterStatFunctionCall(stack: Seq[StackTraceElement]): Boolean = {

@@ -8,9 +8,9 @@
     <relativePath>../pom.xml</relativePath>
   </parent>
 
-  <artifactId>gluten-ut-spark40</artifactId>
+  <artifactId>gluten-ut-spark41</artifactId>
   <packaging>jar</packaging>
-  <name>Gluten Unit Test Spark40</name>
+  <name>Gluten Unit Test Spark41</name>
 
   <dependencies>
     <dependency>

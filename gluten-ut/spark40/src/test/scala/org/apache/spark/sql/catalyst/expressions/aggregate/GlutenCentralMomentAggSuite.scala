@@ -16,6 +16,9 @@
  */
 package org.apache.spark.sql.catalyst.expressions.aggregate
 
-import org.apache.spark.sql.{GlutenTestsCommonTrait}
+import org.apache.spark.sql.GlutenTestsTrait
 
-class GlutenCentralMomentAggSuite extends CentralMomentAggSuite with GlutenTestsCommonTrait {}
+class GlutenCentralMomentAggSuite extends CentralMomentAggSuite with GlutenTestsTrait {
+  override def testBothCodegenAndInterpreted(name: String)(f: => Unit): Unit =
+    super[CentralMomentAggSuite].testBothCodegenAndInterpreted(name)(f)
+}

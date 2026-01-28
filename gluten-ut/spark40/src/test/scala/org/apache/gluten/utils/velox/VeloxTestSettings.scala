@@ -60,6 +60,7 @@ import org.apache.spark.sql.sources._
 import org.apache.spark.sql.sources.{GlutenBucketedReadWithHiveSupportSuite, GlutenBucketedWriteWithHiveSupportSuite, GlutenCommitFailureTestRelationSuite, GlutenDataSourceAnalysisSuite, GlutenDisableUnnecessaryBucketedScanWithHiveSupportSuite, GlutenJsonHadoopFsRelationSuite, GlutenParquetHadoopFsRelationSuite, GlutenSimpleTextHadoopFsRelationSuite}
 import org.apache.spark.sql.streaming._
 import org.apache.spark.sql.streaming.GlutenStreamingQuerySuite
+import org.apache.spark.sql.catalyst.expressions.aggregate.{GlutenCentralMomentAggSuite, GlutenCovarianceAggSuite}
 
 // Some settings' line length exceeds 100
 // scalastyle:off line.size.limit
@@ -1228,6 +1229,9 @@ class VeloxTestSettings extends BackendTestSettings {
   enableSuite[GlutenJsonHadoopFsRelationSuite]
   enableSuite[GlutenParquetHadoopFsRelationSuite]
   enableSuite[GlutenSimpleTextHadoopFsRelationSuite]
+  // Generated suites for org.apache.spark.sql.catalyst.expressions.aggregate
+  enableSuite[GlutenCentralMomentAggSuite]
+  enableSuite[GlutenCovarianceAggSuite]
 
   override def getSQLQueryTestSettings: SQLQueryTestSettings = VeloxSQLQueryTestSettings
 }

@@ -228,7 +228,7 @@ class VeloxTestSettings extends BackendTestSettings {
   enableSuite[GlutenBitmapExpressionUtilsSuite]
   enableSuite[GlutenCallMethodViaReflectionSuite]
   enableSuite[GlutenCanonicalizeSuite]
-  // TODO: 4.x enableSuite[GlutenCastWithAnsiOnSuite]  // 10 failures
+  enableSuite[GlutenCastWithAnsiOnSuite]
   enableSuite[GlutenCodeGenerationSuite]
   enableSuite[GlutenCodeGeneratorWithInterpretedFallbackSuite]
   enableSuite[GlutenCollationExpressionSuite]

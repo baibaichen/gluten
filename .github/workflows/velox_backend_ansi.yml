@@ -16,14 +16,6 @@
 name: Velox Backend ANSI Mode
 
 on:
-  workflow_dispatch:
-    inputs:
-      ansi_mode:
-        description: 'ANSI mode: true=ANSI baseline, false=regression check'
-        required: false
-        default: 'true'
-  schedule:
-    - cron: '0 8 * * *'
   pull_request:
     paths:
       - '.github/workflows/velox_backend_ansi.yml'
@@ -45,8 +37,7 @@ env:
   MVN_CMD: 'build/mvn -ntp'
   WGET_CMD: 'wget -nv'
   CCACHE_DIR: "${{ github.workspace }}/.ccache"
-  # workflow_dispatch 手动输入时可切换，schedule/pull_request 默认 true
-  SPARK_ANSI_SQL_MODE: ${{ github.event.inputs.ansi_mode || 'true' }}
+  SPARK_ANSI_SQL_MODE: true
 
 concurrency:
   group: ${{ github.repository }}-${{ github.head_ref || github.sha }}-${{ github.workflow }}
@@ -128,7 +119,7 @@ jobs:
           rm -rf /opt/shims/spark41
           bash .github/workflows/util/install-resources.sh 4.1
           mv /opt/shims/spark41/spark_home/assembly/target/scala-2.12 /opt/shims/spark41/spark_home/assembly/target/scala-2.13
-      - name: "Spark 4.1 Unit Tests (ANSI=${{ env.SPARK_ANSI_SQL_MODE }})"
+      - name: "Spark 4.1 Unit Tests (ANSI ON)"
         run: |
           cd $GITHUB_WORKSPACE/
           export SPARK_SCALA_VERSION=2.13
@@ -137,10 +128,10 @@ jobs:
           export PATH=$JAVA_HOME/bin:$PATH
           echo "SPARK_ANSI_SQL_MODE=$SPARK_ANSI_SQL_MODE"
           java -version
-          $MVN_CMD clean test -Pspark-4.1 -Pscala-2.13 -Pjava-17 -Pbackends-velox \
-          -Pspark-ut -DargLine="-Dspark.test.home=/opt/shims/spark41/spark_home/" \
+          $MVN_CMD clean test -fae -Pspark-4.1 -Pscala-2.13 -Pjava-17 -Pbackends-velox \
+          -Pspark-ut -DargLine="-Dspark.test.home=/opt/shims/spark41/spark_home/ -Dspark.gluten.sql.ansiFallback.enabled=false" \
           -DtagsToExclude=org.apache.spark.tags.ExtendedSQLTest,org.apache.gluten.tags.UDFTest,org.apache.gluten.tags.EnhancedFeaturesTest,org.apache.gluten.tags.SkipTest \
-          2>&1 | tee ansi-test-output.log || true
+          2>&1 | tee ansi-test-output.log
       - name: "Parse test results"
         if: always()
         run: |

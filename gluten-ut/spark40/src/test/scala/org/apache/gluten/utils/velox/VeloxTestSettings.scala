@@ -102,16 +102,6 @@ class VeloxTestSettings extends BackendTestSettings {
     .exclude("SPARK-45786: Decimal multiply, divide, remainder, quot")
   enableSuite[GlutenBitwiseExpressionsSuite]
   enableSuite[GlutenCastWithAnsiOffSuite]
-    .exclude(
-      "Process Infinity, -Infinity, NaN in case insensitive manner" // +inf not supported in folly.
-    )
-    // Set timezone through config.
-    .exclude("data type casting")
-    // Revised by setting timezone through config and commented unsupported cases.
-    .exclude("cast string to timestamp")
-    .exclude("cast from timestamp II")
-    .exclude("SPARK-36286: invalid string cast to timestamp")
-    .exclude("SPARK-39749: cast Decimal to string")
   enableSuite[GlutenTryCastSuite]
     .exclude(
       "Process Infinity, -Infinity, NaN in case insensitive manner" // +inf not supported in folly.
@@ -217,7 +207,7 @@ class VeloxTestSettings extends BackendTestSettings {
   enableSuite[GlutenBitmapExpressionUtilsSuite]
   enableSuite[GlutenCallMethodViaReflectionSuite]
   enableSuite[GlutenCanonicalizeSuite]
-  // TODO: 4.x enableSuite[GlutenCastWithAnsiOnSuite]  // 4 failures
+  enableSuite[GlutenCastWithAnsiOnSuite]
   enableSuite[GlutenCodeGenerationSuite]
   enableSuite[GlutenCodeGeneratorWithInterpretedFallbackSuite]
   enableSuite[GlutenCollationExpressionSuite]

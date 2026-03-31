@@ -224,9 +224,6 @@ class VeloxTestSettings extends BackendTestSettings {
   enableSuite[GlutenCastWithAnsiOnSuite]
     .exclude("data type casting")
     .exclude("cast string to timestamp")
-    .exclude("Casting to char/varchar")
-    .exclude("ANSI mode: Throw exception on casting out-of-range value to long type")
-    .exclude("SPARK-39749: cast Decimal to string")
   enableSuite[GlutenCodeGenerationSuite]
   enableSuite[GlutenCodeGeneratorWithInterpretedFallbackSuite]
   enableSuite[GlutenCollationExpressionSuite]

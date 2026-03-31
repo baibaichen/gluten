@@ -44,11 +44,43 @@ case class ChildTransformer(
 case class CastTransformer(substraitExprName: String, child: ExpressionTransformer, original: Cast)
   extends UnaryExpressionTransformer {
   override def doTransform(context: SubstraitContext): ExpressionNode = {
-    val typeNode = ConverterUtils.getTypeNode(dataType, original.nullable)
-    ExpressionBuilder.makeCast(
-      typeNode,
+    original.dataType match {
+      case CharType(length) =>
+        buildCastWithWriteSideCheck(
+          context,
+          ExpressionNames.CHAR_TYPE_WRITE_SIDE_CHECK,
+          length)
+      case VarcharType(length) =>
+        buildCastWithWriteSideCheck(
+          context,
+          ExpressionNames.VARCHAR_TYPE_WRITE_SIDE_CHECK,
+          length)
+      case _ =>
+        val typeNode = ConverterUtils.getTypeNode(dataType, original.nullable)
+        ExpressionBuilder.makeCast(
+          typeNode,
+          child.doTransform(context),
+          SparkShimLoader.getSparkShims.withTryEvalMode(original))
+    }
+  }
+
+  /** Builds Cast(child, StringType) + write-side check for CharType/VarcharType. */
+  private def buildCastWithWriteSideCheck(
+      context: SubstraitContext,
+      checkFuncName: String,
+      length: Int): ExpressionNode = {
+    val stringTypeNode = ConverterUtils.getTypeNode(StringType, original.nullable)
+    val castNode = ExpressionBuilder.makeCast(
+      stringTypeNode,
       child.doTransform(context),
       SparkShimLoader.getSparkShims.withTryEvalMode(original))
+    val funcName =
+      ConverterUtils.makeFuncName(checkFuncName, Seq(StringType, IntegerType))
+    val functionId = context.registerFunction(funcName)
+    val lengthNode =
+      ExpressionBuilder.makeLiteral(length.asInstanceOf[java.lang.Integer], IntegerType, false)
+    val childNodes: java.util.List[ExpressionNode] = Lists.newArrayList(castNode, lengthNode)
+    ExpressionBuilder.makeScalarFunction(functionId, childNodes, stringTypeNode)
   }
 }
 

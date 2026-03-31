@@ -16,6 +16,8 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
+import org.apache.gluten.config.GlutenConfig
+
 import org.apache.spark.sql.GlutenTestsTrait
 import org.apache.spark.sql.catalyst.util.DateTimeTestUtils.{withDefaultTimeZone, ALL_TIMEZONES, UTC, UTC_OPT}
 import org.apache.spark.sql.catalyst.util.DateTimeUtils.{fromJavaTimestamp, millisToMicros, TimeZoneUTC}
@@ -30,6 +32,12 @@ class GlutenCastWithAnsiOnSuite extends CastWithAnsiOnSuite with GlutenTestsTrai
   override def beforeAll(): Unit = {
     super.beforeAll()
     conf.setConf(SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO, true)
+    // CastWithAnsiOnSuite creates Cast expressions with EvalMode.ANSI but does not set the
+    // session-level ANSI config. Velox reads ANSI mode from session config to decide cast
+    // behavior (e.g., scientific notation for Decimal→String). We must sync session config
+    // with the expression-level evalMode and disable ANSI fallback so Velox actually executes.
+    conf.setConf(SQLConf.ANSI_ENABLED, true)
+    conf.setConfString(GlutenConfig.GLUTEN_ANSI_FALLBACK_ENABLED.key, "false")
   }
 
   // Override: Gluten uses session-level timezone for cast. The original test sets per-expression

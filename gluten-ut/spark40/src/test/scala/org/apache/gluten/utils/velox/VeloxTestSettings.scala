@@ -102,6 +102,9 @@ class VeloxTestSettings extends BackendTestSettings {
     .exclude("SPARK-45786: Decimal multiply, divide, remainder, quot")
   enableSuite[GlutenBitwiseExpressionsSuite]
   enableSuite[GlutenCastWithAnsiOffSuite]
+    .exclude("data type casting") // Rewrite for Gluten: sync session timezone with per-expression
+    .exclude("cast string to timestamp") // Rewrite for Gluten: sync session timezone
+    .exclude("cast from timestamp II") // Rewrite: skip Long.MinValue (collect rebase overflow)
   enableSuite[GlutenTryCastSuite]
     .exclude(
       "Process Infinity, -Infinity, NaN in case insensitive manner" // +inf not supported in folly.

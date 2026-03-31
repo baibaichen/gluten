@@ -107,6 +107,9 @@ class VeloxTestSettings extends BackendTestSettings {
   enableSuite[GlutenBindReferencesSuite]
   enableSuite[GlutenBitwiseExpressionsSuite]
   enableSuite[GlutenCastWithAnsiOffSuite]
+    .exclude("data type casting") // Rewrite for Gluten: sync session timezone with per-expression
+    .exclude("cast string to timestamp") // Rewrite for Gluten: sync session timezone
+    .exclude("cast from timestamp II") // Rewrite: skip Long.MinValue (collect rebase overflow)
   enableSuite[GlutenTryCastSuite]
     .exclude(
       "Process Infinity, -Infinity, NaN in case insensitive manner" // +inf not supported in folly.

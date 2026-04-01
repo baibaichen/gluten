@@ -791,6 +791,14 @@ object ExpressionConverter extends SQLConfHelper with Logging {
           i,
           ExpressionNames.CHECKED_DIV
         )
+      case a: Remainder =>
+        BackendsApiManager.getSparkPlanExecApiInstance.genArithmeticTransformer(
+          substraitExprName,
+          replaceWithExpressionTransformer0(a.left, attributeSeq, expressionsMap),
+          replaceWithExpressionTransformer0(a.right, attributeSeq, expressionsMap),
+          a,
+          ExpressionNames.CHECKED_REMAINDER
+        )
       case tryEval: TryEval =>
         // This is a placeholder to handle try_eval(other expressions).
         BackendsApiManager.getSparkPlanExecApiInstance.genTryEvalTransformer(

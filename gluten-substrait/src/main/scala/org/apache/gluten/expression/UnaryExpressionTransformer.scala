@@ -46,15 +46,9 @@ case class CastTransformer(substraitExprName: String, child: ExpressionTransform
   override def doTransform(context: SubstraitContext): ExpressionNode = {
     original.dataType match {
       case CharType(length) =>
-        buildCastWithWriteSideCheck(
-          context,
-          ExpressionNames.CHAR_TYPE_WRITE_SIDE_CHECK,
-          length)
+        buildCastWithWriteSideCheck(context, ExpressionNames.CHAR_TYPE_WRITE_SIDE_CHECK, length)
       case VarcharType(length) =>
-        buildCastWithWriteSideCheck(
-          context,
-          ExpressionNames.VARCHAR_TYPE_WRITE_SIDE_CHECK,
-          length)
+        buildCastWithWriteSideCheck(context, ExpressionNames.VARCHAR_TYPE_WRITE_SIDE_CHECK, length)
       case _ =>
         val typeNode = ConverterUtils.getTypeNode(dataType, original.nullable)
         ExpressionBuilder.makeCast(

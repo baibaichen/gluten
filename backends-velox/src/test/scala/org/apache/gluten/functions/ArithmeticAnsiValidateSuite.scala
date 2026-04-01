@@ -100,4 +100,15 @@ class ArithmeticAnsiValidateSuite extends FunctionsValidateSuite {
     }
   }
 
+  test("remainder") {
+    runQueryAndCompare("SELECT int_field1 % 3 FROM datatab WHERE int_field1 IS NOT NULL") {
+      checkGlutenPlan[ProjectExecTransformer]
+    }
+    if (isSparkVersionGE("3.4")) {
+      intercept[SparkException] {
+        sql("SELECT 1 % 0").collect()
+      }
+    }
+  }
+
 }

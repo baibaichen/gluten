@@ -93,6 +93,7 @@ object ExpressionNames {
   final val CHECKED_DIVIDE = "checked_divide"
   final val CHECKED_MULTIPLY = "checked_multiply"
   final val CHECKED_DIV = "checked_div"
+  final val CHECKED_REMAINDER = "checked_remainder"
 
   // SparkSQL String functions
   final val ASCII = "ascii"

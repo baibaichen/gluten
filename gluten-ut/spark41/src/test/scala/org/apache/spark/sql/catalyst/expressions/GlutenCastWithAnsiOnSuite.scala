@@ -34,7 +34,7 @@ class GlutenCastWithAnsiOnSuite extends CastWithAnsiOnSuite with GlutenTestsTrai
     conf.setConf(SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO, true)
     // CastWithAnsiOnSuite creates Cast expressions with EvalMode.ANSI but does not set the
     // session-level ANSI config. Velox reads ANSI mode from session config to decide cast
-    // behavior (e.g., scientific notation for Decimal→String). We must sync session config
+    // behavior (e.g., scientific notation for Decimal->String). We must sync session config
     // with the expression-level evalMode and disable ANSI fallback so Velox actually executes.
     conf.setConf(SQLConf.ANSI_ENABLED, true)
     conf.setConfString(GlutenConfig.GLUTEN_ANSI_FALLBACK_ENABLED.key, "false")

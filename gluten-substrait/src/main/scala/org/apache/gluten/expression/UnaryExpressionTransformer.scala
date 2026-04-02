@@ -54,7 +54,7 @@ case class CastTransformer(substraitExprName: String, child: ExpressionTransform
         ExpressionBuilder.makeCast(
           typeNode,
           child.doTransform(context),
-          SparkShimLoader.getSparkShims.withTryEvalMode(original))
+          !SparkShimLoader.getSparkShims.withAnsiEvalMode(original))
     }
   }
 
@@ -67,7 +67,7 @@ case class CastTransformer(substraitExprName: String, child: ExpressionTransform
     val castNode = ExpressionBuilder.makeCast(
       stringTypeNode,
       child.doTransform(context),
-      SparkShimLoader.getSparkShims.withTryEvalMode(original))
+      !SparkShimLoader.getSparkShims.withAnsiEvalMode(original))
     val funcName =
       ConverterUtils.makeFuncName(checkFuncName, Seq(StringType, IntegerType))
     val functionId = context.registerFunction(funcName)

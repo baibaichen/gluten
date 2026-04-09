@@ -1059,12 +1059,10 @@ class VeloxTestSettings extends BackendTestSettings {
     .exclude("SPARK-47939: Explain should work with parameterized queries")
     // ANSI mode: exception type mismatch -- Velox throws GlutenException, test expects specific
     // Spark exception types. Tracked for future fix via exception type mapping.
-    .exclude(
-      "SPARK-39166: Query context of binary arithmetic should be serialized to executors" +
-        " when WSCG is off")
-    .exclude(
-      "SPARK-39175: Query context of Cast should be serialized to executors" +
-        " when WSCG is off")
+    .exclude("SPARK-39166: Query context of binary arithmetic should be serialized to executors" +
+      " when WSCG is off")
+    .exclude("SPARK-39175: Query context of Cast should be serialized to executors" +
+      " when WSCG is off")
   enableSuite[GlutenSQLQueryTestSuite]
   enableSuite[GlutenStatisticsCollectionSuite]
     // The output byte size of Velox is different

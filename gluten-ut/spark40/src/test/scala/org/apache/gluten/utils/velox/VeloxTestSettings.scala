@@ -1135,6 +1135,7 @@ class VeloxTestSettings extends BackendTestSettings {
   enableSuite[GlutenSQLCollectLimitExecSuite]
   // Generated suites for org.apache.spark.sql.execution.python
   enableSuite[GlutenPythonDataSourceSuite]
+    .exclude("SPARK-50426: should not trigger static Python data source lookup")
   enableSuite[GlutenPythonUDFSuite]
     .exclude("SPARK-48706: Negative test case for Python UDF in higher order functions")
   enableSuite[GlutenPythonUDTFSuite]

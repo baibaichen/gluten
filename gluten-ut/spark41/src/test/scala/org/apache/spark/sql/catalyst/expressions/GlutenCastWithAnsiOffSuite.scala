@@ -27,6 +27,11 @@ import java.sql.{Date, Timestamp}
 import java.util.{Calendar, TimeZone}
 
 class GlutenCastWithAnsiOffSuite extends CastWithAnsiOffSuite with GlutenTestsTrait {
+  // Register UDT for test("SPARK-32828"). Gluten's checkEvaluation collects via RowEncoder,
+  // which needs UDT registration to serialize UserDefinedType values.
+  UDTRegistration.register(classOf[IExampleBaseType].getName, classOf[ExampleBaseTypeUDT].getName)
+  UDTRegistration.register(classOf[IExampleSubType].getName, classOf[ExampleSubTypeUDT].getName)
+
   override def beforeAll(): Unit = {
     super.beforeAll()
     conf.setConf(SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO, true)

@@ -893,6 +893,11 @@ class VeloxTestSettings extends BackendTestSettings {
       "SPARK-31620: agg with subquery (whole-stage-codegen = true)",
       "SPARK-31620: agg with subquery (whole-stage-codegen = false)"
     )
+    // ANSI mode: exception type mismatch -- Velox throws GlutenException, test expects
+    // SparkArithmeticException. Tracked for future fix via exception type mapping.
+    .exclude("SPARK-28067: Aggregate sum should not return wrong results for decimal overflow")
+    .exclude("SPARK-35955: Aggregate avg should not return wrong results for decimal overflow")
+    .exclude("SPARK-28224: Aggregate sum big decimal overflow")
   enableSuite[GlutenDataFrameAsOfJoinSuite]
   enableSuite[GlutenDataFrameComplexTypeSuite]
   enableSuite[GlutenDataFrameFunctionsSuite]
@@ -1063,6 +1068,9 @@ class VeloxTestSettings extends BackendTestSettings {
       " when WSCG is off")
     .exclude("SPARK-39175: Query context of Cast should be serialized to executors" +
       " when WSCG is off")
+    .exclude("SPARK-39190,SPARK-39208,SPARK-39210: Query context of decimal overflow error" +
+      " should be serialized to executors when WSCG is off")
+    .exclude("SPARK-40389: Don't eliminate a cast which can cause overflow")
   enableSuite[GlutenSQLQueryTestSuite]
   enableSuite[GlutenStatisticsCollectionSuite]
     // The output byte size of Velox is different

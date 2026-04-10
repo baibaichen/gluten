@@ -353,7 +353,7 @@ class FallbackSuite extends VeloxWholeStageTransformerSuite with AdaptiveSparkPl
     }
   }
 
-  test("fallback when nested loop join has unsupported expression") {
+  testWithAnsiMode("fallback when nested loop join has unsupported expression", false) {
     val events = new ArrayBuffer[GlutenPlanFallbackEvent]
     val listener = new SparkListener {
       override def onOtherEvent(event: SparkListenerEvent): Unit = {

@@ -34,6 +34,7 @@ import org.apache.spark.sql.execution.{CommandResultExec, SparkPlan, SQLExecutio
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, ShuffleQueryStageExec}
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.columnar.InMemoryRelation
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.storage.StorageLevel
 
 import org.junit.Assert
@@ -131,6 +132,15 @@ abstract class GlutenQueryTest extends PlanTest with AdaptiveSparkPlanHelper {
   /** Run the test if the current spark version greater than the minVersion */
   def testWithMinSparkVersion(testName: String, minVersion: String)(testFun: => Any): Unit = {
     if (matchSparkVersion(Some(minVersion))) {
+      test(testName) {
+        testFun
+      }
+    }
+  }
+
+  /** Run the test only when ANSI mode matches the expected value. */
+  def testWithAnsiMode(testName: String, ansiEnabled: Boolean)(testFun: => Any): Unit = {
+    if (SQLConf.get.ansiEnabled == ansiEnabled) {
       test(testName) {
         testFun
       }

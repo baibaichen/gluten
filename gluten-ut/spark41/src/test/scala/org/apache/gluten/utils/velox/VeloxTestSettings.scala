@@ -110,6 +110,8 @@ class VeloxTestSettings extends BackendTestSettings {
     .exclude("data type casting") // Rewrite for Gluten: sync session timezone with per-expression
     .exclude("cast string to timestamp") // Rewrite for Gluten: sync session timezone
     .exclude("cast from timestamp II") // Rewrite: skip Long.MinValue (collect rebase overflow)
+    // TODO: fix after https://github.com/facebookincubator/velox/pull/14910
+    .exclude("SPARK-39749: cast Decimal to string")
   enableSuite[GlutenTryCastSuite]
     .exclude(
       "Process Infinity, -Infinity, NaN in case insensitive manner" // +inf not supported in folly.

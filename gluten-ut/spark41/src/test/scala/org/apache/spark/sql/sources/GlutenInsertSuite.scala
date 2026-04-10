@@ -180,7 +180,7 @@ class GlutenInsertSuite
     }
   }
 
-  testGluten("remove v1writes sort") {
+  testGlutenWithAnsiMode("remove v1writes sort", false) {
     // __HIVE_DEFAULT_PARTITION__ for other types are covered by other tests.
     Seq(
       ("p boolean", "coalesce(cast(c2 as boolean), false)", Set("p=false", "p=true")),

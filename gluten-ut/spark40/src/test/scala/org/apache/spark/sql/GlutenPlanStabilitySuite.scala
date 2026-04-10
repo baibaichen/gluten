@@ -111,8 +111,19 @@ trait GlutenPlanStabilityTestTrait {
     new File(backendDir, glutenParts.mkString(File.separator)).getAbsolutePath
   }
 
+  // Queries whose plans differ under ANSI mode (mirroring Spark's approvedAnsiPlans).
+  private val approvedAnsiPlans: Seq[String] = Seq(
+    "q83",
+    "q83.sf100"
+  )
+
   private def glutenGetDirForTest(name: String): File = {
-    new File(glutenGoldenFilePath, name)
+    val dirName = if (SQLConf.get.ansiEnabled && approvedAnsiPlans.contains(name)) {
+      name + ".ansi"
+    } else {
+      name
+    }
+    new File(glutenGoldenFilePath, dirName)
   }
 
   private def glutenIsApproved(

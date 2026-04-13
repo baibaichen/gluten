@@ -51,11 +51,17 @@ case class CastTransformer(substraitExprName: String, child: ExpressionTransform
         buildCastWithWriteSideCheck(context, ExpressionNames.VARCHAR_TYPE_WRITE_SIDE_CHECK, length)
       case _ =>
         val typeNode = ConverterUtils.getTypeNode(dataType, original.nullable)
-        ExpressionBuilder.makeCast(
-          typeNode,
-          child.doTransform(context),
-          !SparkShimLoader.getSparkShims.withAnsiEvalMode(original))
+        ExpressionBuilder.makeCast(typeNode, child.doTransform(context), castEvalMode)
     }
+  }
+
+  // Maps Spark Cast EvalMode to Substrait FailureBehavior:
+  // LEGACY=0(UNSPECIFIED), TRY=1(RETURN_NULL), ANSI=2(THROW_EXCEPTION)
+  private val castEvalMode: Int = {
+    val shims = SparkShimLoader.getSparkShims
+    if (shims.withAnsiEvalMode(original)) 2
+    else if (shims.withTryEvalMode(original)) 1
+    else 0
   }
 
   /** Builds Cast(child, StringType) + write-side check for CharType/VarcharType. */
@@ -64,10 +70,8 @@ case class CastTransformer(substraitExprName: String, child: ExpressionTransform
       checkFuncName: String,
       length: Int): ExpressionNode = {
     val stringTypeNode = ConverterUtils.getTypeNode(StringType, original.nullable)
-    val castNode = ExpressionBuilder.makeCast(
-      stringTypeNode,
-      child.doTransform(context),
-      !SparkShimLoader.getSparkShims.withAnsiEvalMode(original))
+    val castNode =
+      ExpressionBuilder.makeCast(stringTypeNode, child.doTransform(context), castEvalMode)
     val funcName =
       ConverterUtils.makeFuncName(checkFuncName, Seq(StringType, IntegerType))
     val functionId = context.registerFunction(funcName)

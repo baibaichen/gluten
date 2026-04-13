@@ -110,25 +110,16 @@ class VeloxTestSettings extends BackendTestSettings {
     .exclude("data type casting") // Rewrite for Gluten: sync session timezone with per-expression
     .exclude("cast string to timestamp") // Rewrite for Gluten: sync session timezone
     .exclude("cast from timestamp II") // Rewrite: skip Long.MinValue (collect rebase overflow)
-    // TODO: fix after https://github.com/facebookincubator/velox/pull/14910
+    // Velox returns plain string "0.000000123" while LEGACY mode expects scientific notation "1.23E-7"
     .exclude("SPARK-39749: cast Decimal to string")
   enableSuite[GlutenTryCastSuite]
-    .exclude(
-      "Process Infinity, -Infinity, NaN in case insensitive manner" // +inf not supported in folly.
-    )
     .exclude("cast from timestamp II") // Rewrite test for Gluten not supported with ANSI mode
-    .exclude("ANSI mode: Throw exception on casting out-of-range value to byte type")
-    .exclude("ANSI mode: Throw exception on casting out-of-range value to short type")
-    .exclude("ANSI mode: Throw exception on casting out-of-range value to int type")
+    // Velox try_cast(float→long) returns null for boundary values near Long.MaxValue/MinValue
     .exclude("ANSI mode: Throw exception on casting out-of-range value to long type")
-    .exclude("cast from invalid string to numeric should throw NumberFormatException")
-    .exclude("SPARK-26218: Fix the corner case of codegen when casting float to Integer")
     // Set timezone through config.
     .exclude("data type casting")
     // Revised by setting timezone through config and commented unsupported cases.
     .exclude("cast string to timestamp")
-    // TODO: fix after https://github.com/facebookincubator/velox/pull/14910
-    .exclude("SPARK-39749: cast Decimal to string")
   enableSuite[GlutenCollectionExpressionsSuite]
     // Rewrite in Gluten to replace Seq with Array
     .exclude("Shuffle")

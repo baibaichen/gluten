@@ -43,12 +43,10 @@ import java.io.File
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.reflect.ClassTag
 
 trait GlutenTestsTrait extends GlutenTestsCommonTrait {
-  // TODO: remove this if we can suppress unused import error.
-  locally {
-    new ColumnConstructorExt(Column)
-  }
+
   override def beforeAll(): Unit = {
     // prepare working paths
     val basePathDir = new File(basePath)
@@ -150,6 +148,22 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
     }
   }
 
+  override def checkExceptionInExpression[T <: Throwable: ClassTag](
+      expression: => Expression,
+      inputRow: InternalRow,
+      expectedErrMsg: String): Unit = {
+    val resolver = ResolveTimeZone
+    val expr = resolver.resolveTimeZones(expression)
+    assert(expr.resolved)
+    glutenCheckExceptionInExpression[T](expr, inputRow, expectedErrMsg)
+  }
+
+  override def checkExceptionInExpression[T <: Throwable: ClassTag](
+      expression: => Expression,
+      expectedErrMsg: String): Unit = {
+    checkExceptionInExpression[T](expression, InternalRow.empty, expectedErrMsg)
+  }
+
   /**
    * Sort map data by key and return the sorted key array and value array.
    *
@@ -243,6 +257,7 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
   }
 
   def glutenCheckExpression(expression: Expression, expected: Any, inputRow: InternalRow): Unit = {
+    logWarning(s"glutenCheckExpression: $expression")
     val df = if (inputRow != EmptyRow && inputRow != InternalRow.empty) {
       convertInternalRowToDataFrame(inputRow)
     } else {
@@ -300,6 +315,45 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
         s"Incorrect evaluation: $expression, " +
           s"actual: ${result.head.get(0)}, " +
           s"expected: $expected$input")
+    }
+  }
+
+  def glutenCheckExceptionInExpression[T <: Throwable: ClassTag](
+      expression: Expression,
+      inputRow: InternalRow,
+      expectedErrMsg: String): Unit = {
+    val clazz = implicitly[ClassTag[T]].runtimeClass
+    logWarning(s"glutenCheckExceptionInExpression[${clazz.getSimpleName}]: $expression")
+    val df = if (inputRow != EmptyRow && inputRow != InternalRow.empty) {
+      convertInternalRowToDataFrame(inputRow)
+    } else {
+      val schema = StructType(StructField("a", IntegerType, nullable = true) :: Nil)
+      val empData = Seq(Row(1))
+      _spark.createDataFrame(_spark.sparkContext.parallelize(empData), schema)
+    }
+    val resultDF = df.select(ClassicColumn(expression))
+    val exception =
+      try {
+        resultDF.collect()
+        fail(s"Expected ${clazz.getSimpleName} but no exception was thrown for: $expression")
+      } catch {
+        case e: SparkException if e.getCause != null && clazz.isInstance(e.getCause) =>
+          e.getCause
+        case e: Throwable if clazz.isInstance(e) =>
+          e
+        case e: SparkException if e.getCause != null =>
+          e.getCause
+        case e: Throwable =>
+          fail(
+            s"Expected ${clazz.getSimpleName} but got ${e.getClass.getSimpleName}: " +
+              s"${e.getMessage}",
+            e)
+      }
+    if (expectedErrMsg != null && exception.getMessage != null) {
+      assert(
+        exception.getMessage.contains(expectedErrMsg),
+        s"Expected error message containing '$expectedErrMsg' " +
+          s"but got '${exception.getMessage}'")
     }
   }
 

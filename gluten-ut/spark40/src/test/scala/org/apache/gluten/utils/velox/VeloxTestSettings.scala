@@ -109,8 +109,6 @@ class VeloxTestSettings extends BackendTestSettings {
     .exclude("SPARK-39749: cast Decimal to string")
   enableSuite[GlutenTryCastSuite]
     .exclude("cast from timestamp II") // Rewrite test for Gluten not supported with ANSI mode
-    // Velox try_cast(float→long) returns null for boundary values near Long.MaxValue/MinValue
-    .exclude("ANSI mode: Throw exception on casting out-of-range value to long type")
     // Set timezone through config.
     .exclude("data type casting")
     // Revised by setting timezone through config and commented unsupported cases.
@@ -265,9 +263,6 @@ class VeloxTestSettings extends BackendTestSettings {
     // SparkArithmeticException). Tracked for future fix via exception type mapping.
     .exclude("SPARK-50290: Add a flag to disable DataFrame context")
   enableSuite[GlutenQueryExecutionAnsiErrorsSuite]
-    // ANSI mode: exception type mismatch -- Velox throws GlutenException, test expects specific
-    // Spark exception types (SparkArithmeticException, SparkRuntimeException).
-    .exclude("SPARK-46922: user-facing runtime errors")
   enableSuite[VeloxAdaptiveQueryExecSuite]
     .includeAllGlutenTests()
     .includeByPrefix(
@@ -886,11 +881,6 @@ class VeloxTestSettings extends BackendTestSettings {
       "SPARK-31620: agg with subquery (whole-stage-codegen = true)",
       "SPARK-31620: agg with subquery (whole-stage-codegen = false)"
     )
-    // ANSI mode: exception type mismatch -- Velox throws GlutenException, test expects
-    // SparkArithmeticException. Tracked for future fix via exception type mapping.
-    .exclude("SPARK-28067: Aggregate sum should not return wrong results for decimal overflow")
-    .exclude("SPARK-35955: Aggregate avg should not return wrong results for decimal overflow")
-    .exclude("SPARK-28224: Aggregate sum big decimal overflow")
   enableSuite[GlutenDataFrameAsOfJoinSuite]
   enableSuite[GlutenDataFrameComplexTypeSuite]
   enableSuite[GlutenDataFrameFunctionsSuite]

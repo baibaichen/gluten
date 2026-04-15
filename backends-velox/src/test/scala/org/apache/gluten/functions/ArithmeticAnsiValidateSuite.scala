@@ -20,7 +20,6 @@ import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.execution.ProjectExecTransformer
 
 import org.apache.spark.SparkConf
-import org.apache.spark.SparkException
 import org.apache.spark.sql.internal.SQLConf
 
 class ArithmeticAnsiValidateSuite extends FunctionsValidateSuite {
@@ -39,15 +38,8 @@ class ArithmeticAnsiValidateSuite extends FunctionsValidateSuite {
     }
 
     val df = sql("SELECT 2147483647 + 1")
-
-    if (isSparkVersionGE("4.0")) {
-      intercept[SparkException] {
-        df.collect()
-      }
-    } else {
-      intercept[ArithmeticException] {
-        df.collect()
-      }
+    intercept[ArithmeticException] {
+      df.collect()
     }
   }
 
@@ -63,14 +55,8 @@ class ArithmeticAnsiValidateSuite extends FunctionsValidateSuite {
     }
 
     val df = sql("SELECT 2147483647 + 1")
-    if (isSparkVersionGE("4.0")) {
-      intercept[SparkException] {
-        df.collect()
-      }
-    } else {
-      intercept[ArithmeticException] {
-        df.collect()
-      }
+    intercept[ArithmeticException] {
+      df.collect()
     }
   }
 
@@ -79,12 +65,10 @@ class ArithmeticAnsiValidateSuite extends FunctionsValidateSuite {
       checkGlutenPlan[ProjectExecTransformer]
     }
     if (isSparkVersionGE("3.4")) {
-      // Spark 3.4+ throws exception for division by zero in ANSI mode
-      intercept[SparkException] {
+      intercept[ArithmeticException] {
         sql("SELECT 1 / 0").collect()
       }
     } else {
-      // Spark 3.2 and 3.3 don't throw exception for division by zero in ANSI mode
       sql("SELECT 1 / 0").collect()
     }
   }
@@ -94,7 +78,7 @@ class ArithmeticAnsiValidateSuite extends FunctionsValidateSuite {
       checkGlutenPlan[ProjectExecTransformer]
     }
     if (isSparkVersionGE("3.4")) {
-      intercept[SparkException] {
+      intercept[ArithmeticException] {
         sql("SELECT 1 div 0 ").collect()
       }
     }
@@ -105,7 +89,7 @@ class ArithmeticAnsiValidateSuite extends FunctionsValidateSuite {
       checkGlutenPlan[ProjectExecTransformer]
     }
     if (isSparkVersionGE("3.4")) {
-      intercept[SparkException] {
+      intercept[ArithmeticException] {
         sql("SELECT 1 % 0").collect()
       }
     }

@@ -22,6 +22,7 @@ import org.apache.gluten.iterator.ClosableIterator;
 import org.apache.gluten.runtime.Runtime;
 import org.apache.gluten.runtime.RuntimeAware;
 
+import org.apache.spark.sql.VeloxCastExceptionTranslator;
 import org.apache.spark.sql.execution.datasources.SchemaColumnConvertNotSupportedException;
 import org.apache.spark.sql.vectorized.ColumnarBatch;
 
@@ -151,6 +152,11 @@ public class ColumnarBatchOutIterator extends ClosableIterator<ColumnarBatch>
       if (schemaEx != null) {
         schemaEx.initCause(e);
         return schemaEx;
+      }
+      RuntimeException castEx = VeloxCastExceptionTranslator.translate(msg);
+      if (castEx != null) {
+        castEx.initCause(e);
+        return castEx;
       }
     }
     return new GlutenException(e);

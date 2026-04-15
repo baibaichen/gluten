@@ -169,10 +169,30 @@ object VeloxCastExceptionTranslator {
   private val ContextLineRegex: Regex =
     """(?m)^Context:.*?(checked_remainder|checked_modulus)""".r
 
+  // Spark 4.1 added remainderByZeroError; Spark 4.0 only has divideByZeroError.
+  // Use reflection to call remainderByZeroError if available, fallback to divideByZeroError.
+  private val remainderByZeroMethod: Option[java.lang.reflect.Method] = {
+    try {
+      val methods = QueryExecutionErrors.getClass.getMethods
+      methods.find(m => m.getName == "remainderByZeroError" && m.getParameterCount == 1)
+    } catch {
+      case _: Exception => None
+    }
+  }
+
+  private def createRemainderByZeroError(): ArithmeticException = {
+    remainderByZeroMethod match {
+      case Some(m) =>
+        m.invoke(QueryExecutionErrors, null.asInstanceOf[AnyRef]).asInstanceOf[ArithmeticException]
+      case None =>
+        QueryExecutionErrors.divideByZeroError(null)
+    }
+  }
+
   private def translateArithmetic(reason: String, fullMsg: String): Option[RuntimeException] = {
     if (DivisionByZeroRegex.findFirstIn(reason).isDefined) {
       if (ContextLineRegex.findFirstIn(fullMsg).isDefined) {
-        Some(QueryExecutionErrors.remainderByZeroError(null))
+        Some(createRemainderByZeroError())
       } else {
         Some(QueryExecutionErrors.divideByZeroError(null))
       }

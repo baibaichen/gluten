@@ -25,6 +25,7 @@ import org.apache.gluten.vectorized.{NativeColumnarToRowInfo, NativeColumnarToRo
 
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.VeloxCastExceptionTranslator
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.UnsafeRow
 import org.apache.spark.sql.execution.{BroadcastUtils, SparkPlan}
@@ -199,7 +200,16 @@ object VeloxColumnarToRowExec {
               baseLength + info.lengths.length
             }
             val before = System.currentTimeMillis()
-            info = jniWrapper.nativeColumnarToRowConvert(c2rId, batchHandle, rowId)
+            try {
+              info = jniWrapper.nativeColumnarToRowConvert(c2rId, batchHandle, rowId)
+            } catch {
+              case e: Exception =>
+                val translated = VeloxCastExceptionTranslator.translate(e.getMessage)
+                if (translated != null) {
+                  throw translated
+                }
+                throw e
+            }
             convertTime += (System.currentTimeMillis() - before)
           }
           val (offset, length) =

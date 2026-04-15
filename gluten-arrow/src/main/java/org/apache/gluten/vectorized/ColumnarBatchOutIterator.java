@@ -22,11 +22,13 @@ import org.apache.gluten.iterator.ClosableIterator;
 import org.apache.gluten.runtime.Runtime;
 import org.apache.gluten.runtime.RuntimeAware;
 
+import org.apache.spark.SparkThrowable;
 import org.apache.spark.sql.VeloxCastExceptionTranslator;
 import org.apache.spark.sql.execution.datasources.SchemaColumnConvertNotSupportedException;
 import org.apache.spark.sql.vectorized.ColumnarBatch;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 
 public class ColumnarBatchOutIterator extends ClosableIterator<ColumnarBatch>
     implements RuntimeAware {
@@ -155,11 +157,38 @@ public class ColumnarBatchOutIterator extends ClosableIterator<ColumnarBatch>
       }
       RuntimeException castEx = VeloxCastExceptionTranslator.translate(msg);
       if (castEx != null) {
-        castEx.initCause(e);
+        forceCause(castEx, e);
         return castEx;
       }
     }
+
+    if (e instanceof GlutenException) {
+      return (GlutenException) e;
+    }
+
+    if (e instanceof RuntimeException && e instanceof SparkThrowable) {
+      return (RuntimeException) e;
+    }
     return new GlutenException(e);
+  }
+
+  /**
+   * Forces the cause of a Throwable via reflection. Spark exception constructors pass cause=null to
+   * super(message, null), which sets the internal cause field to null rather than the sentinel
+   * value "this", making initCause() unusable. Reflection bypasses this limitation so the original
+   * native exception is preserved in the chain for debugging.
+   */
+  private static void forceCause(Throwable target, Throwable cause) {
+    if (target.getCause() != null) {
+      return;
+    }
+    try {
+      Field f = Throwable.class.getDeclaredField("cause");
+      f.setAccessible(true);
+      f.set(target, cause);
+    } catch (NoSuchFieldException | IllegalAccessException ignored) {
+      // Should not happen with standard JDK Throwable; fall through without cause.
+    }
   }
 
   private static String findFirstNonNullMessage(Throwable t) {

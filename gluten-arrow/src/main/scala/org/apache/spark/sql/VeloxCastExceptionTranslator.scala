@@ -25,10 +25,10 @@ import scala.util.matching.Regex
 /**
  * Translates Velox cast error messages into the corresponding Spark exception types.
  *
- * Velox cast errors follow the format: "Cannot cast FROMTYPE 'VALUE' to TOTYPE. DETAILS"
- * (produced by makeErrorMessage in CastExpr-inl.h). This translator parses that format and
- * constructs the correct Spark exception using QueryExecutionErrors factory methods, so that
- * the exception type and message match what Spark's native Cast expression would produce.
+ * Velox cast errors follow the format: "Cannot cast FROMTYPE 'VALUE' to TOTYPE. DETAILS" (produced
+ * by makeErrorMessage in CastExpr-inl.h). This translator parses that format and constructs the
+ * correct Spark exception using QueryExecutionErrors factory methods, so that the exception type
+ * and message match what Spark's native Cast expression would produce.
  *
  * Velox errors arrive via JNI as GlutenException with a structured message:
  * {{{
@@ -42,7 +42,8 @@ import scala.util.matching.Regex
  * The translator extracts the "Reason:" line to find the actual error message.
  *
  * Also translates Velox arithmetic errors (division by zero, overflow) into
- * SparkArithmeticException.
+ * SparkArithmeticException, and Velox datetime/collection errors into the corresponding Spark
+ * exception types.
  *
  * Must be in org.apache.spark.sql package to access private[sql] QueryExecutionErrors.
  */
@@ -61,6 +62,22 @@ object VeloxCastExceptionTranslator {
   private val ArithmeticOverflowRegex: Regex =
     """(?i)(?:Arithmetic overflow|Overflow in .+?)(?::?\s*(.+))?""".r
 
+  // Velox: "Invalid value for MAKE_DATE: year=X, month=Y, day=Z"
+  private val MakeDateRegex: Regex =
+    """Invalid value for MAKE_DATE: year=(-?\d+), month=(-?\d+), day=(-?\d+)""".r
+
+  // Velox: "map key cannot be null"
+  private val NullMapKeyRegex: Regex =
+    """(?i)map key cannot be null""".r
+
+  // Velox: "Timestamp seconds out of range" or "Could not convert Timestamp... to microseconds"
+  private val TimestampOverflowRegex: Regex =
+    """(?i)(?:Timestamp seconds out of range|Could not convert Timestamp.+to microseconds)""".r
+
+  // Velox: "Integer overflow in make_ym_interval(X, Y)"
+  private val MakeYMIntervalOverflowRegex: Regex =
+    """Integer overflow in make_ym_interval""".r
+
   private val VeloxTypeMap: Map[String, DataType] = Map(
     "BOOLEAN" -> BooleanType,
     "TINYINT" -> ByteType,
@@ -78,8 +95,8 @@ object VeloxCastExceptionTranslator {
     Set(ByteType, ShortType, IntegerType, LongType, FloatType, DoubleType)
 
   /**
-   * Translates a Velox cast error message into the corresponding Spark exception.
-   * Returns null if the message is not a recognized Velox cast error.
+   * Translates a Velox cast error message into the corresponding Spark exception. Returns null if
+   * the message is not a recognized Velox cast error.
    *
    * Called from ColumnarBatchOutIterator.translateException() (Java).
    */
@@ -92,6 +109,7 @@ object VeloxCastExceptionTranslator {
 
     translateCast(reason)
       .orElse(translateArithmetic(reason, msg))
+      .orElse(translateOther(reason))
       .orNull
   }
 
@@ -99,7 +117,7 @@ object VeloxCastExceptionTranslator {
     ReasonLineRegex.findFirstMatchIn(msg) match {
       case Some(m) =>
         val reason = m.group(1).trim
-        // Velox sometimes produces "Reason: Reason: ..." — strip the inner prefix
+        // Velox sometimes produces "Reason: Reason: ..." -- strip the inner prefix
         if (reason.startsWith("Reason:")) reason.substring("Reason:".length).trim
         else reason
       case None => msg
@@ -119,20 +137,24 @@ object VeloxCastExceptionTranslator {
 
         (fromType, toType) match {
           case (StringType, BooleanType) =>
-            Some(QueryExecutionErrors.invalidInputSyntaxForBooleanError(
-              UTF8String.fromString(value), null))
+            Some(
+              QueryExecutionErrors
+                .invalidInputSyntaxForBooleanError(UTF8String.fromString(value), null))
 
           case (StringType, _: IntegralType | FloatType | DoubleType | _: DecimalType) =>
-            Some(QueryExecutionErrors.invalidInputInCastToNumberError(
-              toType, UTF8String.fromString(value), null))
+            Some(
+              QueryExecutionErrors
+                .invalidInputInCastToNumberError(toType, UTF8String.fromString(value), null))
 
           case (StringType, TimestampType | DateType) =>
-            Some(QueryExecutionErrors.invalidInputInCastToDatetimeError(
-              UTF8String.fromString(value), toType, null))
+            Some(
+              QueryExecutionErrors
+                .invalidInputInCastToDatetimeError(UTF8String.fromString(value), toType, null))
 
           case (_: DecimalType, dt: DecimalType) =>
-            Some(QueryExecutionErrors.cannotChangeDecimalPrecisionError(
-              Decimal(value), dt.precision, dt.scale, null))
+            Some(
+              QueryExecutionErrors
+                .cannotChangeDecimalPrecisionError(Decimal(value), dt.precision, dt.scale, null))
 
           case (ft, tt) if ft != null && ft != StringType && NumericTypes.contains(tt) =>
             Some(QueryExecutionErrors.castingCauseOverflowError(value, ft, tt))
@@ -161,6 +183,34 @@ object VeloxCastExceptionTranslator {
         case _ => None
       }
     }
+  }
+
+  private def translateOther(reason: String): Option[RuntimeException] = {
+    // MapFromEntries: "map key cannot be null" -> SparkRuntimeException(NULL_MAP_KEY)
+    if (NullMapKeyRegex.findFirstIn(reason).isDefined) {
+      return Some(QueryExecutionErrors.nullAsMapKeyNotAllowedError())
+    }
+
+    // make_date: "Invalid value for MAKE_DATE: year=X, month=Y, day=Z" -> SparkDateTimeException
+    reason match {
+      case MakeDateRegex(year, month, day) =>
+        val dtException = new java.time.DateTimeException(
+          s"Invalid value for MAKE_DATE: year=$year, month=$month, day=$day")
+        return Some(QueryExecutionErrors.ansiDateTimeArgumentOutOfRange(dtException))
+      case _ =>
+    }
+
+    // SecondsToTimestamp/MillisToTimestamp overflow -> ArithmeticException("long overflow")
+    if (TimestampOverflowRegex.findFirstIn(reason).isDefined) {
+      return Some(new ArithmeticException("long overflow"))
+    }
+
+    // make_ym_interval overflow -> SparkArithmeticException(INTERVAL_ARITHMETIC_OVERFLOW)
+    if (MakeYMIntervalOverflowRegex.findFirstIn(reason).isDefined) {
+      return Some(QueryExecutionErrors.withoutSuggestionIntervalArithmeticOverflowError(null))
+    }
+
+    None
   }
 
   private def resolveType(veloxTypeName: String): DataType = {

@@ -332,29 +332,31 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
       _spark.createDataFrame(_spark.sparkContext.parallelize(empData), schema)
     }
     val resultDF = df.select(ClassicColumn(expression))
-    val exception =
-      try {
-        resultDF.collect()
-        fail(s"Expected ${clazz.getSimpleName} but no exception was thrown for: $expression")
-      } catch {
-        case e: SparkException if e.getCause != null && clazz.isInstance(e.getCause) =>
-          e.getCause
-        case e: Throwable if clazz.isInstance(e) =>
-          e
-        case e: SparkException if e.getCause != null =>
-          e.getCause
-        case e: Throwable =>
-          fail(
-            s"Expected ${clazz.getSimpleName} but got ${e.getClass.getSimpleName}: " +
-              s"${e.getMessage}",
-            e)
-      }
+    val thrown = intercept[Exception](resultDF.collect())
+    // Walk the cause chain to find the target exception type
+    val exception = findCause(thrown, clazz).getOrElse {
+      fail(
+        s"Expected ${clazz.getSimpleName} but got ${thrown.getClass.getSimpleName}: " +
+          s"${thrown.getMessage}",
+        thrown)
+    }
     if (expectedErrMsg != null && exception.getMessage != null) {
       assert(
         exception.getMessage.contains(expectedErrMsg),
         s"Expected error message containing '$expectedErrMsg' " +
           s"but got '${exception.getMessage}'")
     }
+  }
+
+  private def findCause(e: Throwable, clazz: Class[_]): Option[Throwable] = {
+    var current: Throwable = e
+    while (current != null) {
+      if (clazz.isAssignableFrom(current.getClass)) {
+        return Some(current)
+      }
+      current = current.getCause
+    }
+    None
   }
 
   def shouldNotFallback(): Unit = {

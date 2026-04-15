@@ -25,6 +25,8 @@
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 export SPARK_ANSI_SQL_MODE=true
 export SPARK_TESTING=true
 
@@ -40,8 +42,8 @@ if [[ "${3:-}" == "--clean" ]] || [[ "${2:-}" == "--clean" ]]; then
 fi
 
 case "${SPARK_VER}" in
-  spark41) PROFILES="-Pjava-17,spark-4.1,scala-2.13,backends-velox,hadoop-3.3"; UT_MODULE="gluten-ut/spark41" ;;
-  spark40) PROFILES="-Pjava-17,spark-4.0,scala-2.13,backends-velox,hadoop-3.3"; UT_MODULE="gluten-ut/spark40" ;;
+  spark41) PROFILES="-Pjava-17,spark-4.1,scala-2.13,backends-velox,hadoop-3.3,delta"; UT_MODULE="gluten-ut/spark41" ;;
+  spark40) PROFILES="-Pjava-17,spark-4.0,scala-2.13,backends-velox,hadoop-3.3,delta"; UT_MODULE="gluten-ut/spark40" ;;
   all)     ;; # handled in main entry
   *)       echo "Unknown spark version: ${SPARK_VER}"; echo "Usage: $0 <category> [spark41|spark40|all] [--clean]"; exit 1 ;;
 esac
@@ -128,7 +130,7 @@ run_ut() {
   local log="${LOG_DIR}/${name}-${SPARK_VER}-ut.log"
   echo ""
   echo "=== ${name}: ${UT_MODULE} ==="
-  ./dev/run-scala-test.sh \
+  ./dev/run-scala-test.sh --mvnd \
     ${CLEAN_FLAG} \
     ${ANSI_ARG} \
     ${PROFILES},spark-ut \
@@ -145,7 +147,7 @@ run_backends() {
   local log="${LOG_DIR}/${name}-${SPARK_VER}-backends.log"
   echo ""
   echo "=== ${name}: backends-velox (${SPARK_VER}) ==="
-  ./dev/run-scala-test.sh \
+  ./dev/run-scala-test.sh --mvnd \
     ${ANSI_ARG} \
     ${PROFILES} \
     -pl backends-velox \
@@ -242,12 +244,12 @@ echo "========================================"
 if [[ "${SPARK_VER}" == "all" ]]; then
   # Run spark41 first, then spark40
   SPARK_VER="spark41"
-  PROFILES="-Pjava-17,spark-4.1,scala-2.13,backends-velox,hadoop-3.3"
+  PROFILES="-Pjava-17,spark-4.1,scala-2.13,backends-velox,hadoop-3.3,delta"
   UT_MODULE="gluten-ut/spark41"
   run_category
 
   SPARK_VER="spark40"
-  PROFILES="-Pjava-17,spark-4.0,scala-2.13,backends-velox,hadoop-3.3"
+  PROFILES="-Pjava-17,spark-4.0,scala-2.13,backends-velox,hadoop-3.3,delta"
   UT_MODULE="gluten-ut/spark40"
   CLEAN_FLAG="--clean"
   run_category
@@ -259,10 +261,16 @@ echo ""
 echo "========================================"
 echo "Verification Complete — ${CATEGORY}"
 echo "Results:"
-for f in "${LOG_DIR}"/*.log; do
+if [[ "${CATEGORY}" == "all" ]]; then
+  LOG_PATTERN="${LOG_DIR}/*-ut.log"
+else
+  LOG_PATTERN="${LOG_DIR}/${CATEGORY}-*-ut.log"
+fi
+for f in ${LOG_PATTERN}; do
   if [ -f "$f" ]; then
-    echo "  $(basename "$f"):"
-    grep -E "Tests:.*succeeded|Tests run|BUILD SUCCESS|BUILD FAILURE|FAILED" "$f" | tail -3 | sed 's/^/    /'
+    echo ""
+    echo "--- $(basename "$f") ---"
+    python3 "${SCRIPT_DIR}/analyze-ansi-test-log.py" "$f"
   fi
 done
 echo "========================================"

@@ -6,6 +6,12 @@ per-test-method status: which suite it belongs to, whether it had fallback
 (detected by 'Validation failed' logs in the test's region), and the test
 result (PASSED / FAILED / IGNORED).
 
+For failed tests, classifies root cause:
+  - NO_EXCEPTION: Velox did not throw an exception when one was expected
+  - MSG_MISMATCH: Exception thrown but message doesn't match expected text
+  - WRONG_EXCEPTION: Wrong exception type thrown
+  - OTHER: Unclassified failure
+
 Algorithm:
   1. Strip ANSI escape codes from all lines.
   2. Single pass: track current suite, and for each test method, collect all
@@ -18,6 +24,7 @@ Algorithm:
 Usage:
     python3 dev/analyze-ansi-test-log.py /tmp/ansi-verify-spark41-ut.log
     python3 dev/analyze-ansi-test-log.py /tmp/ansi-verify-spark41-ut.log --fallback-only
+    python3 dev/analyze-ansi-test-log.py /tmp/ansi-verify-spark41-ut.log --failed-only
     python3 dev/analyze-ansi-test-log.py /tmp/ansi-verify-spark41-ut.log --suite GlutenCastWithAnsiOnSuite
 """
 import argparse
@@ -35,6 +42,18 @@ FAILED_RE = re.compile(r'^- (.+?) \*\*\* FAILED \*\*\* \(\d+.*\)$')
 IGNORED_RE = re.compile(r'^- (.+?) !!! IGNORED !!!$')
 VALIDATION_FAILED_RE = re.compile(r'Validation failed for plan')
 GLUTEN_CHECK_RE = re.compile(r'glutenCheck(?:Expression|ExceptionInExpression)')
+
+# Failure root cause patterns (matched against lines in a failed test's region)
+NO_EXCEPTION_RE = re.compile(
+    r'Expected exception .+ to be thrown, but no exception was thrown')
+MSG_MISMATCH_RE = re.compile(
+    r"Expected error message containing '(.+?)' but got '(.+?)'")
+WRONG_EXCEPTION_RE = re.compile(
+    r'Expected (\S+) but got (\S+):')
+ERRORCLASS_ACCEPTED_RE = re.compile(
+    r'Message mismatch accepted: errorClass=(\S+),')
+ASSERTION_FAILED_RE = re.compile(
+    r'org\.scalatest\.exceptions\.TestFailedException')
 
 
 def parse_log(path):
@@ -121,20 +140,32 @@ def parse_log(path):
         else:
             t['end_line'] = len(lines)
 
-    # Check for "Validation failed" and "glutenCheck" in each test's region
+    # Check for "Validation failed", "glutenCheck", and failure root cause in each test's region
     results = []
     for t in test_list:
         if t['result'] == 'IGNORED':
             has_fallback = False
             has_velox = False
+            fail_cause = None
         else:
             has_fallback = False
             has_velox = False
+            fail_cause = None
             for j in range(t['start_line'], t['end_line']):
                 if VALIDATION_FAILED_RE.search(lines[j]):
                     has_fallback = True
                 if GLUTEN_CHECK_RE.search(lines[j]):
                     has_velox = True
+                # Classify failure root cause
+                if t['result'] == 'FAILED' and fail_cause is None:
+                    if NO_EXCEPTION_RE.search(lines[j]):
+                        fail_cause = 'NO_EXCEPTION'
+                    elif MSG_MISMATCH_RE.search(lines[j]):
+                        fail_cause = 'MSG_MISMATCH'
+                    elif WRONG_EXCEPTION_RE.search(lines[j]):
+                        fail_cause = 'WRONG_EXCEPTION'
+            if t['result'] == 'FAILED' and fail_cause is None:
+                fail_cause = 'OTHER'
 
         results.append({
             'suite': t['suite'],
@@ -142,17 +173,20 @@ def parse_log(path):
             'fallback': has_fallback,
             'velox': has_velox,
             'result': t['result'] or 'PASSED',
+            'fail_cause': fail_cause,
         })
 
     return results
 
 
-def print_table(tests, fallback_only=False, suite_filter=None):
+def print_table(tests, fallback_only=False, failed_only=False, suite_filter=None):
     filtered = tests
     if suite_filter:
         filtered = [t for t in filtered if suite_filter in t['suite']]
     if fallback_only:
         filtered = [t for t in filtered if t['fallback']]
+    if failed_only:
+        filtered = [t for t in filtered if t['result'] == 'FAILED']
 
     if not filtered:
         print("No matching tests found.")
@@ -173,14 +207,32 @@ def print_table(tests, fallback_only=False, suite_filter=None):
             return 'N/A'
         return 'found' if t['fallback'] else 'not found'
 
-    header = f"| {'Suite':<{sw}} | {'Test':<{tw}} | Velox | Fallback  | Result  |"
-    sep = f"|{'-' * (sw + 2)}|{'-' * (tw + 2)}|-------|-----------|---------|"
+    def cause_str(t):
+        return t.get('fail_cause') or ''
+
+    # Show Cause column only when there are failures
+    has_failures = any(t['result'] == 'FAILED' for t in filtered)
+    if has_failures:
+        cw = max(max((len(cause_str(t)) for t in filtered), default=5), len('Cause'))
+        header = (f"| {'Suite':<{sw}} | {'Test':<{tw}} | Velox | Fallback  "
+                  f"| Result  | {'Cause':<{cw}} |")
+        sep = (f"|{'-' * (sw + 2)}|{'-' * (tw + 2)}|-------|--------"
+               f"---|---------|{'-' * (cw + 2)}|")
+    else:
+        header = f"| {'Suite':<{sw}} | {'Test':<{tw}} | Velox | Fallback  | Result  |"
+        sep = f"|{'-' * (sw + 2)}|{'-' * (tw + 2)}|-------|-----------|---------|"
     print(header)
     print(sep)
     for t in filtered:
         v = velox_str(t)
         fb = fallback_str(t)
-        print(f"| {t['suite']:<{sw}} | {t['test']:<{tw}} | {v:<5} | {fb:<9} | {t['result']:<7} |")
+        if has_failures:
+            c = cause_str(t)
+            print(f"| {t['suite']:<{sw}} | {t['test']:<{tw}} | {v:<5} | {fb:<9} "
+                  f"| {t['result']:<7} | {c:<{cw}} |")
+        else:
+            print(f"| {t['suite']:<{sw}} | {t['test']:<{tw}} | {v:<5} | {fb:<9} "
+                  f"| {t['result']:<7} |")
 
     print()
     total = len(filtered)
@@ -194,6 +246,16 @@ def print_table(tests, fallback_only=False, suite_filter=None):
           f"Fallback: {fb_found}")
     print(f"Passed: {passed} | Failed: {failed} | Ignored: {ignored}")
 
+    if failed > 0:
+        # Breakdown of failure root causes
+        causes = {}
+        for t in filtered:
+            c = t.get('fail_cause')
+            if c:
+                causes[c] = causes.get(c, 0) + 1
+        cause_parts = [f"{c}: {n}" for c, n in sorted(causes.items())]
+        print(f"Failure causes: {' | '.join(cause_parts)}")
+
     print()
     print("Per-suite summary:")
     suites = OrderedDict()
@@ -201,7 +263,7 @@ def print_table(tests, fallback_only=False, suite_filter=None):
         s = t['suite']
         if s not in suites:
             suites[s] = {'total': 0, 'velox': 0, 'no_velox': 0, 'fb_found': 0,
-                         'passed': 0, 'failed': 0, 'ignored': 0}
+                         'passed': 0, 'failed': 0, 'ignored': 0, 'causes': {}}
         suites[s]['total'] += 1
         if t['velox']:
             suites[s]['velox'] += 1
@@ -210,6 +272,9 @@ def print_table(tests, fallback_only=False, suite_filter=None):
         if t['fallback']:
             suites[s]['fb_found'] += 1
         suites[s][t['result'].lower()] += 1
+        c = t.get('fail_cause')
+        if c:
+            suites[s]['causes'][c] = suites[s]['causes'].get(c, 0) + 1
 
     sn_w = max(len(s) for s in suites)
     print(f"| {'Suite':<{sn_w}} | Total | Velox | No Velox | Fallback | Passed | Failed | Ignored |")
@@ -223,6 +288,8 @@ def main():
     parser.add_argument('logfile', help='Path to the test log file')
     parser.add_argument('--fallback-only', action='store_true',
                         help='Show only tests that fell back to Spark')
+    parser.add_argument('--failed-only', action='store_true',
+                        help='Show only failed tests with root cause classification')
     parser.add_argument('--suite', type=str, default=None,
                         help='Filter by suite name (substring match)')
     args = parser.parse_args()
@@ -232,7 +299,8 @@ def main():
         print(f"No tests found in {args.logfile}")
         sys.exit(1)
 
-    print_table(tests, fallback_only=args.fallback_only, suite_filter=args.suite)
+    print_table(tests, fallback_only=args.fallback_only,
+                failed_only=args.failed_only, suite_filter=args.suite)
 
 
 if __name__ == '__main__':

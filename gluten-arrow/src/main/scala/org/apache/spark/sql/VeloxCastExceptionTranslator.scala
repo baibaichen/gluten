@@ -50,7 +50,7 @@ import scala.util.matching.Regex
 object VeloxCastExceptionTranslator {
 
   private val CastErrorRegex: Regex =
-    """(?s)Cannot cast (\S+) '(.*?)' to (\S+(?:\(\d+,\s*\d+\))?)\.?\s*(.*)""".r
+    """(?s)Cannot cast ([A-Z]+(?:\(\d+,\s*\d+\))?) '(.*?)' to ([A-Z]+(?:\(\d+,\s*\d+\))?)\.?\s*(.*)""".r
 
   private val DecimalTypeRegex: Regex = """DECIMAL\((\d+),\s*(\d+)\)""".r
 
@@ -157,7 +157,8 @@ object VeloxCastExceptionTranslator {
                 .cannotChangeDecimalPrecisionError(Decimal(value), dt.precision, dt.scale, null))
 
           case (ft, tt) if ft != null && ft != StringType && NumericTypes.contains(tt) =>
-            Some(QueryExecutionErrors.castingCauseOverflowError(value, ft, tt))
+            val typedValue = parseNumericValue(value, ft)
+            Some(QueryExecutionErrors.castingCauseOverflowError(typedValue, ft, tt))
 
           case _ => None
         }
@@ -231,6 +232,23 @@ object VeloxCastExceptionTranslator {
     }
 
     None
+  }
+
+  private def parseNumericValue(value: String, dataType: DataType): Any = {
+    try {
+      dataType match {
+        case ByteType => value.toByte
+        case ShortType => value.toShort
+        case IntegerType => value.toInt
+        case LongType => value.toLong
+        case FloatType => value.toFloat
+        case DoubleType => value.toDouble
+        case _: DecimalType => Decimal(value)
+        case _ => value
+      }
+    } catch {
+      case _: NumberFormatException => value
+    }
   }
 
   private def resolveType(veloxTypeName: String): DataType = {

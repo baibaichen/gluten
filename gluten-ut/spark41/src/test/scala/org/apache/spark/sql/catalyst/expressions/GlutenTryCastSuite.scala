@@ -17,7 +17,7 @@
 package org.apache.spark.sql.catalyst.expressions
 
 import org.apache.spark.SparkThrowable
-import org.apache.spark.sql.GlutenTestsTrait
+import org.apache.spark.sql.shim.GlutenPanoramaTrait
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.DateTimeTestUtils.{withDefaultTimeZone, ALL_TIMEZONES, UTC, UTC_OPT}
 import org.apache.spark.sql.catalyst.util.DateTimeUtils.{fromJavaTimestamp, millisToMicros, TimeZoneUTC}
@@ -30,7 +30,12 @@ import java.util.{Calendar, TimeZone}
 
 import scala.reflect.ClassTag
 
-class GlutenTryCastSuite extends TryCastSuite with GlutenTestsTrait {
+class GlutenTryCastSuite extends TryCastSuite with GlutenPanoramaTrait {
+  override protected def panoramaMeta(expression: Expression): String = expression match {
+    case c: Cast => s"fromType=${c.child.dataType.simpleString},toType=${c.dataType.simpleString}"
+    case _ => ""
+  }
+
 
   // TryCastSuite overrides checkExceptionInExpression to checkEvaluation(expr, null)
   // because TRY mode should return null instead of throwing. GlutenTestsTrait also

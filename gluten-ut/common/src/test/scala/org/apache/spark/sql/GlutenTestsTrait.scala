@@ -18,7 +18,6 @@ package org.apache.spark.sql
 
 import org.apache.gluten.backendsapi.BackendsApiManager
 import org.apache.gluten.config.GlutenConfig
-import org.apache.gluten.execution.ProjectExecTransformer
 import org.apache.gluten.test.TestStats
 import org.apache.gluten.utils.BackendTestUtils
 
@@ -128,7 +127,7 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
     }
   }
 
-  protected var _spark: SparkSession = null
+  protected var _spark: SparkSession = _
 
   override protected def checkEvaluation(
       expression: => Expression,
@@ -257,7 +256,11 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
   }
 
   def glutenCheckExpression(expression: Expression, expected: Any, inputRow: InternalRow): Unit = {
-    logWarning(s"glutenCheckExpression: $expression")
+    val resultDF = buildResultDF(expression, inputRow)
+    doCheckExpression(expression, expected, inputRow, resultDF)
+  }
+
+  protected def buildResultDF(expression: Expression, inputRow: InternalRow): DataFrame = {
     val df = if (inputRow != EmptyRow && inputRow != InternalRow.empty) {
       convertInternalRowToDataFrame(inputRow)
     } else {
@@ -265,7 +268,14 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
       val empData = Seq(Row(1))
       _spark.createDataFrame(_spark.sparkContext.parallelize(empData), schema)
     }
-    val resultDF = df.select(ClassicColumn(expression))
+    df.select(ClassicColumn(expression))
+  }
+
+  protected def doCheckExpression(
+      expression: Expression,
+      expected: Any,
+      inputRow: InternalRow,
+      resultDF: DataFrame): Unit = {
     val result =
       try {
         resultDF.collect()
@@ -279,32 +289,13 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
         case e: Exception =>
           fail(s"Exception evaluating $expression", e)
       }
-    TestStats.testUnitNumber = TestStats.testUnitNumber + 1
-    if (
-      checkDataTypeSupported(expression) &&
-      expression.children.forall(checkDataTypeSupported)
-    ) {
-      val projectTransformer = resultDF.queryExecution.executedPlan.collect {
-        case p: ProjectExecTransformer => p
-      }
-      if (projectTransformer.size == 1) {
-        TestStats.offloadGlutenUnitNumber += 1
-        logInfo("Offload to native backend in the test.\n")
-      } else {
-        logInfo("Not supported in native backend, fall back to vanilla spark in the test.\n")
-        shouldNotFallback()
-      }
-    } else {
-      logInfo("Has unsupported data type, fall back to vanilla spark.\n")
-      shouldNotFallback()
-    }
 
     if (
       !(checkResult(result.head.get(0), expected, expression.dataType, expression.nullable)
         || checkResult(
           CatalystTypeConverters.createToCatalystConverter(expression.dataType)(
             result.head.get(0)
-          ), // decimal precision is wrong from value
+          ),
           CatalystTypeConverters.convertToCatalyst(expected),
           expression.dataType,
           expression.nullable
@@ -322,18 +313,17 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
       expression: Expression,
       inputRow: InternalRow,
       expectedErrMsg: String): Unit = {
+    val resultDF = buildResultDF(expression, inputRow)
+    doCheckExceptionInExpression[T](expression, inputRow, expectedErrMsg, resultDF)
+  }
+
+  protected def doCheckExceptionInExpression[T <: Throwable: ClassTag](
+      expression: Expression,
+      inputRow: InternalRow,
+      expectedErrMsg: String,
+      resultDF: DataFrame): Unit = {
     val clazz = implicitly[ClassTag[T]].runtimeClass
-    logWarning(s"glutenCheckExceptionInExpression[${clazz.getSimpleName}]: $expression")
-    val df = if (inputRow != EmptyRow && inputRow != InternalRow.empty) {
-      convertInternalRowToDataFrame(inputRow)
-    } else {
-      val schema = StructType(StructField("a", IntegerType, nullable = true) :: Nil)
-      val empData = Seq(Row(1))
-      _spark.createDataFrame(_spark.sparkContext.parallelize(empData), schema)
-    }
-    val resultDF = df.select(ClassicColumn(expression))
     val thrown = intercept[Exception](resultDF.collect())
-    // Walk the cause chain to find the target exception type
     val exception = findCause(thrown, clazz).getOrElse {
       fail(
         s"Expected ${clazz.getSimpleName} but got ${thrown.getClass.getSimpleName}: " +
@@ -342,9 +332,6 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
     }
     if (expectedErrMsg != null && exception.getMessage != null) {
       if (!exception.getMessage.contains(expectedErrMsg)) {
-        // Message doesn't contain expected text (e.g., Velox lacks SQL text context).
-        // If the exception is a SparkThrowable with a valid errorClass, accept it —
-        // the exception type and error class are correct, only the SQL context is missing.
         exception match {
           case st: SparkThrowable if st.getCondition != null =>
             logWarning(

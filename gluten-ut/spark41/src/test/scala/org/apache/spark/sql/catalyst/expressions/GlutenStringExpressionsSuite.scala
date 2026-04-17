@@ -16,6 +16,9 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
-import org.apache.spark.sql.GlutenTestsTrait
+import org.apache.spark.sql.shim.GlutenPanoramaTrait
 
-class GlutenStringExpressionsSuite extends StringExpressionsSuite with GlutenTestsTrait {}
+class GlutenStringExpressionsSuite extends StringExpressionsSuite with GlutenPanoramaTrait {
+  override protected def panoramaMeta(expression: Expression): String =
+    s"expr=${expression.getClass.getSimpleName}"
+}

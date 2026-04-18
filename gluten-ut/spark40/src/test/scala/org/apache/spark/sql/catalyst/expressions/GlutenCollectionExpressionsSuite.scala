@@ -17,7 +17,7 @@
 package org.apache.spark.sql.catalyst.expressions
 
 import org.apache.spark.SparkRuntimeException
-import org.apache.spark.sql.GlutenTestsTrait
+import org.apache.spark.sql.shim.GlutenPanoramaTrait
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult.DataTypeMismatch
@@ -26,7 +26,12 @@ import org.apache.spark.sql.types._
 
 import scala.util.Random
 
-class GlutenCollectionExpressionsSuite extends CollectionExpressionsSuite with GlutenTestsTrait {
+class GlutenCollectionExpressionsSuite
+    extends CollectionExpressionsSuite
+    with GlutenPanoramaTrait {
+  override protected def panoramaMeta(expression: Expression): String =
+    s"expr=${expression.getClass.getSimpleName}"
+
   testGluten("Shuffle") {
     // Primitive-type elements
     val ai0 = Literal.create(Seq(1, 2, 3, 4, 5), ArrayType(IntegerType, containsNull = false))

@@ -18,7 +18,7 @@ package org.apache.spark.sql.catalyst.expressions
 
 import org.apache.gluten.config.GlutenConfig
 
-import org.apache.spark.sql.GlutenTestsTrait
+import org.apache.spark.sql.shim.GlutenPanoramaTrait
 import org.apache.spark.sql.catalyst.util.DateTimeTestUtils.{withDefaultTimeZone, ALL_TIMEZONES, UTC, UTC_OPT}
 import org.apache.spark.sql.catalyst.util.DateTimeUtils.{fromJavaTimestamp, millisToMicros, TimeZoneUTC}
 import org.apache.spark.sql.internal.SQLConf
@@ -28,7 +28,12 @@ import org.apache.spark.util.DebuggableThreadUtils
 import java.sql.{Date, Timestamp}
 import java.util.{Calendar, TimeZone}
 
-class GlutenCastWithAnsiOnSuite extends CastWithAnsiOnSuite with GlutenTestsTrait {
+class GlutenCastWithAnsiOnSuite extends CastWithAnsiOnSuite with GlutenPanoramaTrait {
+  override protected def panoramaMeta(expression: Expression): String = expression match {
+    case c: Cast => s"fromType=${c.child.dataType.simpleString},toType=${c.dataType.simpleString}"
+    case _ => ""
+  }
+
   override def beforeAll(): Unit = {
     super.beforeAll()
     conf.setConf(SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO, true)

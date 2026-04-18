@@ -19,6 +19,7 @@ package org.apache.spark.sql
 import org.apache.gluten.utils.BackendTestSettings
 
 import org.apache.spark.sql.GlutenTestConstants.GLUTEN_TEST
+import org.apache.spark.sql.internal.SQLConf
 
 import org.scalactic.source.Position
 import org.scalatest.Tag
@@ -49,6 +50,14 @@ trait GlutenTestsBaseTrait extends AnyFunSuiteLike {
   protected def testGluten(testName: String, testTag: Tag*)(testFun: => Any)(implicit
       pos: Position): Unit = {
     test(GLUTEN_TEST + testName, testTag: _*)(testFun)
+  }
+
+  /** Run the gluten test only when ANSI mode matches the expected value. */
+  protected def testGlutenWithAnsiMode(testName: String, ansiEnabled: Boolean)(testFun: => Any)(
+      implicit pos: Position): Unit = {
+    if (SQLConf.get.ansiEnabled == ansiEnabled) {
+      testGluten(testName)(testFun)
+    }
   }
 
   protected def ignoreGluten(testName: String, testTag: Tag*)(testFun: => Any)(implicit

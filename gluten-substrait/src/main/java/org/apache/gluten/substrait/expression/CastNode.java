@@ -26,12 +26,16 @@ public class CastNode implements ExpressionNode, Serializable {
   private final TypeNode typeNode;
   private final ExpressionNode expressionNode;
 
-  public final boolean isTryCast;
+  // Maps directly to Substrait FailureBehavior:
+  // 0 = UNSPECIFIED (LEGACY: truncate on overflow)
+  // 1 = RETURN_NULL (TRY: return null on failure)
+  // 2 = THROW_EXCEPTION (ANSI: throw on failure)
+  public final int evalMode;
 
-  CastNode(TypeNode typeNode, ExpressionNode expressionNode, boolean isTryCast) {
+  CastNode(TypeNode typeNode, ExpressionNode expressionNode, int evalMode) {
     this.typeNode = typeNode;
     this.expressionNode = expressionNode;
-    this.isTryCast = isTryCast;
+    this.evalMode = evalMode;
   }
 
   @Override
@@ -39,13 +43,7 @@ public class CastNode implements ExpressionNode, Serializable {
     Expression.Cast.Builder castBuilder = Expression.Cast.newBuilder();
     castBuilder.setType(typeNode.toProtobuf());
     castBuilder.setInput(expressionNode.toProtobuf());
-    if (!isTryCast) {
-      // Throw exception on failure.
-      castBuilder.setFailureBehaviorValue(2);
-    } else {
-      // Return null on failure.
-      castBuilder.setFailureBehaviorValue(1);
-    }
+    castBuilder.setFailureBehaviorValue(evalMode);
     Expression.Builder builder = Expression.newBuilder();
     builder.setCast(castBuilder.build());
     return builder.build();

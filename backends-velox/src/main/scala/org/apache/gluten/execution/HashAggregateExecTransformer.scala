@@ -136,7 +136,7 @@ abstract class HashAggregateExecTransformer(
                     .makeCast(
                       ConverterUtils.getTypeNode(sparkType, nullable = false),
                       ExpressionBuilder.makeSelection(colIdx, adjustedOrders(idx)),
-                      SQLConf.get.ansiEnabled))
+                      if (SQLConf.get.ansiEnabled) 2 else 0))
               } else {
                 // Velox and Spark have the same type
                 expressionNodes.add(ExpressionBuilder.makeSelection(colIdx, adjustedOrders(idx)))
@@ -337,7 +337,7 @@ abstract class HashAggregateExecTransformer(
                       ExpressionBuilder.makeCast(
                         ConverterUtils.getTypeNode(veloxType, attr.nullable),
                         aggFuncInputAttrNode,
-                        SQLConf.get.ansiEnabled)
+                        if (SQLConf.get.ansiEnabled) 2 else 0)
                     } else {
                       newInputAttributes += attr
                       aggFuncInputAttrNode

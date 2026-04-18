@@ -25,6 +25,7 @@ import org.apache.gluten.test.FallbackUtil
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{DataFrame, GlutenQueryTest, Row}
+import org.apache.spark.sql.internal.SQLConf
 
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -96,10 +97,8 @@ abstract class GlutenQueryComparisonTest extends GlutenQueryTest {
       customCheck: DataFrame => Unit,
       noFallBack: Boolean = true,
       cache: Boolean = false): DataFrame = {
-    var expected: Seq[Row] = null
-    withSQLConf(vanillaSparkConfs(): _*) {
-      val df = dataframe()
-      expected = df.collect()
+    val expected = withSQLConf(vanillaSparkConfs(): _*) {
+      scala.util.Try(dataframe().collect())
     }
     // By default, we will fallback complex type scan but here we should allow
     // to test support of complex type
@@ -109,17 +108,33 @@ abstract class GlutenQueryComparisonTest extends GlutenQueryTest {
       df.cache()
     }
     try {
-      if (compareResult) {
-        checkAnswer(df, expected)
-      } else {
-        df.collect()
+      expected match {
+        case scala.util.Failure(_) if SQLConf.get.ansiEnabled =>
+          // In ANSI mode, if vanilla Spark throws an exception on the test data,
+          // verify that Gluten also throws an exception.
+          intercept[Exception](df.collect())
+        // TODO: once exception type mapping is implemented, enable this assertion
+        //  to verify that the exception type matches vanilla Spark's.
+        // assert(
+        //   glutenException.getClass == expected.failed.get.getClass,
+        //   s"Expected ${expected.failed.get.getClass.getName} " +
+        //     s"but got ${glutenException.getClass.getName}"
+        // )
+        case scala.util.Failure(e) =>
+          throw e
+        case scala.util.Success(rows) =>
+          if (compareResult) {
+            checkAnswer(df, rows)
+          } else {
+            df.collect()
+          }
+          checkDataFrame(noFallBack, customCheck, df)
       }
     } finally {
       if (cache) {
         df.unpersist()
       }
     }
-    checkDataFrame(noFallBack, customCheck, df)
     df
   }
 

@@ -75,9 +75,17 @@ for arg in "$@"; do
     esac
 done
 
-# Auto-detect BUILD_TYPE
+# Auto-detect BUILD_TYPE from Gluten CMakeCache.txt
 if [ -z "${BUILD_TYPE:-}" ]; then
-    [ -d "$VELOX_HOME/_build/debug" ] && BUILD_TYPE=Debug || BUILD_TYPE=Release
+    GLUTEN_BUILD_DIR="$GLUTEN_DIR/cpp/build"
+    if [ -f "$GLUTEN_BUILD_DIR/CMakeCache.txt" ]; then
+        BUILD_TYPE=$(grep '^CMAKE_BUILD_TYPE:' "$GLUTEN_BUILD_DIR/CMakeCache.txt" | cut -d= -f2)
+    fi
+    if [ -z "${BUILD_TYPE:-}" ]; then
+        echo "ERROR: Cannot auto-detect BUILD_TYPE from $GLUTEN_BUILD_DIR/CMakeCache.txt"
+        echo "Use --build_type=Debug|Release or run a full build first."
+        exit 1
+    fi
 fi
 
 # Auto-detect SCALA_VERSION

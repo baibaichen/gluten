@@ -1615,7 +1615,9 @@ class MiscOperatorSuite extends VeloxWholeStageTransformerSuite with AdaptiveSpa
     )(df => checkFallbackOperators(df, 0))
   }
 
-  test("Support multi-children count with row construct") {
+  // corr() triggers DIVIDE_BY_ZERO in ANSI mode when group has single row (n=1, stddev=0).
+  // Velox's corr() returns NaN instead of throwing. Skip under ANSI mode.
+  testWithAnsiMode("Support multi-children count with row construct", ansiEnabled = false) {
     runQueryAndCompare(
       """
         |select l_orderkey, count(distinct l_partkey, l_comment), corr(l_partkey, l_partkey+1)

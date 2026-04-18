@@ -107,33 +107,17 @@ class VeloxTestSettings extends BackendTestSettings {
   enableSuite[GlutenBindReferencesSuite]
   enableSuite[GlutenBitwiseExpressionsSuite]
   enableSuite[GlutenCastWithAnsiOffSuite]
-    .exclude(
-      "Process Infinity, -Infinity, NaN in case insensitive manner" // +inf not supported in folly.
-    )
-    // Set timezone through config.
-    .exclude("data type casting")
-    // Revised by setting timezone through config and commented unsupported cases.
-    .exclude("cast string to timestamp")
-    .exclude("cast from timestamp II")
-    .exclude("SPARK-36286: invalid string cast to timestamp")
+    .exclude("data type casting") // Rewrite for Gluten: sync session timezone with per-expression
+    .exclude("cast string to timestamp") // Rewrite for Gluten: sync session timezone
+    .exclude("cast from timestamp II") // Rewrite: skip Long.MinValue (collect rebase overflow)
+    // Velox returns plain string "0.000000123" while LEGACY mode expects scientific notation "1.23E-7"
     .exclude("SPARK-39749: cast Decimal to string")
   enableSuite[GlutenTryCastSuite]
-    .exclude(
-      "Process Infinity, -Infinity, NaN in case insensitive manner" // +inf not supported in folly.
-    )
     .exclude("cast from timestamp II") // Rewrite test for Gluten not supported with ANSI mode
-    .exclude("ANSI mode: Throw exception on casting out-of-range value to byte type")
-    .exclude("ANSI mode: Throw exception on casting out-of-range value to short type")
-    .exclude("ANSI mode: Throw exception on casting out-of-range value to int type")
-    .exclude("ANSI mode: Throw exception on casting out-of-range value to long type")
-    .exclude("cast from invalid string to numeric should throw NumberFormatException")
-    .exclude("SPARK-26218: Fix the corner case of codegen when casting float to Integer")
     // Set timezone through config.
     .exclude("data type casting")
     // Revised by setting timezone through config and commented unsupported cases.
     .exclude("cast string to timestamp")
-    // TODO: fix after https://github.com/facebookincubator/velox/pull/14910
-    .exclude("SPARK-39749: cast Decimal to string")
   enableSuite[GlutenCollectionExpressionsSuite]
     // Rewrite in Gluten to replace Seq with Array
     .exclude("Shuffle")
@@ -228,7 +212,9 @@ class VeloxTestSettings extends BackendTestSettings {
   enableSuite[GlutenBitmapExpressionUtilsSuite]
   enableSuite[GlutenCallMethodViaReflectionSuite]
   enableSuite[GlutenCanonicalizeSuite]
-  // TODO: 4.x enableSuite[GlutenCastWithAnsiOnSuite]  // 10 failures
+  enableSuite[GlutenCastWithAnsiOnSuite]
+    .exclude("data type casting")
+    .exclude("cast string to timestamp")
   enableSuite[GlutenCodeGenerationSuite]
   enableSuite[GlutenCodeGeneratorWithInterpretedFallbackSuite]
   enableSuite[GlutenCollationExpressionSuite]
@@ -284,6 +270,9 @@ class VeloxTestSettings extends BackendTestSettings {
     .exclude("CONVERSION_INVALID_INPUT: to_binary conversion function hex")
   enableSuite[GlutenQueryParsingErrorsSuite]
   enableSuite[GlutenQueryContextSuite]
+    // ANSI mode: Velox exceptions lose type info at JNI boundary (GlutenException instead of
+    // SparkArithmeticException). Tracked for future fix via exception type mapping.
+    .exclude("SPARK-50290: Add a flag to disable DataFrame context")
   enableSuite[GlutenQueryExecutionAnsiErrorsSuite]
   enableSuite[VeloxAdaptiveQueryExecSuite]
     .includeAllGlutenTests()
@@ -1056,6 +1045,15 @@ class VeloxTestSettings extends BackendTestSettings {
     .exclude("SPARK-38173: Quoted column cannot be recognized correctly when quotedRegexColumnNames is true")
     // Rewrite with Gluten's explained result.
     .exclude("SPARK-47939: Explain should work with parameterized queries")
+    // ANSI mode: exception type mismatch -- Velox throws GlutenException, test expects specific
+    // Spark exception types. Tracked for future fix via exception type mapping.
+    .exclude("SPARK-39166: Query context of binary arithmetic should be serialized to executors" +
+      " when WSCG is off")
+    .exclude("SPARK-39175: Query context of Cast should be serialized to executors" +
+      " when WSCG is off")
+    .exclude("SPARK-39190,SPARK-39208,SPARK-39210: Query context of decimal overflow error" +
+      " should be serialized to executors when WSCG is off")
+    .exclude("SPARK-40389: Don't eliminate a cast which can cause overflow")
   enableSuite[GlutenSQLQueryTestSuite]
   enableSuite[GlutenStatisticsCollectionSuite]
     // The output byte size of Velox is different

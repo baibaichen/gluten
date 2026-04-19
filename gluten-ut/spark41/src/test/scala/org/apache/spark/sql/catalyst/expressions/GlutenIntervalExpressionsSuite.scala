@@ -16,6 +16,11 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
-import org.apache.spark.sql.GlutenTestsTrait
+import org.apache.spark.sql.shim.GlutenExpressionOffloadTracker
 
-class GlutenIntervalExpressionsSuite extends IntervalExpressionsSuite with GlutenTestsTrait {}
+class GlutenIntervalExpressionsSuite
+  extends IntervalExpressionsSuite
+  with GlutenExpressionOffloadTracker {
+  override protected def panoramaMeta(expression: Expression): String =
+    s"expr=${expression.getClass.getSimpleName}"
+}

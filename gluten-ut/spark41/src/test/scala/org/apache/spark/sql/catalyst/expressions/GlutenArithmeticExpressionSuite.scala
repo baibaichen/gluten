@@ -16,6 +16,21 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
-import org.apache.spark.sql.GlutenTestsTrait
+import org.apache.spark.sql.shim.GlutenExpressionOffloadTracker
 
-class GlutenArithmeticExpressionSuite extends ArithmeticExpressionSuite with GlutenTestsTrait {}
+class GlutenArithmeticExpressionSuite
+  extends ArithmeticExpressionSuite
+  with GlutenExpressionOffloadTracker {
+  override protected def panoramaMeta(expression: Expression): String = expression match {
+    case _: Add => "operator=Add"
+    case _: Subtract => "operator=Subtract"
+    case _: Multiply => "operator=Multiply"
+    case _: Divide => "operator=Divide"
+    case _: IntegralDivide => "operator=IntegralDivide"
+    case _: Remainder => "operator=Remainder"
+    case _: Pmod => "operator=Pmod"
+    case _: Abs => "operator=Abs"
+    case _: UnaryMinus => "operator=UnaryMinus"
+    case _ => ""
+  }
+}

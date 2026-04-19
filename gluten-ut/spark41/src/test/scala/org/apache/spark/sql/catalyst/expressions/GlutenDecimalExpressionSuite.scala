@@ -20,5 +20,4 @@ import org.apache.spark.sql.shim.GlutenExpressionOffloadTracker
 
 class GlutenDecimalExpressionSuite
   extends DecimalExpressionSuite
-  with GlutenExpressionOffloadTracker {
-}
+  with GlutenExpressionOffloadTracker {}

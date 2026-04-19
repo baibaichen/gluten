@@ -20,5 +20,4 @@ import org.apache.spark.sql.shim.GlutenExpressionOffloadTracker
 
 class GlutenIntervalExpressionsSuite
   extends IntervalExpressionsSuite
-  with GlutenExpressionOffloadTracker {
-}
+  with GlutenExpressionOffloadTracker {}

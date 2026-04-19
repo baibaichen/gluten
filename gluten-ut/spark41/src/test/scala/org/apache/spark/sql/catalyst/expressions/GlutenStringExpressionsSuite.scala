@@ -20,5 +20,4 @@ import org.apache.spark.sql.shim.GlutenExpressionOffloadTracker
 
 class GlutenStringExpressionsSuite
   extends StringExpressionsSuite
-  with GlutenExpressionOffloadTracker {
-}
+  with GlutenExpressionOffloadTracker {}

@@ -46,7 +46,7 @@ class GlutenCastWithAnsiOffSuite extends CastWithAnsiOffSuite with GlutenExpress
     conf.setConf(SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO, true)
   }
 
-  // Override: Gluten uses session-level timezone for cast. The original test sets per-expression
+  // Gluten uses session-level timezone for cast. The original test sets per-expression
   // timezone via Cast(..., Option(tz)), which Gluten ignores. We sync session timezone with
   // withSQLConf to match per-expression timezone.
   testGluten("data type casting") {
@@ -129,7 +129,7 @@ class GlutenCastWithAnsiOffSuite extends CastWithAnsiOffSuite with GlutenExpress
     checkEvaluation(cast(Literal.create(null, IntegerType), ShortType), null)
   }
 
-  // Override: Gluten's glutenCheckExpression uses collect(), which triggers
+  // Gluten's glutenCheckExpression uses collect(), which triggers
   // toJavaTimestamp -> rebaseGregorianToJulianMicros. Long.MinValue micros (~292000 BC) overflows
   // during rebase. Velox computes correctly; only the collect path fails. Skip Long.MinValue.
   testGluten("cast from timestamp II") {
@@ -142,7 +142,7 @@ class GlutenCastWithAnsiOffSuite extends CastWithAnsiOffSuite with GlutenExpress
     // rebaseGregorianToJulianMicros when converting extreme timestamp to java.sql.Timestamp.
   }
 
-  // Override: sync session timezone with per-expression timezone and run single-threaded.
+  // Sync session timezone with per-expression timezone and run single-threaded.
   testGluten("cast string to timestamp") {
     DebuggableThreadUtils.parmap(
       ALL_TIMEZONES

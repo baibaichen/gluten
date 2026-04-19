@@ -45,7 +45,7 @@ class GlutenCastWithAnsiOnSuite extends CastWithAnsiOnSuite with GlutenExpressio
     conf.setConfString(GlutenConfig.GLUTEN_ANSI_FALLBACK_ENABLED.key, "false")
   }
 
-  // Override: Gluten uses session-level timezone for cast. The original test sets per-expression
+  // Gluten uses session-level timezone for cast. The original test sets per-expression
   // timezone via Cast(..., Option(tz)), which Gluten ignores. We sync session timezone with
   // withSQLConf to match per-expression timezone.
   testGluten("data type casting") {
@@ -126,7 +126,7 @@ class GlutenCastWithAnsiOnSuite extends CastWithAnsiOnSuite with GlutenExpressio
     checkEvaluation(cast(Literal.create(null, IntegerType), ShortType), null)
   }
 
-  // Override: sync session timezone with per-expression timezone and run single-threaded.
+  // Sync session timezone with per-expression timezone and run single-threaded.
   testGluten("cast string to timestamp") {
     DebuggableThreadUtils.parmap(
       ALL_TIMEZONES

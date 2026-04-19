@@ -29,8 +29,6 @@ import scala.util.Random
 class GlutenCollectionExpressionsSuite
   extends CollectionExpressionsSuite
   with GlutenExpressionOffloadTracker {
-  override protected def panoramaMeta(expression: Expression): String =
-    s"expr=${expression.getClass.getSimpleName}"
 
   testGluten("Shuffle") {
     // Primitive-type elements

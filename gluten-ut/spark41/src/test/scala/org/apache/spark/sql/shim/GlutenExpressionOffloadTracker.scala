@@ -30,7 +30,8 @@ import scala.reflect.ClassTag
 
 trait GlutenExpressionOffloadTracker extends GlutenTestsTrait {
 
-  protected def panoramaMeta(expression: Expression): String
+  protected def panoramaMeta(expression: Expression): String =
+    s"expr=${expression.getClass.getSimpleName}"
 
   private case class OffloadRecord(
       method: String,

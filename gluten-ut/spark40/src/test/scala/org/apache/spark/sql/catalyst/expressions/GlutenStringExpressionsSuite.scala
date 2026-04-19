@@ -21,6 +21,4 @@ import org.apache.spark.sql.shim.GlutenExpressionOffloadTracker
 class GlutenStringExpressionsSuite
   extends StringExpressionsSuite
   with GlutenExpressionOffloadTracker {
-  override protected def panoramaMeta(expression: Expression): String =
-    s"expr=${expression.getClass.getSimpleName}"
 }

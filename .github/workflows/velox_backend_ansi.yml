@@ -454,6 +454,11 @@ jobs:
         with:
           pattern: spark-test-*-report
           path: ./test-reports/
+      - name: Download all test logs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: spark-test-*-logs
+          path: ./test-logs/
       - name: Install dependencies
         run: pip3 install requests
       - name: Analyze and report
@@ -463,4 +468,4 @@ jobs:
           PR_NUMBER: ${{ needs.check-comment.outputs.pr_number }}
           TRIGGERED_BY: ${{ github.event.comment.user.login || github.actor }}
           RUN_ID: ${{ github.run_id }}
-        run: python3 .github/scripts/analyze-ansi-results.py
+        run: python3 .github/scripts/analyze-ansi-results.py --ai --pr-comment --log-dir ./test-logs/

@@ -23,17 +23,18 @@ class GlutenArithmeticExpressionSuite
   extends ArithmeticExpressionSuite
   with GlutenExpressionOffloadTracker
   with GlutenTestsTrait {
-  override protected def panoramaMeta(expression: Expression): Map[String, String] = expression match {
-    case _: Add => Map("operator" -> "Add")
-    case _: Subtract => Map("operator" -> "Subtract")
-    case _: Multiply => Map("operator" -> "Multiply")
-    case _: Divide => Map("operator" -> "Divide")
-    case _: IntegralDivide => Map("operator" -> "IntegralDivide")
-    case _: Remainder => Map("operator" -> "Remainder")
-    case _: Pmod => Map("operator" -> "Pmod")
-    case _: Abs => Map("operator" -> "Abs")
-    case _: UnaryMinus => Map("operator" -> "UnaryMinus")
-    case _ => Map.empty
-  }
+  override protected def panoramaMeta(expression: Expression): Map[String, String] =
+    expression match {
+      case _: Add => Map("operator" -> "Add")
+      case _: Subtract => Map("operator" -> "Subtract")
+      case _: Multiply => Map("operator" -> "Multiply")
+      case _: Divide => Map("operator" -> "Divide")
+      case _: IntegralDivide => Map("operator" -> "IntegralDivide")
+      case _: Remainder => Map("operator" -> "Remainder")
+      case _: Pmod => Map("operator" -> "Pmod")
+      case _: Abs => Map("operator" -> "Abs")
+      case _: UnaryMinus => Map("operator" -> "UnaryMinus")
+      case _ => Map.empty
+    }
   override protected def offloadCategory: String = "arithmetic"
 }

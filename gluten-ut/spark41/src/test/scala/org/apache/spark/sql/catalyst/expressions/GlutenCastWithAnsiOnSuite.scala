@@ -33,10 +33,12 @@ class GlutenCastWithAnsiOnSuite
   extends CastWithAnsiOnSuite
   with GlutenExpressionOffloadTracker
   with GlutenTestsTrait {
-  override protected def panoramaMeta(expression: Expression): Map[String, String] = expression match {
-    case c: Cast => Map("fromType" -> c.child.dataType.simpleString, "toType" -> c.dataType.simpleString)
-    case _ => Map.empty
-  }
+  override protected def panoramaMeta(expression: Expression): Map[String, String] =
+    expression match {
+      case c: Cast =>
+        Map("fromType" -> c.child.dataType.simpleString, "toType" -> c.dataType.simpleString)
+      case _ => Map.empty
+    }
   override protected def offloadCategory: String = "cast"
 
   override def beforeAll(): Unit = {

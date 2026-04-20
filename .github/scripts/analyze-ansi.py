@@ -47,19 +47,15 @@ ANALYSIS_PROMPT_TEMPLATE = """\
 你是 Gluten 项目的 ANSI 模式测试分析专家。Gluten 是 Apache Spark 的 native engine 加速插件，
 通过 Velox (C++) 后端 offload 表达式计算。ANSI 模式要求对溢出、类型转换错误等抛出异常。
 
-以下是 analyze-ansi.py --mode json 的结构化输出：
+以下是 JSON 表达式测试（非 XML suite 测试）的结构化输出：
 
 ```json
 {json_data}
 ```
 
-请按以下结构生成分析报告（Markdown 格式，中文）：
+请只分析 JSON 表达式测试数据，不要包含 XML suite 测试统计。直接输出关键发现，不需要总体概览。
 
-## 总体概览
-- 总测试数、通过/失败
-- 色彩分布表（🟢 Passed+Offload / 🔴 Passed+Fallback / ⚪ No data / 🟡 Failed），含数量和占比
-- 各 category 分布表（Category / Pass / Fail / Entries）
-- 标注"假绿"隐性问题：Passed+Fallback 表示测试通过但实际由 Spark fallback 执行，非 Velox offload
+请按以下结构生成分析报告（Markdown 格式，中文）：
 
 ## 关键发现
 - 失败集中区域表（Suite / 失败数 / 主要症结）
@@ -535,7 +531,7 @@ def format_summary(summary, json_tests, suites=None):
             for suite, cnt in sorted(xml_suite_counts.items(),
                                      key=lambda x: -x[1]):
                 if cnt <= 3:
-                    tests = ", ".join(xml_suite_tests[suite])
+                    tests = "<br/>".join(xml_suite_tests[suite])
                     lines.append(f"| {suite} | {tests} |")
                 else:
                     lines.append(f"| {suite} | {cnt} |")
@@ -761,11 +757,12 @@ def _build_ai_context(summary, categories):
             "suites": sorted(data["suites"]),
         }
 
+    json_colors = {k: v for k, v in summary["by_color"].items()
+                    if k not in ("Passed (no data)", "Skipped")}
+
     output = {
-        "total": summary["total"],
         "json_test_count": summary["json_test_count"],
-        "xml_test_count": summary["xml_test_count"],
-        "by_color": summary["by_color"],
+        "by_color": json_colors,
         "failure_count": len(summary["failures"]),
         "failures": compact_failures,
         "categories": compact_cats,

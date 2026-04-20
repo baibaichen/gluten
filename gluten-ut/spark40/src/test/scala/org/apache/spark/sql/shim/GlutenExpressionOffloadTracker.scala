@@ -62,35 +62,41 @@ trait GlutenExpressionOffloadTracker extends sql.GlutenTestsTrait {
     }
   }
 
-  override def runTest(testName: String, args: Args): Status = {
+  override def runTest(testName: String, args: Args): Status = if (ansiTest) {
     currentTestRecords.clear()
     val status = super.runTest(testName, args)
     val result = if (status.succeeds()) "PASS" else "FAIL"
     allTestResults += TestOffloadResult(testName, currentTestRecords.toSeq, result)
     status
+  } else {
+    super.runTest(testName, args)
   }
 
   override protected def doCheckExpression(
       expression: Expression,
       expected: Any,
       inputRow: InternalRow,
-      resultDF: DataFrame): Unit = {
+      resultDF: DataFrame): Unit = if (ansiTest) {
     withOffloadLog("checkExpression", expression, resultDF) {
       super.doCheckExpression(expression, expected, inputRow, resultDF)
     }
+  } else {
+    super.doCheckExpression(expression, expected, inputRow, resultDF)
   }
 
   override protected def doCheckExceptionInExpression[T <: Throwable: ClassTag](
       expression: Expression,
       inputRow: InternalRow,
       expectedErrMsg: String,
-      resultDF: DataFrame): Unit = {
+      resultDF: DataFrame): Unit = if (ansiTest) {
     withOffloadLog("checkException", expression, resultDF) {
       super.doCheckExceptionInExpression[T](expression, inputRow, expectedErrMsg, resultDF)
     }
+  } else {
+    super.doCheckExceptionInExpression[T](expression, inputRow, expectedErrMsg, resultDF)
   }
 
-  override def afterAll(): Unit = {
+  override def afterAll(): Unit = if (ansiTest) {
     val suiteName = this.getClass.getSimpleName
     logWarning("EXPRESSION_OFFLOAD_SUMMARY_BEGIN")
     logWarning(s"$suiteName:")
@@ -105,6 +111,8 @@ trait GlutenExpressionOffloadTracker extends sql.GlutenTestsTrait {
         }
     }
     logWarning("EXPRESSION_OFFLOAD_SUMMARY_END")
+    super.afterAll()
+  } else {
     super.afterAll()
   }
 }

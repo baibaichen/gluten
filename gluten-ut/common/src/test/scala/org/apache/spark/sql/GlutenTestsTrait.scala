@@ -47,6 +47,8 @@ import scala.reflect.ClassTag
 
 trait GlutenTestsTrait extends GlutenTestsCommonTrait {
 
+  lazy val ansiTest: Boolean = !GlutenConfig.get.enableAnsiFallback
+
   // TODO: remove this if we can suppress unused import error.
   locally {
     new ColumnConstructorExt(Column)
@@ -163,12 +165,12 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
       expression: => Expression,
       inputRow: InternalRow,
       expectedErrMsg: String): Unit = {
-    if (GlutenConfig.get.enableAnsiFallback) {
-      super.checkExceptionInExpression[T](expression, inputRow, expectedErrMsg)
-    } else {
+    if (ansiTest) {
       val expr = resolveExpression(expression)
       assert(expr.resolved)
       glutenCheckExceptionInExpression[T](expr, inputRow, expectedErrMsg)
+    } else {
+      super.checkExceptionInExpression[T](expression, inputRow, expectedErrMsg)
     }
   }
 

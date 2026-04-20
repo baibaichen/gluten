@@ -73,7 +73,12 @@ trait GlutenExpressionOffloadTracker extends GlutenTestsTrait {
       }
       val offload = if (projectTransformer.size == 1) "OFFLOAD" else "FALLBACK"
       currentTestRecords += OffloadRecord(
-        method, expression.toString, meta, offload, failCause, failStackTrace)
+        method,
+        expression.toString,
+        meta,
+        offload,
+        failCause,
+        failStackTrace)
     }
   }
 
@@ -123,29 +128,30 @@ trait GlutenExpressionOffloadTracker extends GlutenTestsTrait {
     val mapper = new ObjectMapper()
     mapper.registerModule(DefaultScalaModule)
 
-    val testsJson = allTestResults.map { t =>
-      val recordsJson = t.records.zipWithIndex.map {
-        case (r, idx) =>
-          val methodTag = if (r.method == "checkException") "E" else "N"
-          val status = if (idx == t.records.size - 1) t.status else "PASS"
-          val record = mutable.LinkedHashMap[String, Any](
-            "method" -> methodTag,
-            "expression" -> r.expression,
-            "meta" -> r.meta,
-            "offload" -> r.offload,
-            "status" -> status
-          )
-          if (r.failCause != null) {
-            record("failCause") = r.failCause
-            record("failStackTrace") = r.failStackTrace
-          }
-          record
-      }
-      mutable.LinkedHashMap[String, Any](
-        "name" -> t.testName,
-        "status" -> t.status,
-        "records" -> recordsJson
-      )
+    val testsJson = allTestResults.map {
+      t =>
+        val recordsJson = t.records.zipWithIndex.map {
+          case (r, idx) =>
+            val methodTag = if (r.method == "checkException") "E" else "N"
+            val status = if (idx == t.records.size - 1) t.status else "PASS"
+            val record = mutable.LinkedHashMap[String, Any](
+              "method" -> methodTag,
+              "expression" -> r.expression,
+              "meta" -> r.meta,
+              "offload" -> r.offload,
+              "status" -> status
+            )
+            if (r.failCause != null) {
+              record("failCause") = r.failCause
+              record("failStackTrace") = r.failStackTrace
+            }
+            record
+        }
+        mutable.LinkedHashMap[String, Any](
+          "name" -> t.testName,
+          "status" -> t.status,
+          "records" -> recordsJson
+        )
     }
 
     val output = mutable.LinkedHashMap[String, Any](

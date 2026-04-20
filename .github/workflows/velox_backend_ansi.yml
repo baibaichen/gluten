@@ -479,7 +479,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      copilot_requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -528,7 +527,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      copilot_requests: write
     steps:
       - uses: actions/checkout@v4
         with:

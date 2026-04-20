@@ -476,6 +476,10 @@ jobs:
       - spark-test-spark-ut-ansi-spark40
     if: always() && needs.check-comment.result == 'success' && inputs.mode != 'analyze-only'
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      pull-requests: write
+      copilot_requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -502,6 +506,7 @@ jobs:
         run: curl -fsSL https://gh.io/copilot-install | bash
       - name: Analyze and report
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
           AI_MODEL: ${{ needs.check-comment.outputs.ai_model }}
           PR_NUMBER: ${{ needs.check-comment.outputs.pr_number }}
@@ -520,6 +525,10 @@ jobs:
     needs: check-comment
     if: inputs.mode == 'analyze-only'
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      pull-requests: write
+      copilot_requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -580,6 +589,7 @@ jobs:
         run: curl -fsSL https://gh.io/copilot-install | bash
       - name: Analyze and report
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
           AI_MODEL: ${{ needs.check-comment.outputs.ai_model }}
           PR_NUMBER: ${{ needs.check-comment.outputs.pr_number }}

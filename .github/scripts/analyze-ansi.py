@@ -817,7 +817,9 @@ def call_copilot_analysis(json_output, model=None):
             print(f"Warning: copilot --model {m} returned empty or failed "
                   f"(rc={result.returncode})", file=sys.stderr)
             if result.stderr:
-                print(f"  stderr: {result.stderr[:200]}", file=sys.stderr)
+                print(f"  stderr: {result.stderr[:500]}", file=sys.stderr)
+            if result.stdout:
+                print(f"  stdout: {result.stdout[:200]}", file=sys.stderr)
         except subprocess.TimeoutExpired:
             print(f"Warning: copilot --model {m} timed out", file=sys.stderr)
         except FileNotFoundError:

@@ -433,7 +433,7 @@ def _worse(a, b):
 
 def format_summary(summary, json_tests, suites=None):
     """Format test-level summary as markdown."""
-    lines = ["## ANSI Mode Test Analysis Report\n"]
+    lines = ["## ANSI Mode Test Analysis Report (Spark 4.1)\n"]
     json_total = summary["json_test_count"]
     xml_total = summary["xml_test_count"]
     lines.append(f"**JSON tests: {json_total}** | "

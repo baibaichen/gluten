@@ -434,24 +434,25 @@ def _worse(a, b):
 def format_summary(summary, json_tests, suites=None):
     """Format test-level summary as markdown."""
     lines = ["## ANSI Mode Test Analysis Report\n"]
-    lines.append(f"**Total tests: {summary['total']}** "
-                 f"(JSON: {summary['json_test_count']}, "
-                 f"XML: {summary['xml_test_count']})\n")
+    json_total = summary["json_test_count"]
+    xml_total = summary["xml_test_count"]
+    lines.append(f"**JSON tests: {json_total}** | "
+                 f"**XML suites: {xml_total} tests**\n")
 
-    # --- Overview with percentage ---
-    lines.append("### Overview\n")
+    # --- Overview: JSON-only three-color stats ---
+    lines.append("### Overview (JSON Expression Tests)\n")
     lines.append("| Classification | Count | % |")
     lines.append("|---|---|---|")
-    for label in ["Passed+Offload", "Failed+Offload", "Passed+Fallback",
-                  "Failed+Fallback", "Failed", "Passed (no data)",
-                  "Failed (no data)", "Skipped"]:
+    json_labels = ["Passed+Offload", "Failed+Offload", "Passed+Fallback",
+                   "Failed+Fallback", "Failed"]
+    color_map = {"Passed+Offload": "🟢", "Failed+Offload": "🟡",
+                 "Passed+Fallback": "🔴", "Failed+Fallback": "🔴",
+                 "Failed": "🟡"}
+    for label in json_labels:
         count = summary["by_color"].get(label, 0)
         if count > 0:
-            color = {"Passed+Offload": "🟢", "Failed+Offload": "🟡",
-                     "Passed+Fallback": "🔴", "Failed+Fallback": "🔴",
-                     "Failed": "🟡", "Passed (no data)": "⚪",
-                     "Failed (no data)": "🟡", "Skipped": "⚪"}.get(label, "")
-            pct = count * 100 / summary["total"] if summary["total"] else 0
+            color = color_map.get(label, "")
+            pct = count * 100 / json_total if json_total else 0
             lines.append(f"| {color} {label} | {count} | {pct:.1f}% |")
     lines.append("")
 
@@ -547,23 +548,28 @@ def format_summary(summary, json_tests, suites=None):
                 f"\n*...and {len(json_failures) - 50} more*\n")
         lines.append("")
 
-    # --- Failed Tests: XML ---
+    # --- XML: failed suite summary (exclude suites already in JSON) ---
     if xml_failures:
-        lines.append(f"### Failed Tests — Integration Suites "
-                     f"(XML, {len(xml_failures)} failures)\n")
-        lines.append("| Suite | Test | Job | Message |")
-        lines.append("|---|---|---|---|")
-        for f in xml_failures[:30]:
-            msg = (f.get("message") or "")[:150]
-            msg = msg.replace("|", "\\|").replace("\n", " ")
-            suite_short = f["suite"].split(".")[-1]
-            job = f.get("job", "")
-            lines.append(
-                f"| {suite_short} | {f['test']} | {job} | {msg} |")
-        if len(xml_failures) > 30:
-            lines.append(
-                f"\n*...and {len(xml_failures) - 30} more*\n")
-        lines.append("")
+        json_suite_names = set()
+        if suites:
+            for s in suites:
+                json_suite_names.add(s.get("suite", ""))
+                json_suite_names.add(s.get("suite", "").split(".")[-1])
+        xml_suite_counts = defaultdict(int)
+        for f in xml_failures:
+            suite = f["suite"]
+            short = suite.split(".")[-1]
+            if suite not in json_suite_names and short not in json_suite_names:
+                xml_suite_counts[short] += 1
+        if xml_suite_counts:
+            lines.append(f"### Failed XML Suites "
+                         f"(not in JSON, {sum(xml_suite_counts.values())} failures)\n")
+            lines.append("| Suite | Failures |")
+            lines.append("|---|---|")
+            for suite, cnt in sorted(xml_suite_counts.items(),
+                                     key=lambda x: -x[1]):
+                lines.append(f"| {suite} | {cnt} |")
+            lines.append("")
 
     return "\n".join(lines)
 

@@ -16,9 +16,13 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
-import org.apache.spark.sql.shim.GlutenExpressionOffloadTracker
+import org.apache.spark.sql.GlutenExpressionOffloadTracker
+import org.apache.spark.sql.shim.GlutenTestsTrait
 
-class GlutenTryEvalSuite extends TryEvalSuite with GlutenExpressionOffloadTracker {
+class GlutenTryEvalSuite
+  extends TryEvalSuite
+  with GlutenExpressionOffloadTracker
+  with GlutenTestsTrait {
   override protected def panoramaMeta(expression: Expression): String = expression match {
     case _: Add => "operator=Add"
     case _: Subtract => "operator=Subtract"

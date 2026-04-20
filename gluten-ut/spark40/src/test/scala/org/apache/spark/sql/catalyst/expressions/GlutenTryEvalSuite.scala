@@ -16,7 +16,7 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
-import org.apache.spark.sql.shim.GlutenExpressionOffloadTracker
+import org.apache.spark.sql.GlutenExpressionOffloadTracker
 
 class GlutenTryEvalSuite extends TryEvalSuite with GlutenExpressionOffloadTracker {
   override protected def panoramaMeta(expression: Expression): String = expression match {

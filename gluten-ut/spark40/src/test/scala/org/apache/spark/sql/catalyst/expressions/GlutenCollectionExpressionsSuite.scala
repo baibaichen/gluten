@@ -17,11 +17,11 @@
 package org.apache.spark.sql.catalyst.expressions
 
 import org.apache.spark.SparkRuntimeException
+import org.apache.spark.sql.GlutenExpressionOffloadTracker
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult.DataTypeMismatch
 import org.apache.spark.sql.catalyst.util.TypeUtils.ordinalNumber
-import org.apache.spark.sql.shim.GlutenExpressionOffloadTracker
 import org.apache.spark.sql.types._
 
 import scala.util.Random

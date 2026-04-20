@@ -18,17 +18,21 @@ package org.apache.spark.sql.catalyst.expressions
 
 import org.apache.gluten.config.GlutenConfig
 
+import org.apache.spark.sql.GlutenExpressionOffloadTracker
 import org.apache.spark.sql.catalyst.util.DateTimeTestUtils.{withDefaultTimeZone, ALL_TIMEZONES, UTC, UTC_OPT}
 import org.apache.spark.sql.catalyst.util.DateTimeUtils.{fromJavaTimestamp, millisToMicros, TimeZoneUTC}
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.shim.GlutenExpressionOffloadTracker
+import org.apache.spark.sql.shim.GlutenTestsTrait
 import org.apache.spark.sql.types._
 import org.apache.spark.util.DebuggableThreadUtils
 
 import java.sql.{Date, Timestamp}
 import java.util.{Calendar, TimeZone}
 
-class GlutenCastWithAnsiOnSuite extends CastWithAnsiOnSuite with GlutenExpressionOffloadTracker {
+class GlutenCastWithAnsiOnSuite
+  extends CastWithAnsiOnSuite
+  with GlutenExpressionOffloadTracker
+  with GlutenTestsTrait {
   override protected def panoramaMeta(expression: Expression): String = expression match {
     case c: Cast => s"fromType=${c.child.dataType.simpleString},toType=${c.dataType.simpleString}"
     case _ => ""

@@ -17,18 +17,20 @@
 package org.apache.spark.sql.catalyst.expressions
 
 import org.apache.spark.SparkRuntimeException
+import org.apache.spark.sql.GlutenExpressionOffloadTracker
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult.DataTypeMismatch
 import org.apache.spark.sql.catalyst.util.TypeUtils.ordinalNumber
-import org.apache.spark.sql.shim.GlutenExpressionOffloadTracker
+import org.apache.spark.sql.shim.GlutenTestsTrait
 import org.apache.spark.sql.types._
 
 import scala.util.Random
 
 class GlutenCollectionExpressionsSuite
   extends CollectionExpressionsSuite
-  with GlutenExpressionOffloadTracker {
+  with GlutenExpressionOffloadTracker
+  with GlutenTestsTrait {
   testGluten("Shuffle") {
     // Primitive-type elements
     val ai0 = Literal.create(Seq(1, 2, 3, 4, 5), ArrayType(IntegerType, containsNull = false))

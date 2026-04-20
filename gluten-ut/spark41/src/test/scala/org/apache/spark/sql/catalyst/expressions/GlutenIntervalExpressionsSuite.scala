@@ -16,8 +16,10 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
-import org.apache.spark.sql.shim.GlutenExpressionOffloadTracker
+import org.apache.spark.sql.GlutenExpressionOffloadTracker
+import org.apache.spark.sql.shim.GlutenTestsTrait
 
 class GlutenIntervalExpressionsSuite
   extends IntervalExpressionsSuite
-  with GlutenExpressionOffloadTracker {}
+  with GlutenExpressionOffloadTracker
+  with GlutenTestsTrait {}

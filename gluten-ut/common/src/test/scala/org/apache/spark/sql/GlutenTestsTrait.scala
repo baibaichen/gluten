@@ -47,7 +47,7 @@ import scala.reflect.ClassTag
 
 trait GlutenTestsTrait extends GlutenTestsCommonTrait {
 
-  lazy val ansiTest: Boolean = !GlutenConfig.get.enableAnsiFallback
+  protected def ansiTest: Boolean = !GlutenConfig.get.enableAnsiFallback
 
   // TODO: remove this if we can suppress unused import error.
   locally {

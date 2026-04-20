@@ -276,8 +276,9 @@ def _normalize_type(t):
     return t
 
 
-def _cell_symbol(offload, status, fail_cause_type):
-    """Determine cell symbol using unified three-color scheme."""
+def _cell_symbol(offload, status):
+    """Determine cell symbol using unified three-color scheme.
+    TODO: accept fail_cause_type to differentiate 🟡 subtypes (NO_EXCEPTION/WRONG_EXCEPTION/etc.)."""
     if offload == "FALLBACK":
         return "🔴"
     if status == "PASS":
@@ -334,7 +335,7 @@ def _build_cast_matrix(entries, suites):
         from_t = _normalize_type(e["meta"].get("fromType", "?"))
         to_t = _normalize_type(e["meta"].get("toType", "?"))
         key = (from_t, to_t)
-        sym = _cell_symbol(e["offload"], e["status"], e.get("fail_type"))
+        sym = _cell_symbol(e["offload"], e["status"])
         cur = matrix[key].get(e["suite"], "⚪")
         matrix[key][e["suite"]] = _worse(sym, cur)
     return matrix
@@ -346,7 +347,7 @@ def _build_arithmetic_matrix(entries, suites):
     for e in entries:
         op = e["meta"].get("operator", "?")
         key = op
-        sym = _cell_symbol(e["offload"], e["status"], e.get("fail_type"))
+        sym = _cell_symbol(e["offload"], e["status"])
         cur = matrix[key].get(e["suite"], "⚪")
         matrix[key][e["suite"]] = _worse(sym, cur)
     return matrix
@@ -358,7 +359,7 @@ def _build_mechanism_b_matrix(entries, suites):
     for e in entries:
         expr = e["meta"].get("expr", "?")
         key = expr
-        sym = _cell_symbol(e["offload"], e["status"], e.get("fail_type"))
+        sym = _cell_symbol(e["offload"], e["status"])
         cur = matrix[key].get(e["suite"], "⚪")
         matrix[key][e["suite"]] = _worse(sym, cur)
     return matrix

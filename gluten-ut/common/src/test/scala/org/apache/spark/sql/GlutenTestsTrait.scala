@@ -129,14 +129,17 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
 
   protected var _spark: SparkSession = _
 
+  protected def resolveExpression(expression: Expression): Expression = {
+    ResolveTimeZone.resolveTimeZones(expression)
+  }
+
   override protected def checkEvaluation(
       expression: => Expression,
       expected: Any,
       inputRow: InternalRow = EmptyRow): Unit = {
 
     if (canConvertToDataFrame(inputRow)) {
-      val resolver = ResolveTimeZone
-      val expr = resolver.resolveTimeZones(expression)
+      val expr = resolveExpression(expression)
       assert(expr.resolved)
 
       glutenCheckExpression(expr, expected, inputRow)
@@ -147,20 +150,20 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
     }
   }
 
+  // Delegates to Spark's ExpressionEvalHelper when ansiFallback is enabled (default);
+  // routes through Velox only when ansiFallback is explicitly disabled (ANSI-compliance testing).
+  // TODO: Velox still has issues when ansiFallback=false.
   override def checkExceptionInExpression[T <: Throwable: ClassTag](
       expression: => Expression,
       inputRow: InternalRow,
       expectedErrMsg: String): Unit = {
-    val resolver = ResolveTimeZone
-    val expr = resolver.resolveTimeZones(expression)
-    assert(expr.resolved)
-    glutenCheckExceptionInExpression[T](expr, inputRow, expectedErrMsg)
-  }
-
-  override def checkExceptionInExpression[T <: Throwable: ClassTag](
-      expression: => Expression,
-      expectedErrMsg: String): Unit = {
-    checkExceptionInExpression[T](expression, InternalRow.empty, expectedErrMsg)
+    if (GlutenConfig.get.enableAnsiFallback) {
+      super.checkExceptionInExpression[T](expression, inputRow, expectedErrMsg)
+    } else {
+      val expr = resolveExpression(expression)
+      assert(expr.resolved)
+      glutenCheckExceptionInExpression[T](expr, inputRow, expectedErrMsg)
+    }
   }
 
   /**

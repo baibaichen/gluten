@@ -520,11 +520,13 @@ def format_summary(summary, json_tests, suites=None):
                 json_suite_names.add(s.get("suite", ""))
                 json_suite_names.add(s.get("suite", "").split(".")[-1])
         xml_suite_counts = defaultdict(int)
+        xml_suite_tests = defaultdict(list)
         for f in xml_failures:
             suite = f["suite"]
             short = suite.split(".")[-1]
             if suite not in json_suite_names and short not in json_suite_names:
                 xml_suite_counts[short] += 1
+                xml_suite_tests[short].append(f.get("test", ""))
         if xml_suite_counts:
             lines.append(f"### Failed XML Suites "
                          f"(not in JSON, {sum(xml_suite_counts.values())} failures)\n")
@@ -532,7 +534,11 @@ def format_summary(summary, json_tests, suites=None):
             lines.append("|---|---|")
             for suite, cnt in sorted(xml_suite_counts.items(),
                                      key=lambda x: -x[1]):
-                lines.append(f"| {suite} | {cnt} |")
+                if cnt <= 3:
+                    tests = ", ".join(xml_suite_tests[suite])
+                    lines.append(f"| {suite} | {tests} |")
+                else:
+                    lines.append(f"| {suite} | {cnt} |")
             lines.append("")
 
     return "\n".join(lines)

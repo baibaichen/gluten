@@ -767,68 +767,57 @@ def format_json_output(summary, json_tests, xml_tests, categories):
 # AI analysis via Copilot CLI
 # ---------------------------------------------------------------------------
 
-def _strip_copilot_stats(text):
-    lines = text.strip().split("\n")
-    content_lines = []
-    skip_block = False
-    for line in lines:
-        if line.startswith(("Changes ", "Requests ", "Tokens ")):
-            break
-        if line.startswith("● "):
-            skip_block = True
-            continue
-        if skip_block:
-            if line.startswith("  │") or line.startswith("  └"):
-                continue
-            skip_block = False
-        content_lines.append(line)
-    return "\n".join(content_lines).strip()
+GITHUB_MODELS_API = "https://models.inference.ai.azure.com/chat/completions"
 
 
-def call_copilot_analysis(json_output, model=None):
-    """Call Copilot CLI for deep analysis with fallback chain.
+def call_ai_analysis(json_output, model=None):
+    """Call GitHub Models API for deep analysis with fallback chain.
 
     Returns (content, model_used) or (None, None) on failure.
     """
+    import requests
+
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if not token:
+        print("Warning: no GITHUB_TOKEN/GH_TOKEN, skipping AI analysis",
+              file=sys.stderr)
+        return None, None
+
     models_to_try = []
     if model:
         models_to_try.append(model)
-    models_to_try.extend(["claude-sonnet-4", "auto"])
+    models_to_try.extend(["gpt-4.1", "gpt-4o"])
 
     prompt = ANALYSIS_PROMPT_TEMPLATE.format(json_data=json_output)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
 
     for m in models_to_try:
         try:
-            print(f"Calling Copilot CLI with model={m}...", file=sys.stderr)
-            result = subprocess.run(
-                ["copilot", "-p", prompt,
-                 "--model", m,
-                 "--output-format", "text",
-                 "--add-dir", ".",
-                 "--allow-all-paths"],
-                capture_output=True, text=True, timeout=300,
+            print(f"Calling GitHub Models API with model={m}...",
+                  file=sys.stderr)
+            resp = requests.post(
+                GITHUB_MODELS_API,
+                headers=headers,
+                json={
+                    "model": m,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=300,
             )
-            if result.returncode == 0 and result.stdout.strip():
-                content = _strip_copilot_stats(result.stdout)
+            if resp.status_code == 200:
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"].strip()
                 if content:
                     print(f"AI analysis completed with model={m}",
                           file=sys.stderr)
                     return content, m
-            print(f"Warning: copilot --model {m} returned empty or failed "
-                  f"(rc={result.returncode})", file=sys.stderr)
-            if result.stderr:
-                print(f"  stderr: {result.stderr[:500]}", file=sys.stderr)
-            if result.stdout:
-                print(f"  stdout: {result.stdout[:200]}", file=sys.stderr)
-        except subprocess.TimeoutExpired:
-            print(f"Warning: copilot --model {m} timed out", file=sys.stderr)
-        except FileNotFoundError:
-            print("Warning: copilot CLI not found, skipping AI analysis",
-                  file=sys.stderr)
-            return None, None
+            print(f"Warning: model {m} returned status {resp.status_code}: "
+                  f"{resp.text[:300]}", file=sys.stderr)
         except Exception as e:
-            print(f"Warning: copilot --model {m} failed: {e}",
-                  file=sys.stderr)
+            print(f"Warning: model {m} failed: {e}", file=sys.stderr)
 
     print("Warning: all AI models failed, skipping analysis", file=sys.stderr)
     return None, None
@@ -903,7 +892,7 @@ def main():
             json_output = format_json_output(
                 summary, json_tests, xml_tests, categories)
             model = args.ai_model or os.environ.get("AI_MODEL", "")
-            ai_content, ai_model = call_copilot_analysis(
+            ai_content, ai_model = call_ai_analysis(
                 json_output, model or None)
         report = format_full(summary, json_tests, categories, suites,
                              ai_content=ai_content, ai_model=ai_model)

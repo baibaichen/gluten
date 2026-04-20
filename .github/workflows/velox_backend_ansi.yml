@@ -501,8 +501,6 @@ jobs:
           path: ./ansi-offload/
       - name: Install dependencies
         run: pip3 install requests
-      - name: Install Copilot CLI
-        run: curl -fsSL https://gh.io/copilot-install | bash
       - name: Analyze and report
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -586,8 +584,6 @@ jobs:
           find ./test-reports ./test-logs -type f | head -50
       - name: Install dependencies
         run: pip3 install requests
-      - name: Install Copilot CLI
-        run: curl -fsSL https://gh.io/copilot-install | bash
       - name: Analyze and report
         env:
           GITHUB_TOKEN: ${{ github.token }}

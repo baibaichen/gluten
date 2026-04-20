@@ -21,6 +21,7 @@ import org.apache.spark.sql.catalyst.dsl.expressions._
 import org.apache.spark.sql.types._
 
 class GlutenMathExpressionsSuite extends MathExpressionsSuite with GlutenExpressionOffloadTracker {
+  override protected def offloadCategory: String = "math"
   testGluten("round/bround/floor/ceil") {
     val scales = -6 to 6
     val doublePi: Double = math.Pi

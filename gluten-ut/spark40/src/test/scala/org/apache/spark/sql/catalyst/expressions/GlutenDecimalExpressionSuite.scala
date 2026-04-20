@@ -20,4 +20,6 @@ import org.apache.spark.sql.GlutenExpressionOffloadTracker
 
 class GlutenDecimalExpressionSuite
   extends DecimalExpressionSuite
-  with GlutenExpressionOffloadTracker {}
+  with GlutenExpressionOffloadTracker {
+  override protected def offloadCategory: String = "decimal"
+}

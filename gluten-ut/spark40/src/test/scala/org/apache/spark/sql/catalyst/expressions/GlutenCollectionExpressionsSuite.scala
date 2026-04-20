@@ -29,6 +29,7 @@ import scala.util.Random
 class GlutenCollectionExpressionsSuite
   extends CollectionExpressionsSuite
   with GlutenExpressionOffloadTracker {
+  override protected def offloadCategory: String = "collection"
 
   testGluten("Shuffle") {
     // Primitive-type elements

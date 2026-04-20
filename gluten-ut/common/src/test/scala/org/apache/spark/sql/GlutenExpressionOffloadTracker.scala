@@ -21,22 +21,31 @@ import org.apache.gluten.execution.ProjectExecTransformer
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Expression
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import org.scalatest.Args
 import org.scalatest.Status
+
+import java.io.File
+import java.io.PrintWriter
 
 import scala.collection.mutable
 import scala.reflect.ClassTag
 
 trait GlutenExpressionOffloadTracker extends GlutenTestsTrait {
 
-  protected def panoramaMeta(expression: Expression): String =
-    s"expr=${expression.getClass.getSimpleName}"
+  protected def offloadCategory: String = "unknown"
+
+  protected def panoramaMeta(expression: Expression): Map[String, String] =
+    Map("expr" -> expression.getClass.getSimpleName)
 
   private case class OffloadRecord(
       method: String,
       expression: String,
-      meta: String,
-      offload: String)
+      meta: Map[String, String],
+      offload: String,
+      failCause: String,
+      failStackTrace: String)
 
   private case class TestOffloadResult(
       testName: String,
@@ -49,14 +58,22 @@ trait GlutenExpressionOffloadTracker extends GlutenTestsTrait {
   private def withOffloadLog[T](method: String, expression: Expression, resultDF: DataFrame)(
       body: => T): T = {
     val meta = panoramaMeta(expression)
+    var failCause: String = null
+    var failStackTrace: String = null
     try {
       body
+    } catch {
+      case e: Exception =>
+        failCause = e.getMessage
+        failStackTrace = e.getStackTrace.map(_.toString).mkString("\n")
+        throw e
     } finally {
       val projectTransformer = resultDF.queryExecution.executedPlan.collect {
         case p: ProjectExecTransformer => p
       }
       val offload = if (projectTransformer.size == 1) "OFFLOAD" else "FALLBACK"
-      currentTestRecords += OffloadRecord(method, expression.toString, meta, offload)
+      currentTestRecords += OffloadRecord(
+        method, expression.toString, meta, offload, failCause, failStackTrace)
     }
   }
 
@@ -95,22 +112,57 @@ trait GlutenExpressionOffloadTracker extends GlutenTestsTrait {
   }
 
   override def afterAll(): Unit = if (ansiTest) {
-    val suiteName = this.getClass.getSimpleName
-    logWarning("EXPRESSION_OFFLOAD_SUMMARY_BEGIN")
-    logWarning(s"$suiteName:")
-    allTestResults.foreach {
-      t =>
-        logWarning(s"  ${t.testName}:")
-        t.records.zipWithIndex.foreach {
-          case (r, idx) =>
-            val methodTag = if (r.method == "checkException") "E" else "N"
-            val status = if (idx == t.records.size - 1) t.status else "PASS"
-            logWarning(s"    $methodTag|${r.expression}|${r.meta}|${r.offload}|$status")
-        }
-    }
-    logWarning("EXPRESSION_OFFLOAD_SUMMARY_END")
+    writeJsonOutput()
     super.afterAll()
   } else {
     super.afterAll()
+  }
+
+  private def writeJsonOutput(): Unit = {
+    val suiteName = this.getClass.getSimpleName
+    val mapper = new ObjectMapper()
+    mapper.registerModule(DefaultScalaModule)
+
+    val testsJson = allTestResults.map { t =>
+      val recordsJson = t.records.zipWithIndex.map {
+        case (r, idx) =>
+          val methodTag = if (r.method == "checkException") "E" else "N"
+          val status = if (idx == t.records.size - 1) t.status else "PASS"
+          val record = mutable.LinkedHashMap[String, Any](
+            "method" -> methodTag,
+            "expression" -> r.expression,
+            "meta" -> r.meta,
+            "offload" -> r.offload,
+            "status" -> status
+          )
+          if (r.failCause != null) {
+            record("failCause") = r.failCause
+            record("failStackTrace") = r.failStackTrace
+          }
+          record
+      }
+      mutable.LinkedHashMap[String, Any](
+        "name" -> t.testName,
+        "status" -> t.status,
+        "records" -> recordsJson
+      )
+    }
+
+    val output = mutable.LinkedHashMap[String, Any](
+      "suite" -> suiteName,
+      "category" -> offloadCategory,
+      "tests" -> testsJson
+    )
+
+    val dir = new File("target/ansi-offload")
+    dir.mkdirs()
+    val file = new File(dir, s"$suiteName.json")
+    val writer = new PrintWriter(file)
+    try {
+      writer.write(mapper.writerWithDefaultPrettyPrinter().writeValueAsString(output))
+    } finally {
+      writer.close()
+    }
+    logWarning(s"ANSI offload data written to ${file.getAbsolutePath}")
   }
 }

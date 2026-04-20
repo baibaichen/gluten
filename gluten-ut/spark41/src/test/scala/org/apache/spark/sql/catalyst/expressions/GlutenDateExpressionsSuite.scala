@@ -38,6 +38,7 @@ class GlutenDateExpressionsSuite
   extends DateExpressionsSuite
   with GlutenExpressionOffloadTracker
   with GlutenTestsTrait {
+  override protected def offloadCategory: String = "datetime"
   override def testIntegralInput(testFunc: Number => Unit): Unit = {
     def checkResult(input: Long): Unit = {
       if (input.toByte == input) {

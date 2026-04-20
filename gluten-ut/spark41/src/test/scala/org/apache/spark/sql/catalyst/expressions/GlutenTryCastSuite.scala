@@ -35,10 +35,11 @@ class GlutenTryCastSuite
   extends TryCastSuite
   with GlutenExpressionOffloadTracker
   with GlutenTestsTrait {
-  override protected def panoramaMeta(expression: Expression): String = expression match {
-    case c: Cast => s"fromType=${c.child.dataType.simpleString},toType=${c.dataType.simpleString}"
-    case _ => ""
+  override protected def panoramaMeta(expression: Expression): Map[String, String] = expression match {
+    case c: Cast => Map("fromType" -> c.child.dataType.simpleString, "toType" -> c.dataType.simpleString)
+    case _ => Map.empty
   }
+  override protected def offloadCategory: String = "cast"
 
   // TryCastSuite overrides checkExceptionInExpression to checkEvaluation(expr, null)
   // because TRY mode should return null instead of throwing. GlutenTestsTrait also

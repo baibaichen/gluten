@@ -20,4 +20,6 @@ import org.apache.spark.sql.GlutenExpressionOffloadTracker
 
 class GlutenIntervalExpressionsSuite
   extends IntervalExpressionsSuite
-  with GlutenExpressionOffloadTracker {}
+  with GlutenExpressionOffloadTracker {
+  override protected def offloadCategory: String = "datetime"
+}

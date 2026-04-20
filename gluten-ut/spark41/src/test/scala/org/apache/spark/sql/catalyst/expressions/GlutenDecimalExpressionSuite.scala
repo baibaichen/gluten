@@ -22,4 +22,6 @@ import org.apache.spark.sql.shim.GlutenTestsTrait
 class GlutenDecimalExpressionSuite
   extends DecimalExpressionSuite
   with GlutenExpressionOffloadTracker
-  with GlutenTestsTrait {}
+  with GlutenTestsTrait {
+  override protected def offloadCategory: String = "decimal"
+}

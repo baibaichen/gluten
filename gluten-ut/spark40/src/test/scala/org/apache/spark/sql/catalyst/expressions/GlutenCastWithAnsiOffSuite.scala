@@ -27,9 +27,10 @@ import java.sql.{Date, Timestamp}
 import java.util.{Calendar, TimeZone}
 
 class GlutenCastWithAnsiOffSuite extends CastWithAnsiOffSuite with GlutenExpressionOffloadTracker {
-  override protected def panoramaMeta(expression: Expression): String = expression match {
-    case c: Cast => s"fromType=${c.child.dataType.simpleString},toType=${c.dataType.simpleString}"
-    case _ => ""
+  override protected def offloadCategory: String = "cast"
+  override protected def panoramaMeta(expression: Expression): Map[String, String] = expression match {
+    case c: Cast => Map("fromType" -> c.child.dataType.simpleString, "toType" -> c.dataType.simpleString)
+    case _ => Map.empty
   }
 
   // Register UDT for test("SPARK-32828"). Gluten's checkEvaluation collects via RowEncoder,

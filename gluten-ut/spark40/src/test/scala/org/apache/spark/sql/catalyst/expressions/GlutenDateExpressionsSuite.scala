@@ -34,6 +34,7 @@ import java.util.{Calendar, Locale, TimeZone}
 import java.util.concurrent.TimeUnit._
 
 class GlutenDateExpressionsSuite extends DateExpressionsSuite with GlutenExpressionOffloadTracker {
+  override protected def offloadCategory: String = "datetime"
   override def testIntegralInput(testFunc: Number => Unit): Unit = {
     def checkResult(input: Long): Unit = {
       if (input.toByte == input) {

@@ -31,6 +31,7 @@ class GlutenCollectionExpressionsSuite
   extends CollectionExpressionsSuite
   with GlutenExpressionOffloadTracker
   with GlutenTestsTrait {
+  override protected def offloadCategory: String = "collection"
   testGluten("Shuffle") {
     // Primitive-type elements
     val ai0 = Literal.create(Seq(1, 2, 3, 4, 5), ArrayType(IntegerType, containsNull = false))

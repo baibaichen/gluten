@@ -25,6 +25,7 @@ class GlutenMathExpressionsSuite
   extends MathExpressionsSuite
   with GlutenExpressionOffloadTracker
   with GlutenTestsTrait {
+  override protected def offloadCategory: String = "math"
   testGluten("round/bround/floor/ceil") {
     val scales = -6 to 6
     val doublePi: Double = math.Pi

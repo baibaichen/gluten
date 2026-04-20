@@ -23,16 +23,17 @@ class GlutenTryEvalSuite
   extends TryEvalSuite
   with GlutenExpressionOffloadTracker
   with GlutenTestsTrait {
-  override protected def panoramaMeta(expression: Expression): String = expression match {
-    case _: Add => "operator=Add"
-    case _: Subtract => "operator=Subtract"
-    case _: Multiply => "operator=Multiply"
-    case _: Divide => "operator=Divide"
-    case _: IntegralDivide => "operator=IntegralDivide"
-    case _: Remainder => "operator=Remainder"
-    case _: Pmod => "operator=Pmod"
-    case _: Abs => "operator=Abs"
-    case _: UnaryMinus => "operator=UnaryMinus"
-    case _ => ""
+  override protected def panoramaMeta(expression: Expression): Map[String, String] = expression match {
+    case _: Add => Map("operator" -> "Add")
+    case _: Subtract => Map("operator" -> "Subtract")
+    case _: Multiply => Map("operator" -> "Multiply")
+    case _: Divide => Map("operator" -> "Divide")
+    case _: IntegralDivide => Map("operator" -> "IntegralDivide")
+    case _: Remainder => Map("operator" -> "Remainder")
+    case _: Pmod => Map("operator" -> "Pmod")
+    case _: Abs => Map("operator" -> "Abs")
+    case _: UnaryMinus => Map("operator" -> "UnaryMinus")
+    case _ => Map.empty
   }
+  override protected def offloadCategory: String = "arithmetic"
 }

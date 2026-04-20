@@ -20,4 +20,6 @@ import org.apache.spark.sql.GlutenExpressionOffloadTracker
 
 class GlutenStringExpressionsSuite
   extends StringExpressionsSuite
-  with GlutenExpressionOffloadTracker {}
+  with GlutenExpressionOffloadTracker {
+  override protected def offloadCategory: String = "string"
+}

@@ -490,13 +490,9 @@ def format_summary(summary, json_tests, suites=None):
 
     if json_failures:
         cause_counts = defaultdict(int)
-        cause_details = defaultdict(list)
-        cause_by_failure = {}
         for f in json_failures:
             cause = classify_fail_cause(f.get("message", ""))
             cause_counts[cause] += 1
-            cause_details[cause].append(f)
-            cause_by_failure[id(f)] = cause
 
         lines.append(f"### Failure Cause Analysis "
                      f"({len(json_failures)} failures from JSON)\n")
@@ -514,38 +510,6 @@ def format_summary(summary, json_tests, suites=None):
             if cnt > 0:
                 lines.append(f"| {cause} | {cnt} "
                              f"| {cause_desc.get(cause, '')} |")
-        lines.append("")
-
-        # --- WRONG_EXCEPTION Details ---
-        wrong_exc = cause_details.get("WRONG_EXCEPTION", [])
-        if wrong_exc:
-            lines.append("### WRONG_EXCEPTION Details\n")
-            lines.append("| Suite | Test | Expected | Got |")
-            lines.append("|---|---|---|---|")
-            for f in wrong_exc:
-                exp, got = _extract_expected_got(f.get("message", ""))
-                suite_short = f["suite"].split(".")[-1]
-                lines.append(
-                    f"| {suite_short} | {f['test']} "
-                    f"| {exp or '?'} | {got or '?'} |")
-            lines.append("")
-
-    # --- Failed Tests: JSON ---
-    if json_failures:
-        lines.append(f"### Failed Tests — Expression Suites "
-                     f"(JSON, {len(json_failures)} failures)\n")
-        lines.append("| Suite | Test | Cause | Message |")
-        lines.append("|---|---|---|---|")
-        for f in json_failures[:50]:
-            msg = _extract_short_message(f.get("message", ""))
-            msg = msg.replace("|", "\\|")
-            cause = cause_by_failure[id(f)]
-            suite_short = f["suite"].split(".")[-1]
-            lines.append(
-                f"| {suite_short} | {f['test']} | {cause} | {msg} |")
-        if len(json_failures) > 50:
-            lines.append(
-                f"\n*...and {len(json_failures) - 50} more*\n")
         lines.append("")
 
     # --- XML: failed suite summary (exclude suites already in JSON) ---

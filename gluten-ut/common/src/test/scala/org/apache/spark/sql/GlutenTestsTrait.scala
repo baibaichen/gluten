@@ -40,11 +40,17 @@ import org.scalactic.TripleEqualsSupport.Spread
 
 import java.io.File
 
+import scala.annotation.nowarn
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
 trait GlutenTestsTrait extends GlutenTestsCommonTrait {
+
+  // TODO: remove this if we can suppress unused import error.
+  locally {
+    new ColumnConstructorExt(Column)
+  }
 
   override def beforeAll(): Unit = {
     // prepare working paths
@@ -312,6 +318,7 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
     }
   }
 
+  @nowarn("cat=deprecation")
   def glutenCheckExceptionInExpression[T <: Throwable: ClassTag](
       expression: Expression,
       inputRow: InternalRow,
@@ -336,9 +343,9 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
     if (expectedErrMsg != null && exception.getMessage != null) {
       if (!exception.getMessage.contains(expectedErrMsg)) {
         exception match {
-          case st: SparkThrowable if st.getCondition != null =>
+          case st: SparkThrowable if st.getErrorClass != null =>
             logWarning(
-              s"Message mismatch accepted: errorClass=${st.getCondition}, " +
+              s"Message mismatch accepted: errorClass=${st.getErrorClass}, " +
                 s"expected msg containing '$expectedErrMsg', " +
                 s"got '${exception.getMessage}'")
           case _ =>

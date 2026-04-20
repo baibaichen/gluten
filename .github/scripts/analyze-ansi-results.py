@@ -138,6 +138,12 @@ def _infer_job_name(xml_path):
     return "unknown"
 
 
+def _short_job_name(job):
+    """Shorten job name for table display."""
+    job = job.replace("spark-test-", "").replace("-report", "")
+    return job or "unknown"
+
+
 # ---------------------------------------------------------------------------
 # Log file parsing
 # ---------------------------------------------------------------------------
@@ -311,27 +317,31 @@ def parse_offload_summary_from_logs(log_paths):
 # Classification
 # ---------------------------------------------------------------------------
 
-def classify_test(status, has_fallback):
+def classify_test(status, has_fallback, has_offload_data):
     """Assign three-color classification."""
     if status == "SKIPPED":
         return "⚪", "Skipped"
-    if status == "PASSED" and not has_fallback:
-        return "🟢", "Passed+Offload"
-    if status in ("FAILED", "ERROR") and not has_fallback:
-        return "🟡", "Failed+Offload"
     if has_fallback:
         if status == "PASSED":
             return "🔴", "Passed+Fallback"
         return "🔴", "Failed+Fallback"
+    if not has_offload_data:
+        if status == "PASSED":
+            return "⚪", "Passed (no data)"
+        return "🟡", "Failed (no data)"
+    if status == "PASSED":
+        return "🟢", "Passed+Offload"
+    if status in ("FAILED", "ERROR"):
+        return "🟡", "Failed+Offload"
     return "🟡", "Failed"
 
 
 def determine_fallback(test_key, offload_records):
-    """Determine if a test has fallback based on offload summary records."""
+    """Determine fallback status and whether offload data exists."""
     records = offload_records.get(test_key, [])
     if not records:
-        return False
-    return any(r['offload'] == 'FALLBACK' for r in records)
+        return False, False
+    return any(r['offload'] == 'FALLBACK' for r in records), True
 
 
 def build_summary(results, offload_records=None):
@@ -349,11 +359,14 @@ def build_summary(results, offload_records=None):
         status = t.get("status", "PASSED")
 
         has_fallback = t.get("fallback", False)
+        has_offload_data = False
         if offload_records:
             test_key = (suite.split('.')[-1], test)
-            has_fallback = has_fallback or determine_fallback(test_key, offload_records)
+            fb, has_data = determine_fallback(test_key, offload_records)
+            has_fallback = has_fallback or fb
+            has_offload_data = has_data
 
-        color, label = classify_test(status, has_fallback)
+        color, label = classify_test(status, has_fallback, has_offload_data)
         t["color"] = color
         t["label"] = label
         t["fallback"] = has_fallback
@@ -378,12 +391,14 @@ def format_markdown_report(summary, results, ai_analysis=None):
     lines.append("| Classification | Count |")
     lines.append("|---|---|")
     for label in ["Passed+Offload", "Failed+Offload", "Passed+Fallback",
-                  "Failed+Fallback", "Failed", "Skipped"]:
+                  "Failed+Fallback", "Failed", "Passed (no data)",
+                  "Failed (no data)", "Skipped"]:
         count = summary["by_color"].get(label, 0)
         if count > 0:
             color = {"Passed+Offload": "🟢", "Failed+Offload": "🟡",
                      "Passed+Fallback": "🔴", "Failed+Fallback": "🔴",
-                     "Failed": "🟡", "Skipped": "⚪"}.get(label, "")
+                     "Failed": "🟡", "Passed (no data)": "⚪",
+                     "Failed (no data)": "🟡", "Skipped": "⚪"}.get(label, "")
             lines.append(f"| {color} {label} | {count} |")
     lines.append("")
 
@@ -396,13 +411,14 @@ def format_markdown_report(summary, results, ai_analysis=None):
 
     if summary["failures"]:
         lines.append("### Failed Tests (sample, max 50)\n")
-        lines.append("| Suite | Test | Color | Message |")
-        lines.append("|---|---|---|---|")
+        lines.append("| Suite | Test | Job | Color | Message |")
+        lines.append("|---|---|---|---|---|")
         for t in summary["failures"][:50]:
-            msg = t.get("message", "")[:100].replace("|", "\\|").replace("\n", " ")
+            msg = t.get("message", "")[:200].replace("|", "\\|").replace("\n", " ")
+            job = _short_job_name(t.get("job", ""))
             lines.append(
                 f"| {t['suite'].split('.')[-1]} | {t['test']} "
-                f"| {t['color']} {t['label']} | {msg} |")
+                f"| {job} | {t['color']} {t['label']} | {msg} |")
         if len(summary["failures"]) > 50:
             lines.append(f"\n*...and {len(summary['failures']) - 50} more failures*\n")
         lines.append("")
@@ -691,6 +707,8 @@ def main():
 
     if args.pr_comment:
         post_pr_comment(report)
+    else:
+        print(report)
     write_job_summary(report)
 
     print(f"Analysis complete: {summary['total']} tests, "

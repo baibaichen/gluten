@@ -58,8 +58,8 @@ if [[ "${3:-}" == "--clean" ]] || [[ "${2:-}" == "--clean" ]]; then
 fi
 
 case "${SPARK_VER}" in
-  spark41) PROFILES="-Pjava-17,spark-4.1,scala-2.13,backends-velox,hadoop-3.3,delta"; UT_MODULE="gluten-ut/spark41" ;;
-  spark40) PROFILES="-Pjava-17,spark-4.0,scala-2.13,backends-velox,hadoop-3.3,delta"; UT_MODULE="gluten-ut/spark40" ;;
+  spark41) PROFILES="-Pjava-17,spark-4.1,scala-2.13,backends-velox,hadoop-3.3"; UT_MODULE="gluten-ut/spark41" ;;
+  spark40) PROFILES="-Pjava-17,spark-4.0,scala-2.13,backends-velox,hadoop-3.3"; UT_MODULE="gluten-ut/spark40" ;;
   all)     ;; # handled in main entry
   *)       echo "Unknown spark version: ${SPARK_VER}"; echo "Usage: $0 <category> [spark41|spark40|all] [--clean]"; exit 1 ;;
 esac
@@ -251,12 +251,12 @@ echo "========================================"
 if [[ "${SPARK_VER}" == "all" ]]; then
   # Run spark41 first, then spark40
   SPARK_VER="spark41"
-  PROFILES="-Pjava-17,spark-4.1,scala-2.13,backends-velox,hadoop-3.3,delta"
+  PROFILES="-Pjava-17,spark-4.1,scala-2.13,backends-velox,hadoop-3.3"
   UT_MODULE="gluten-ut/spark41"
   run_for_spark_ver
 
   SPARK_VER="spark40"
-  PROFILES="-Pjava-17,spark-4.0,scala-2.13,backends-velox,hadoop-3.3,delta"
+  PROFILES="-Pjava-17,spark-4.0,scala-2.13,backends-velox,hadoop-3.3"
   UT_MODULE="gluten-ut/spark40"
   CLEAN_FLAG="--clean"
   run_for_spark_ver

@@ -71,7 +71,7 @@ def load_json_data(json_dir):
     suites = []
     if not json_dir or not os.path.isdir(json_dir):
         return suites
-    for path in sorted(glob.glob(os.path.join(json_dir, "*.json"))):
+    for path in sorted(glob.glob(os.path.join(json_dir, "**/*.json"), recursive=True)):
         with open(path) as f:
             try:
                 data = json.load(f)

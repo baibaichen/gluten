@@ -38,13 +38,59 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 
-# ---------------------------------------------------------------------------
-# Fail cause classification patterns
-# ---------------------------------------------------------------------------
 NO_EXCEPTION_RE = re.compile(
     r"Expected .+ to be thrown, but no exception was thrown")
-WRONG_EXCEPTION_RE = re.compile(r"Expected \S+ but got \S+:")
+WRONG_EXCEPTION_RE = re.compile(r"Expected (\S+) but got (\S+):")
 MSG_MISMATCH_RE = re.compile(r"Expected error message containing")
+
+ANALYSIS_PROMPT_TEMPLATE = """\
+你是 Gluten 项目的 ANSI 模式测试分析专家。Gluten 是 Apache Spark 的 native engine 加速插件，
+通过 Velox (C++) 后端 offload 表达式计算。ANSI 模式要求对溢出、类型转换错误等抛出异常。
+
+以下是 analyze-ansi.py --mode json 的结构化输出：
+
+```json
+{json_data}
+```
+
+请按以下结构生成分析报告（Markdown 格式，中文）：
+
+## 总体概览
+- 总测试数、通过/失败
+- 色彩分布表（🟢 Passed+Offload / 🔴 Passed+Fallback / ⚪ No data / 🟡 Failed），含数量和占比
+- 各 category 分布表（Category / Pass / Fail / Entries）
+- 标注"假绿"隐性问题：Passed+Fallback 表示测试通过但实际由 Spark fallback 执行，非 Velox offload
+
+## 关键发现
+- 失败集中区域表（Suite / 失败数 / 主要症结）
+- failCause 类型统计表（类型 / 数量 / 占比 / 解读）：
+  - WRONG_EXCEPTION: Velox 抛了异常但被 Spark 调度层包装为 SparkException，丢失原始异常类型
+  - NO_EXCEPTION: Velox 在 ANSI 模式下未抛出期望的异常
+  - OTHER: 计算结果不匹配或其他错误
+- 对 WRONG_EXCEPTION 做根因深度分析（异常包装链路径、关键代码位置）
+- 对 NO_EXCEPTION 按根因细分（算术/cast/datetime 等）
+
+## 修复建议（只列 P0 / P1 / P2 三个优先级）
+每个修复建议包含：
+- 症状：测试失败的模式描述
+- 根因：具体代码路径和逻辑问题
+- 修复点：文件路径 + 改动方向
+- 代表测试：受影响的典型测试名
+- 预计影响：修复后可转绿的测试数
+
+关键源码位置（供参考）：
+- 异常查找: gluten-ut/common/src/test/scala/org/apache/spark/sql/GlutenTestsTrait.scala (findCause 方法)
+- 异常包装: gluten-arrow/src/main/java/org/apache/gluten/vectorized/ColumnarBatchOutIterator.java (translateException)
+- 表达式转换: gluten-core/.../ExpressionConverter.scala
+- 类型映射: gluten-substrait/.../ConverterUtils.scala (getTypeNode)
+- Velox Cast: ep/build-velox/build/velox_ep/velox/functions/sparksql/SparkCastExpr.cpp
+- Velox 算术: ep/build-velox/build/velox_ep/velox/functions/sparksql/Arithmetic.cpp
+
+限制：
+- 使用 Markdown 表格，不要用 ASCII box drawing 字符
+- 修复建议最多 3 个
+- 如果可以访问源码，请读取关键文件验证根因分析
+"""
 
 
 def classify_fail_cause(message):
@@ -57,6 +103,32 @@ def classify_fail_cause(message):
     if MSG_MISMATCH_RE.search(message):
         return "MSG_MISMATCH"
     return "OTHER"
+
+
+def _extract_short_message(message):
+    if not message:
+        return ""
+    m = WRONG_EXCEPTION_RE.search(message)
+    if m:
+        return f"Expected {m.group(1)} but got {m.group(2)}"
+    if NO_EXCEPTION_RE.search(message):
+        m2 = re.search(
+            r"Expected (.+?) to be thrown, but no exception was thrown",
+            message)
+        if m2:
+            return f"Expected {m2.group(1)} but no exception was thrown"
+    if message.startswith("Exception evaluating"):
+        return message.split("\n")[0][:150]
+    if message.startswith("Incorrect evaluation"):
+        return message.split("\n")[0][:150]
+    return message.split("\n")[0][:120]
+
+
+def _extract_expected_got(message):
+    m = WRONG_EXCEPTION_RE.search(message)
+    if m:
+        return m.group(1), m.group(2)
+    return None, None
 
 
 # ===========================================================================
@@ -253,7 +325,6 @@ def build_summary(json_tests, xml_tests):
 # ---------------------------------------------------------------------------
 
 def _normalize_type(t):
-    """Normalize Spark type names for display."""
     simple = {
         "boolean": "Boolean", "byte": "TinyInt", "short": "SmallInt",
         "int": "Int", "bigint": "BigInt", "float": "Float",
@@ -273,12 +344,10 @@ def _normalize_type(t):
         parts = inner.split(",", 1)
         if len(parts) == 2:
             return "Map\\<" + _normalize_type(parts[0]) + "," + _normalize_type(parts[1]) + "\\>"
-    return t
+    return t.replace("<", "\\<").replace(">", "\\>")
 
 
 def _cell_symbol(offload, status):
-    """Determine cell symbol using unified three-color scheme.
-    TODO: accept fail_cause_type to differentiate 🟡 subtypes (NO_EXCEPTION/WRONG_EXCEPTION/etc.)."""
     if offload == "FALLBACK":
         return "🔴"
     if status == "PASS":
@@ -341,24 +410,10 @@ def _build_cast_matrix(entries, suites):
     return matrix
 
 
-def _build_arithmetic_matrix(entries, suites):
-    """Build arithmetic matrix: operator -> {suite: symbol}."""
+def _build_keyed_matrix(entries, suites, meta_key):
     matrix = defaultdict(lambda: defaultdict(lambda: "⚪"))
     for e in entries:
-        op = e["meta"].get("operator", "?")
-        key = op
-        sym = _cell_symbol(e["offload"], e["status"])
-        cur = matrix[key].get(e["suite"], "⚪")
-        matrix[key][e["suite"]] = _worse(sym, cur)
-    return matrix
-
-
-def _build_mechanism_b_matrix(entries, suites):
-    """Build mechanism B matrix: expr_class -> {suite: symbol}."""
-    matrix = defaultdict(lambda: defaultdict(lambda: "⚪"))
-    for e in entries:
-        expr = e["meta"].get("expr", "?")
-        key = expr
+        key = e["meta"].get(meta_key, "?")
         sym = _cell_symbol(e["offload"], e["status"])
         cur = matrix[key].get(e["suite"], "⚪")
         matrix[key][e["suite"]] = _worse(sym, cur)
@@ -376,16 +431,17 @@ def _worse(a, b):
 # OUTPUT LAYER
 # ===========================================================================
 
-def format_summary(summary, json_tests):
+def format_summary(summary, json_tests, suites=None):
     """Format test-level summary as markdown."""
     lines = ["## ANSI Mode Test Analysis Report\n"]
     lines.append(f"**Total tests: {summary['total']}** "
                  f"(JSON: {summary['json_test_count']}, "
                  f"XML: {summary['xml_test_count']})\n")
 
+    # --- Overview with percentage ---
     lines.append("### Overview\n")
-    lines.append("| Classification | Count |")
-    lines.append("|---|---|")
+    lines.append("| Classification | Count | % |")
+    lines.append("|---|---|---|")
     for label in ["Passed+Offload", "Failed+Offload", "Passed+Fallback",
                   "Failed+Fallback", "Failed", "Passed (no data)",
                   "Failed (no data)", "Skipped"]:
@@ -395,23 +451,118 @@ def format_summary(summary, json_tests):
                      "Passed+Fallback": "🔴", "Failed+Fallback": "🔴",
                      "Failed": "🟡", "Passed (no data)": "⚪",
                      "Failed (no data)": "🟡", "Skipped": "⚪"}.get(label, "")
-            lines.append(f"| {color} {label} | {count} |")
+            pct = count * 100 / summary["total"] if summary["total"] else 0
+            lines.append(f"| {color} {label} | {count} | {pct:.1f}% |")
     lines.append("")
 
-    if summary["failures"]:
-        lines.append("### Failed Tests (sample, max 50)\n")
-        lines.append("| Suite | Test | Source | Color | Message |")
-        lines.append("|---|---|---|---|---|")
-        for t in summary["failures"][:50]:
-            msg = (t.get("message") or "")[:200].replace("|", "\\|").replace("\n", " ")
-            source = t.get("source", "")
-            suite_short = t["suite"].split(".")[-1]
+    # --- Per-Suite Summary (JSON only) ---
+    if suites:
+        lines.append("### Per-Suite Summary\n")
+        lines.append("| Suite | Category | Total | Pass | Fail "
+                     "| Offload | Fallback |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for s in suites:
+            name = s.get("suite", "").split(".")[-1]
+            cat = s.get("category", "")
+            tests = s.get("tests", [])
+            total = len(tests)
+            passed = failed = off = fb = 0
+            for t in tests:
+                st = t.get("status")
+                if st == "PASS":
+                    passed += 1
+                elif st == "FAIL":
+                    failed += 1
+                for r in t.get("records", []):
+                    ol = r.get("offload")
+                    if ol == "OFFLOAD":
+                        off += 1
+                    elif ol == "FALLBACK":
+                        fb += 1
+            lines.append(f"| {name} | {cat} | {total} | {passed} "
+                         f"| {failed} | {off} | {fb} |")
+        lines.append("")
+
+    # --- Failure Cause Analysis (JSON only) ---
+    json_failures = [f for f in summary["failures"] if f.get("source") == "json"]
+    xml_failures = [f for f in summary["failures"] if f.get("source") == "xml"]
+
+    if json_failures:
+        cause_counts = defaultdict(int)
+        cause_details = defaultdict(list)
+        cause_by_failure = {}
+        for f in json_failures:
+            cause = classify_fail_cause(f.get("message", ""))
+            cause_counts[cause] += 1
+            cause_details[cause].append(f)
+            cause_by_failure[id(f)] = cause
+
+        lines.append(f"### Failure Cause Analysis "
+                     f"({len(json_failures)} failures from JSON)\n")
+        cause_desc = {
+            "NO_EXCEPTION": "Velox did not throw expected ANSI exception",
+            "WRONG_EXCEPTION": "Exception wrapped as SparkException",
+            "MSG_MISMATCH": "Error message text mismatch",
+            "OTHER": "Result mismatch or eval exception",
+        }
+        lines.append("| Cause | Count | Description |")
+        lines.append("|---|---|---|")
+        for cause in ["NO_EXCEPTION", "WRONG_EXCEPTION",
+                      "MSG_MISMATCH", "OTHER"]:
+            cnt = cause_counts.get(cause, 0)
+            if cnt > 0:
+                lines.append(f"| {cause} | {cnt} "
+                             f"| {cause_desc.get(cause, '')} |")
+        lines.append("")
+
+        # --- WRONG_EXCEPTION Details ---
+        wrong_exc = cause_details.get("WRONG_EXCEPTION", [])
+        if wrong_exc:
+            lines.append("### WRONG_EXCEPTION Details\n")
+            lines.append("| Suite | Test | Expected | Got |")
+            lines.append("|---|---|---|---|")
+            for f in wrong_exc:
+                exp, got = _extract_expected_got(f.get("message", ""))
+                suite_short = f["suite"].split(".")[-1]
+                lines.append(
+                    f"| {suite_short} | {f['test']} "
+                    f"| {exp or '?'} | {got or '?'} |")
+            lines.append("")
+
+    # --- Failed Tests: JSON ---
+    if json_failures:
+        lines.append(f"### Failed Tests — Expression Suites "
+                     f"(JSON, {len(json_failures)} failures)\n")
+        lines.append("| Suite | Test | Cause | Message |")
+        lines.append("|---|---|---|---|")
+        for f in json_failures[:50]:
+            msg = _extract_short_message(f.get("message", ""))
+            msg = msg.replace("|", "\\|")
+            cause = cause_by_failure[id(f)]
+            suite_short = f["suite"].split(".")[-1]
             lines.append(
-                f"| {suite_short} | {t['test']} "
-                f"| {source} | {t['color']} {t['label']} | {msg} |")
-        if len(summary["failures"]) > 50:
+                f"| {suite_short} | {f['test']} | {cause} | {msg} |")
+        if len(json_failures) > 50:
             lines.append(
-                f"\n*...and {len(summary['failures']) - 50} more failures*\n")
+                f"\n*...and {len(json_failures) - 50} more*\n")
+        lines.append("")
+
+    # --- Failed Tests: XML ---
+    if xml_failures:
+        lines.append(f"### Failed Tests — Integration Suites "
+                     f"(XML, {len(xml_failures)} failures)\n")
+        lines.append("| Suite | Test | Job | Message |")
+        lines.append("|---|---|---|---|")
+        for f in xml_failures[:30]:
+            msg = (f.get("message") or "")[:150]
+            msg = msg.replace("|", "\\|").replace("\n", " ")
+            suite_short = f["suite"].split(".")[-1]
+            job = f.get("job", "")
+            lines.append(
+                f"| {suite_short} | {f['test']} | {job} | {msg} |")
+        if len(xml_failures) > 30:
+            lines.append(
+                f"\n*...and {len(xml_failures) - 30} more*\n")
         lines.append("")
 
     return "\n".join(lines)
@@ -445,10 +596,10 @@ def format_matrix(categories):
             matrix = _build_cast_matrix(entries, suites)
             _format_cast_tables(lines, matrix, suites)
         elif cat == "arithmetic":
-            matrix = _build_arithmetic_matrix(entries, suites)
+            matrix = _build_keyed_matrix(entries, suites, "operator")
             _format_generic_table(lines, matrix, suites, "Operator")
         else:
-            matrix = _build_mechanism_b_matrix(entries, suites)
+            matrix = _build_keyed_matrix(entries, suites, "expr")
             _format_generic_table(lines, matrix, suites, "Expression")
 
         lines.append("")
@@ -574,9 +725,10 @@ def _format_generic_table(lines, matrix, suites, key_label):
         lines.append("")
 
 
-def format_full(summary, json_tests, categories):
-    """Format full report: summary + matrix in <details>."""
-    parts = [format_summary(summary, json_tests)]
+def format_full(summary, json_tests, categories, suites=None,
+                ai_content=None, ai_model=None):
+    """Format full report: summary + matrix in <details> + optional AI analysis."""
+    parts = [format_summary(summary, json_tests, suites)]
     matrix_md = format_matrix(categories)
     parts.append("<details>")
     parts.append(
@@ -584,6 +736,13 @@ def format_full(summary, json_tests, categories):
         f"({len(categories)} categories)</summary>\n")
     parts.append(matrix_md)
     parts.append("</details>")
+    if ai_content:
+        parts.append("")
+        parts.append("<details>")
+        parts.append("<summary>🤖 AI Deep Analysis</summary>\n")
+        parts.append(ai_content)
+        parts.append(f"\n---\n*Generated by {ai_model}*")
+        parts.append("</details>")
     return "\n".join(parts)
 
 
@@ -602,6 +761,75 @@ def format_json_output(summary, json_tests, xml_tests, categories):
             "entry_count": len(data["entries"]),
         }
     return json.dumps(output, indent=2, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# AI analysis via Copilot CLI
+# ---------------------------------------------------------------------------
+
+def _strip_copilot_stats(text):
+    lines = text.strip().split("\n")
+    content_lines = []
+    skip_block = False
+    for line in lines:
+        if line.startswith(("Changes ", "Requests ", "Tokens ")):
+            break
+        if line.startswith("● "):
+            skip_block = True
+            continue
+        if skip_block:
+            if line.startswith("  │") or line.startswith("  └"):
+                continue
+            skip_block = False
+        content_lines.append(line)
+    return "\n".join(content_lines).strip()
+
+
+def call_copilot_analysis(json_output, model=None):
+    """Call Copilot CLI for deep analysis with fallback chain.
+
+    Returns (content, model_used) or (None, None) on failure.
+    """
+    models_to_try = []
+    if model:
+        models_to_try.append(model)
+    models_to_try.extend(["claude-sonnet-4", "auto"])
+
+    prompt = ANALYSIS_PROMPT_TEMPLATE.format(json_data=json_output)
+
+    for m in models_to_try:
+        try:
+            print(f"Calling Copilot CLI with model={m}...", file=sys.stderr)
+            result = subprocess.run(
+                ["copilot", "-p", prompt,
+                 "--model", m,
+                 "--output-format", "text",
+                 "--add-dir", ".",
+                 "--allow-all-paths"],
+                capture_output=True, text=True, timeout=300,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                content = _strip_copilot_stats(result.stdout)
+                if content:
+                    print(f"AI analysis completed with model={m}",
+                          file=sys.stderr)
+                    return content, m
+            print(f"Warning: copilot --model {m} returned empty or failed "
+                  f"(rc={result.returncode})", file=sys.stderr)
+            if result.stderr:
+                print(f"  stderr: {result.stderr[:200]}", file=sys.stderr)
+        except subprocess.TimeoutExpired:
+            print(f"Warning: copilot --model {m} timed out", file=sys.stderr)
+        except FileNotFoundError:
+            print("Warning: copilot CLI not found, skipping AI analysis",
+                  file=sys.stderr)
+            return None, None
+        except Exception as e:
+            print(f"Warning: copilot --model {m} failed: {e}",
+                  file=sys.stderr)
+
+    print("Warning: all AI models failed, skipping analysis", file=sys.stderr)
+    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -646,6 +874,10 @@ def main():
     parser.add_argument("--pr-comment", action="store_true")
     parser.add_argument("--job-summary", action="store_true")
     parser.add_argument("--output-file", help="Write output to file")
+    parser.add_argument("--ai-analysis", action="store_true",
+                        help="Call Copilot CLI for AI deep analysis")
+    parser.add_argument("--ai-model", default="",
+                        help="AI model for Copilot CLI (default: claude-sonnet-4)")
     args = parser.parse_args()
 
     # Load data
@@ -660,11 +892,19 @@ def main():
 
     # Format output
     if args.mode == "summary":
-        report = format_summary(summary, json_tests)
+        report = format_summary(summary, json_tests, suites)
     elif args.mode == "matrix":
         report = format_matrix(categories)
     elif args.mode == "full":
-        report = format_full(summary, json_tests, categories)
+        ai_content, ai_model = None, None
+        if args.ai_analysis:
+            json_output = format_json_output(
+                summary, json_tests, xml_tests, categories)
+            model = args.ai_model or os.environ.get("AI_MODEL", "")
+            ai_content, ai_model = call_copilot_analysis(
+                json_output, model or None)
+        report = format_full(summary, json_tests, categories, suites,
+                             ai_content=ai_content, ai_model=ai_model)
     elif args.mode == "json":
         report = format_json_output(summary, json_tests, xml_tests, categories)
 

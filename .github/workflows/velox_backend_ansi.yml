@@ -24,6 +24,14 @@ on:
         description: 'PR number to analyze'
         required: true
         type: string
+      mode:
+        description: 'Run mode: full (build+test+analyze) or analyze-only (reuse artifacts from latest run)'
+        required: false
+        type: choice
+        options:
+          - full
+          - analyze-only
+        default: 'full'
 
 env:
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
@@ -73,6 +81,7 @@ jobs:
 
   build-native-lib:
     needs: check-comment
+    if: inputs.mode != 'analyze-only'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -443,7 +452,7 @@ jobs:
       - spark-test-spark-ut-ansi
       - spark-test-backends-velox-ansi-spark40
       - spark-test-spark-ut-ansi-spark40
-    if: always() && needs.check-comment.result == 'success'
+    if: always() && needs.check-comment.result == 'success' && inputs.mode != 'analyze-only'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -469,3 +478,71 @@ jobs:
           TRIGGERED_BY: ${{ github.event.comment.user.login || github.actor }}
           RUN_ID: ${{ github.run_id }}
         run: python3 .github/scripts/analyze-ansi-results.py --ai --pr-comment --log-dir ./test-logs/
+
+  analyze-only:
+    needs: check-comment
+    if: inputs.mode == 'analyze-only'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-comment.outputs.pr_sha }}
+      - name: Find latest ANSI workflow run
+        id: find-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_SHA="${{ needs.check-comment.outputs.pr_sha }}"
+          REPO="${{ github.repository }}"
+          WORKFLOW="velox_backend_ansi.yml"
+          echo "Looking for latest ANSI run for SHA=${PR_SHA}..."
+          RUN_ID=$(gh api "repos/${REPO}/actions/workflows/${WORKFLOW}/runs?head_sha=${PR_SHA}&per_page=5" \
+            --jq '[.workflow_runs[] | select(.id != ${{ github.run_id }})][0].id')
+          if [[ -z "$RUN_ID" || "$RUN_ID" == "null" ]]; then
+            echo "No previous ANSI run found for this PR SHA, trying branch..."
+            PR_BRANCH="${{ needs.check-comment.outputs.pr_ref }}"
+            RUN_ID=$(gh api "repos/${REPO}/actions/workflows/${WORKFLOW}/runs?branch=${PR_BRANCH}&per_page=10" \
+              --jq '[.workflow_runs[] | select(.id != ${{ github.run_id }})][0].id')
+          fi
+          if [[ -z "$RUN_ID" || "$RUN_ID" == "null" ]]; then
+            echo "::error::No previous ANSI workflow run found for PR"
+            exit 1
+          fi
+          echo "Found run: ${RUN_ID}"
+          echo "run_id=${RUN_ID}" >> $GITHUB_OUTPUT
+      - name: Download artifacts from previous run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REPO="${{ github.repository }}"
+          RUN_ID="${{ steps.find-run.outputs.run_id }}"
+          echo "Downloading artifacts from run ${RUN_ID}..."
+          mkdir -p ./test-reports ./test-logs
+          ARTIFACTS=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts" --jq '.artifacts[] | "\(.name) \(.id)"')
+          while read -r NAME AID; do
+            [[ -z "$NAME" ]] && continue
+            if [[ "$NAME" == *-report ]]; then
+              echo "Downloading report artifact: ${NAME}"
+              gh api "repos/${REPO}/actions/artifacts/${AID}/zip" > "/tmp/${NAME}.zip"
+              unzip -qo "/tmp/${NAME}.zip" -d "./test-reports/${NAME}/"
+            elif [[ "$NAME" == *-logs ]]; then
+              echo "Downloading log artifact: ${NAME}"
+              gh api "repos/${REPO}/actions/artifacts/${AID}/zip" > "/tmp/${NAME}.zip"
+              unzip -qo "/tmp/${NAME}.zip" -d "./test-logs/${NAME}/"
+            fi
+          done <<< "$ARTIFACTS"
+          echo "Downloaded artifacts:"
+          find ./test-reports ./test-logs -type f | head -50
+      - name: Install dependencies
+        run: pip3 install requests
+      - name: Analyze and report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AI_MODEL: ${{ vars.AI_MODEL || 'gpt-4o' }}
+          PR_NUMBER: ${{ needs.check-comment.outputs.pr_number }}
+          TRIGGERED_BY: ${{ github.event.comment.user.login || github.actor }}
+          RUN_ID: ${{ github.run_id }}
+          SOURCE_RUN_ID: ${{ steps.find-run.outputs.run_id }}
+        run: |
+          echo "Analyzing artifacts from run ${SOURCE_RUN_ID}"
+          python3 .github/scripts/analyze-ansi-results.py --ai --pr-comment --log-dir ./test-logs/

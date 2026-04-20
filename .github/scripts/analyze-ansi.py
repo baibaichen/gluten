@@ -764,10 +764,44 @@ def format_json_output(summary, json_tests, xml_tests, categories):
 
 
 # ---------------------------------------------------------------------------
-# AI analysis via Copilot CLI
+# AI analysis via GitHub Models API
 # ---------------------------------------------------------------------------
 
 GITHUB_MODELS_API = "https://models.inference.ai.azure.com/chat/completions"
+
+
+def _build_ai_context(summary, categories):
+    """Build a compact JSON context for AI analysis (fits within 16K token limit)."""
+    compact_failures = []
+    for f in summary["failures"][:100]:
+        cause = classify_fail_cause(f.get("message", ""))
+        short_msg = _extract_short_message(f.get("message", ""))
+        compact_failures.append({
+            "suite": f["suite"].split(".")[-1],
+            "test": f["test"],
+            "source": f.get("source", ""),
+            "cause": cause,
+            "message": short_msg[:120],
+        })
+
+    compact_cats = {}
+    for cat, data in categories.items():
+        compact_cats[cat] = {
+            "tests_pass": data["tests_pass"],
+            "tests_fail": data["tests_fail"],
+            "suites": sorted(data["suites"]),
+        }
+
+    output = {
+        "total": summary["total"],
+        "json_test_count": summary["json_test_count"],
+        "xml_test_count": summary["xml_test_count"],
+        "by_color": summary["by_color"],
+        "failure_count": len(summary["failures"]),
+        "failures": compact_failures,
+        "categories": compact_cats,
+    }
+    return json.dumps(output, indent=2, ensure_ascii=False)
 
 
 def call_ai_analysis(json_output, model=None):
@@ -889,11 +923,10 @@ def main():
     elif args.mode == "full":
         ai_content, ai_model = None, None
         if args.ai_analysis:
-            json_output = format_json_output(
-                summary, json_tests, xml_tests, categories)
+            ai_context = _build_ai_context(summary, categories)
             model = args.ai_model or os.environ.get("AI_MODEL", "")
             ai_content, ai_model = call_ai_analysis(
-                json_output, model or None)
+                ai_context, model or None)
         report = format_full(summary, json_tests, categories, suites,
                              ai_content=ai_content, ai_model=ai_model)
     elif args.mode == "json":

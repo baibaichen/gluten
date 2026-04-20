@@ -276,6 +276,13 @@ jobs:
           path: |
             **/surefire-reports/TEST-*.xml
             spark-ut-test-output.log
+      - name: Upload offload data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ansi-offload-spark41
+          path: '**/target/ansi-offload/*.json'
+          if-no-files-found: ignore
       - name: Upload log files
         if: always()
         uses: actions/upload-artifact@v4
@@ -435,6 +442,13 @@ jobs:
           path: |
             **/surefire-reports/TEST-*.xml
             spark-ut-spark40-test-output.log
+      - name: Upload offload data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ansi-offload-spark40
+          path: '**/target/ansi-offload/*.json'
+          if-no-files-found: ignore
       - name: Upload log files
         if: always()
         uses: actions/upload-artifact@v4
@@ -468,6 +482,12 @@ jobs:
         with:
           pattern: spark-test-*-logs
           path: ./test-logs/
+      - name: Download offload data
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ansi-offload-*
+          merge-multiple: true
+          path: ./ansi-offload/
       - name: Install dependencies
         run: pip3 install requests
       - name: Analyze and report
@@ -477,7 +497,12 @@ jobs:
           PR_NUMBER: ${{ needs.check-comment.outputs.pr_number }}
           TRIGGERED_BY: ${{ github.event.comment.user.login || github.actor }}
           RUN_ID: ${{ github.run_id }}
-        run: python3 .github/scripts/analyze-ansi-results.py --ai --pr-comment --log-dir ./test-logs/
+        run: |
+          python3 .github/scripts/analyze-ansi.py \
+            --json-dir ./ansi-offload/ \
+            --report-dir ./test-reports/ \
+            --mode full \
+            --pr-comment
 
   analyze-only:
     needs: check-comment
@@ -517,7 +542,7 @@ jobs:
           REPO="${{ github.repository }}"
           RUN_ID="${{ steps.find-run.outputs.run_id }}"
           echo "Downloading artifacts from run ${RUN_ID}..."
-          mkdir -p ./test-reports ./test-logs
+          mkdir -p ./test-reports ./test-logs ./ansi-offload
           ARTIFACTS=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts" --jq '.artifacts[] | "\(.name) \(.id)"')
           while read -r NAME AID; do
             [[ -z "$NAME" ]] && continue
@@ -529,6 +554,10 @@ jobs:
               echo "Downloading log artifact: ${NAME}"
               gh api "repos/${REPO}/actions/artifacts/${AID}/zip" > "/tmp/${NAME}.zip"
               unzip -qo "/tmp/${NAME}.zip" -d "./test-logs/${NAME}/"
+            elif [[ "$NAME" == ansi-offload-* ]]; then
+              echo "Downloading offload artifact: ${NAME}"
+              gh api "repos/${REPO}/actions/artifacts/${AID}/zip" > "/tmp/${NAME}.zip"
+              unzip -qo "/tmp/${NAME}.zip" -d "./ansi-offload/"
             fi
           done <<< "$ARTIFACTS"
           echo "Downloaded artifacts:"
@@ -545,4 +574,8 @@ jobs:
           SOURCE_RUN_ID: ${{ steps.find-run.outputs.run_id }}
         run: |
           echo "Analyzing artifacts from run ${SOURCE_RUN_ID}"
-          python3 .github/scripts/analyze-ansi-results.py --ai --pr-comment --log-dir ./test-logs/
+          python3 .github/scripts/analyze-ansi.py \
+            --json-dir ./ansi-offload/ \
+            --report-dir ./test-reports/ \
+            --mode full \
+            --pr-comment

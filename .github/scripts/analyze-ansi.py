@@ -705,13 +705,6 @@ def format_full(summary, json_tests, categories, suites=None,
                 ai_content=None, ai_model=None):
     """Format full report: summary + matrix in <details> + optional AI analysis."""
     parts = [format_summary(summary, json_tests, suites)]
-    matrix_md = format_matrix(categories)
-    parts.append("<details>")
-    parts.append(
-        f"<summary>📊 Expression Offload Matrix "
-        f"({len(categories)} categories)</summary>\n")
-    parts.append(matrix_md)
-    parts.append("</details>")
     if ai_content:
         parts.append("")
         parts.append("<details>")

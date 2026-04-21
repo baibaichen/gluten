@@ -539,7 +539,7 @@ jobs:
           WORKFLOW="velox_backend_ansi.yml"
           PR_BRANCH="${{ needs.check-comment.outputs.pr_ref }}"
           echo "Looking for latest ANSI run with artifacts on branch=${PR_BRANCH}..."
-          CANDIDATE_IDS=$(gh api "repos/${REPO}/actions/workflows/${WORKFLOW}/runs?branch=${PR_BRANCH}&per_page=15" \
+          CANDIDATE_IDS=$(gh api "repos/${REPO}/actions/workflows/${WORKFLOW}/runs?branch=${PR_BRANCH}&per_page=50" \
             --jq '.workflow_runs[] | select(.id != ${{ github.run_id }}) | .id')
           RUN_ID=""
           for cid in $CANDIDATE_IDS; do

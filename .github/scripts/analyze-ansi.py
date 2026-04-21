@@ -455,29 +455,32 @@ def format_summary(summary, json_tests, suites=None):
     # --- Per-Suite Summary (JSON only) ---
     if suites:
         lines.append("### Per-Suite Summary\n")
-        lines.append("| Suite | Category | Total | Pass | Fail "
-                     "| Offload | Fallback |")
-        lines.append("|---|---|---|---|---|---|---|")
+        lines.append("| Suite | 🟢 Passed+Offload | 🟡 Failed+Offload "
+                     "| 🔴 Passed+Fallback | 🔴 Failed+Fallback |")
+        lines.append("|---|---|---|---|---|")
+        suite_rows = []
         for s in suites:
             name = s.get("suite", "").split(".")[-1]
             cat = s.get("category", "")
             tests = s.get("tests", [])
-            total = len(tests)
-            passed = failed = off = fb = 0
+            counts = defaultdict(int)
             for t in tests:
-                st = t.get("status")
-                if st == "PASS":
-                    passed += 1
-                elif st == "FAIL":
-                    failed += 1
-                for r in t.get("records", []):
-                    ol = r.get("offload")
-                    if ol == "OFFLOAD":
-                        off += 1
-                    elif ol == "FALLBACK":
-                        fb += 1
-            lines.append(f"| {name} | {cat} | {total} | {passed} "
-                         f"| {failed} | {off} | {fb} |")
+                records = t.get("records", [])
+                has_fallback = any(r.get("offload") == "FALLBACK"
+                                   for r in records)
+                has_offload_data = len(records) > 0
+                _, label = classify_test(
+                    t.get("status", "PASSED"), has_fallback, has_offload_data)
+                counts[label] += 1
+            total = sum(counts.values())
+            po = counts.get("Passed+Offload", 0)
+            pct = f"{po * 100 / total:.0f}%" if total else "0%"
+            suite_rows.append((cat, name, po, pct,
+                               counts.get("Failed+Offload", 0),
+                               counts.get("Passed+Fallback", 0),
+                               counts.get("Failed+Fallback", 0)))
+        for cat, name, po, pct, fo, pfb, ffb in sorted(suite_rows):
+            lines.append(f"| {name} | {po} ({pct}) | {fo} | {pfb} | {ffb} |")
         lines.append("")
 
     # --- Failure Cause Analysis (JSON only) ---

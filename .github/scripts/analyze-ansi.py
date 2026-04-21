@@ -13,17 +13,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Unified ANSI mode test analyzer.
+"""ANSI mode test analyzer for Gluten CI.
 
 Data sources:
   --json-dir     JSON files from GlutenExpressionOffloadTracker (expression-level)
   --report-dir   Surefire XML reports (test-method-level, for backends-velox)
-
-Output modes:
-  --mode summary   Test-level three-color classification + failure list
-  --mode matrix    Expression-level matrix by category
-  --mode full      summary + matrix (matrix in <details> fold)
-  --mode json      Structured JSON output for tool consumption
 
 Output targets:
   stdout (default), --pr-comment, --job-summary, --output-file FILE
@@ -122,16 +116,12 @@ def _extract_short_message(message):
     return message.split("\n")[0][:120]
 
 
-
 # ===========================================================================
 # DATA LAYER
 # ===========================================================================
 
 def load_json_data(json_dir):
-    """Load all JSON files from Tracker output directory.
-
-    Returns list of suite dicts: {suite, category, tests: [{name, status, records}]}
-    """
+    """Load all JSON files from Tracker output directory."""
     suites = []
     if not json_dir or not os.path.isdir(json_dir):
         return suites
@@ -146,10 +136,7 @@ def load_json_data(json_dir):
 
 
 def load_surefire_xml(report_dir):
-    """Load surefire XML reports for backends-velox test results.
-
-    Returns list of test dicts: {suite, test, status, message, job}
-    """
+    """Load surefire XML reports for backends-velox test results."""
     results = []
     if not report_dir or not os.path.isdir(report_dir):
         return results
@@ -202,11 +189,7 @@ def _infer_job_name(xml_path):
 # ===========================================================================
 
 def classify_record(offload_status, record_status):
-    """Classify a single record (expression-level).
-
-    offload_status: "OFFLOAD" or "FALLBACK"
-    record_status: "PASS" or "FAIL"
-    """
+    """Classify a single record (expression-level)."""
     is_pass = record_status in ("PASSED", "PASS")
     is_fallback = offload_status == "FALLBACK"
     if is_fallback:
@@ -309,7 +292,6 @@ def build_summary(json_records, xml_tests):
                 "source": "xml",
             })
 
-    # Count unique tests from JSON for the header
     json_test_names = set()
     for r in json_records:
         json_test_names.add((r["suite"], r["test"]))
@@ -322,113 +304,6 @@ def build_summary(json_records, xml_tests):
         "json_test_count": len(json_test_names),
         "xml_test_count": len(xml_tests),
     }
-
-
-# ---------------------------------------------------------------------------
-# Expression-level matrix analysis
-# ---------------------------------------------------------------------------
-
-def _normalize_type(t):
-    simple = {
-        "boolean": "Boolean", "byte": "TinyInt", "short": "SmallInt",
-        "int": "Int", "bigint": "BigInt", "float": "Float",
-        "double": "Double", "string": "String", "binary": "Binary",
-        "date": "Date", "timestamp": "Timestamp", "timestamp_ntz": "TimestampNTZ",
-        "void": "Null",
-    }
-    low = t.lower().strip()
-    if low in simple:
-        return simple[low]
-    if low.startswith("decimal"):
-        return t.replace("decimal", "Decimal")
-    if low.startswith("array"):
-        return "Array\\<" + _normalize_type(t[6:-1]) + "\\>"
-    if low.startswith("map"):
-        inner = t[4:-1]
-        parts = inner.split(",", 1)
-        if len(parts) == 2:
-            return "Map\\<" + _normalize_type(parts[0]) + "," + _normalize_type(parts[1]) + "\\>"
-    return t.replace("<", "\\<").replace(">", "\\>")
-
-
-def _cell_symbol(offload, status):
-    if offload == "FALLBACK":
-        return "🔴"
-    if status == "PASS":
-        return "🟢"
-    return "🟡"
-
-
-def analyze_expression_matrix(suites):
-    """Build expression-level matrices grouped by category.
-
-    Returns dict: {category: {info, entries, matrix_data}}
-    """
-    categories = defaultdict(lambda: {"entries": [], "suites": set(),
-                                       "tests_pass": 0, "tests_fail": 0,
-                                       "tests_skip": 0})
-
-    for suite_data in suites:
-        cat = suite_data.get("category", "unknown")
-        suite_name = suite_data.get("suite", "")
-        cat_data = categories[cat]
-        cat_data["suites"].add(suite_name)
-
-        for t in suite_data.get("tests", []):
-            if t.get("status") == "PASS":
-                cat_data["tests_pass"] += 1
-            elif t.get("status") == "FAIL":
-                cat_data["tests_fail"] += 1
-            else:
-                cat_data["tests_skip"] += 1
-
-            for rec in t.get("records", []):
-                meta = rec.get("meta", {})
-                fail_cause = rec.get("failCause")
-                fail_type = classify_fail_cause(fail_cause) if fail_cause else None
-                cat_data["entries"].append({
-                    "suite": suite_name,
-                    "test": t["name"],
-                    "method": rec.get("method", "N"),
-                    "expression": rec.get("expression", ""),
-                    "meta": meta,
-                    "offload": rec.get("offload", ""),
-                    "status": rec.get("status", "PASS"),
-                    "fail_cause": fail_cause,
-                    "fail_type": fail_type,
-                })
-
-    return dict(categories)
-
-
-def _build_cast_matrix(entries, suites):
-    """Build cast matrix: (fromType, toType) -> {suite: symbol}."""
-    matrix = defaultdict(lambda: defaultdict(lambda: "⚪"))
-    for e in entries:
-        from_t = _normalize_type(e["meta"].get("fromType", "?"))
-        to_t = _normalize_type(e["meta"].get("toType", "?"))
-        key = (from_t, to_t)
-        sym = _cell_symbol(e["offload"], e["status"])
-        cur = matrix[key].get(e["suite"], "⚪")
-        matrix[key][e["suite"]] = _worse(sym, cur)
-    return matrix
-
-
-def _build_keyed_matrix(entries, suites, meta_key):
-    matrix = defaultdict(lambda: defaultdict(lambda: "⚪"))
-    for e in entries:
-        key = e["meta"].get(meta_key, "?")
-        sym = _cell_symbol(e["offload"], e["status"])
-        cur = matrix[key].get(e["suite"], "⚪")
-        matrix[key][e["suite"]] = _worse(sym, cur)
-    return matrix
-
-
-_PRIORITY = {"🟡": 3, "🔴": 2, "🟢": 1, "⚪": 0}
-
-
-def _worse(a, b):
-    return a if _PRIORITY.get(a, 0) >= _PRIORITY.get(b, 0) else b
 
 
 # ===========================================================================
@@ -454,10 +329,8 @@ def format_summary(summary, json_records, suites=None):
                  f"{json_record_count} records** | "
                  f"**Other suites: {xml_total} tests**\n")
 
-    # --- ANSI Offload section ---
     lines.append("## ANSI Offload\n")
 
-    # --- Overview: record-level stats ---
     lines.append("### Overview (ANSI Offload Expression Records)\n")
     lines.append("| Classification | Count | % |")
     lines.append("|---|---|---|")
@@ -472,7 +345,6 @@ def format_summary(summary, json_records, suites=None):
             lines.append(f"| {color} {label} | {count} | {pct:.1f}% |")
     lines.append("")
 
-    # --- Per-Suite Summary (record-level) ---
     if suites:
         lines.append("### Per-Suite Summary\n")
         lines.append("| Suite | 🟢 Passed | 🟡 Failed "
@@ -499,7 +371,6 @@ def format_summary(summary, json_records, suites=None):
             lines.append(f"| {name} | {po} ({pct}) | {fo} | {pfb} |")
         lines.append("")
 
-    # --- Failure Cause Analysis (JSON only) ---
     json_failures = [f for f in summary["failures"] if f.get("source") == "json"]
     xml_failures = [f for f in summary["failures"] if f.get("source") == "xml"]
 
@@ -527,7 +398,6 @@ def format_summary(summary, json_records, suites=None):
                              f"| {cause_desc.get(cause, '')} |")
         lines.append("")
 
-    # --- XML: failed suite summary (exclude suites already in JSON) ---
     if xml_failures:
         json_suite_names = set()
         if suites:
@@ -559,166 +429,9 @@ def format_summary(summary, json_records, suites=None):
     return "\n".join(lines)
 
 
-def format_matrix(categories):
-    """Format expression-level matrix as markdown."""
-    lines = ["## Expression Offload Matrix\n"]
-
-    cat_order = ["cast", "arithmetic", "collection", "datetime",
-                 "math", "decimal", "string", "aggregate", "errors"]
-
-    for cat in cat_order:
-        if cat not in categories:
-            continue
-        data = categories[cat]
-        total = data["tests_pass"] + data["tests_fail"] + data["tests_skip"]
-        lines.append(
-            f"### {cat.title()} "
-            f"({total} tests: {data['tests_pass']} passed, "
-            f"{data['tests_fail']} failed, {data['tests_skip']} skipped)\n")
-
-        suites = sorted(data["suites"])
-        entries = data["entries"]
-
-        if not entries:
-            lines.append("*No expression-level data for this category.*\n")
-            continue
-
-        if cat == "cast":
-            matrix = _build_cast_matrix(entries, suites)
-            _format_cast_tables(lines, matrix, suites)
-        elif cat == "arithmetic":
-            matrix = _build_keyed_matrix(entries, suites, "operator")
-            _format_generic_table(lines, matrix, suites, "Operator")
-        else:
-            matrix = _build_keyed_matrix(entries, suites, "expr")
-            _format_generic_table(lines, matrix, suites, "Expression")
-
-        lines.append("")
-
-    # Coverage table
-    lines.append("### Coverage Summary\n")
-    lines.append("| Category | Tests | Passed | Failed | Skipped |")
-    lines.append("|---|---|---|---|---|")
-    t_total = t_pass = t_fail = t_skip = 0
-    for cat in cat_order:
-        if cat not in categories:
-            continue
-        d = categories[cat]
-        total = d["tests_pass"] + d["tests_fail"] + d["tests_skip"]
-        lines.append(
-            f"| {cat} | {total} | {d['tests_pass']} | "
-            f"{d['tests_fail']} | {d['tests_skip']} |")
-        t_total += total
-        t_pass += d["tests_pass"]
-        t_fail += d["tests_fail"]
-        t_skip += d["tests_skip"]
-    lines.append(
-        f"| **Total** | **{t_total}** | **{t_pass}** | "
-        f"**{t_fail}** | **{t_skip}** |")
-    if t_total > 0:
-        pct = t_pass * 100 / t_total
-        lines.append(f"\nPass rate: {t_pass}/{t_total} ({pct:.1f}%)\n")
-
-    return "\n".join(lines)
-
-
-def _format_cast_tables(lines, matrix, suites):
-    """Format cast matrix split into fallback/pass/fail groups."""
-    fallback_rows = []
-    pass_rows = []
-    fail_rows = []
-
-    for (from_t, to_t), suite_map in sorted(matrix.items()):
-        merged = "⚪"
-        for s in suites:
-            merged = _worse(merged, suite_map.get(s, "⚪"))
-
-        if merged == "🔴":
-            fallback_rows.append((from_t, to_t, suite_map))
-        elif merged == "🟢":
-            pass_rows.append((from_t, to_t, suite_map))
-        else:
-            fail_rows.append((from_t, to_t, suite_map))
-
-    suite_headers = " | ".join(s.replace("Gluten", "") for s in suites)
-
-    if fallback_rows:
-        lines.append(f"**🔴 Fallback ({len(fallback_rows)} type pairs)**\n")
-        lines.append(f"| From | To | {suite_headers} |")
-        lines.append("|---|---| " + " | ".join(["---"] * len(suites)) + " |")
-        for from_t, to_t, sm in fallback_rows:
-            cells = " | ".join(sm.get(s, "⚪") for s in suites)
-            lines.append(f"| {from_t} | {to_t} | {cells} |")
-        lines.append("")
-
-    if pass_rows:
-        lines.append(f"**🟢 Passed ({len(pass_rows)} type pairs)**\n")
-        by_from = defaultdict(list)
-        for from_t, to_t, _ in pass_rows:
-            by_from[from_t].append(to_t)
-        for from_t in sorted(by_from):
-            tos = ", ".join(sorted(by_from[from_t]))
-            lines.append(f"- {from_t} → {tos}")
-        lines.append("")
-
-    if fail_rows:
-        lines.append(f"**🟡 Failed ({len(fail_rows)} type pairs)**\n")
-        lines.append(f"| From | To | {suite_headers} |")
-        lines.append("|---|---| " + " | ".join(["---"] * len(suites)) + " |")
-        for from_t, to_t, sm in fail_rows:
-            cells = " | ".join(sm.get(s, "⚪") for s in suites)
-            lines.append(f"| {from_t} | {to_t} | {cells} |")
-        lines.append("")
-
-
-def _format_generic_table(lines, matrix, suites, key_label):
-    """Format a generic matrix table split into fallback/pass/fail groups."""
-    fallback_rows = []
-    pass_rows = []
-    fail_rows = []
-
-    for key, suite_map in sorted(matrix.items()):
-        merged = "⚪"
-        for s in suites:
-            merged = _worse(merged, suite_map.get(s, "⚪"))
-
-        if merged == "🔴":
-            fallback_rows.append((key, suite_map))
-        elif merged == "🟢":
-            pass_rows.append((key, suite_map))
-        else:
-            fail_rows.append((key, suite_map))
-
-    suite_headers = " | ".join(s.replace("Gluten", "") for s in suites)
-
-    if fallback_rows:
-        lines.append(f"**🔴 Fallback ({len(fallback_rows)})**\n")
-        lines.append(f"| {key_label} | {suite_headers} |")
-        lines.append("|---| " + " | ".join(["---"] * len(suites)) + " |")
-        for key, sm in fallback_rows:
-            cells = " | ".join(sm.get(s, "⚪") for s in suites)
-            lines.append(f"| {key} | {cells} |")
-        lines.append("")
-
-    if pass_rows:
-        lines.append(f"**🟢 Passed ({len(pass_rows)})**\n")
-        for key, _ in pass_rows:
-            lines.append(f"- {key}")
-        lines.append("")
-
-    if fail_rows:
-        lines.append(f"**🟡 Failed ({len(fail_rows)})**\n")
-        lines.append(f"| {key_label} | {suite_headers} |")
-        lines.append("|---| " + " | ".join(["---"] * len(suites)) + " |")
-        for key, sm in fail_rows:
-            cells = " | ".join(sm.get(s, "⚪") for s in suites)
-            lines.append(f"| {key} | {cells} |")
-        lines.append("")
-
-
-def format_full(summary, json_records, categories, suites=None,
-                ai_content=None, ai_model=None):
-    """Format full report: summary + matrix in <details> + optional AI analysis."""
+def format_report(summary, json_records, suites=None,
+                  ai_content=None, ai_model=None):
+    """Format full report: summary + optional AI analysis."""
     parts = [format_summary(summary, json_records, suites)]
     if ai_content:
         parts.append("")
@@ -732,23 +445,6 @@ def format_full(summary, json_records, categories, suites=None,
     return "\n".join(parts)
 
 
-def format_json_output(summary, json_records, xml_tests, categories):
-    """Format analysis results as JSON."""
-    output = {
-        "summary": summary,
-        "categories": {},
-    }
-    for cat, data in categories.items():
-        output["categories"][cat] = {
-            "tests_pass": data["tests_pass"],
-            "tests_fail": data["tests_fail"],
-            "tests_skip": data["tests_skip"],
-            "suites": sorted(data["suites"]),
-            "entry_count": len(data["entries"]),
-        }
-    return json.dumps(output, indent=2, ensure_ascii=False)
-
-
 # ---------------------------------------------------------------------------
 # AI analysis via GitHub Models API
 # ---------------------------------------------------------------------------
@@ -756,8 +452,8 @@ def format_json_output(summary, json_records, xml_tests, categories):
 GITHUB_MODELS_API = "https://models.inference.ai.azure.com/chat/completions"
 
 
-def _build_ai_context(summary, categories):
-    """Build a compact JSON context for AI analysis (fits within 16K token limit)."""
+def _build_ai_context(summary, suites):
+    """Build a compact JSON context for AI analysis."""
     compact_failures = []
     for f in summary["failures"][:100]:
         cause = classify_fail_cause(f.get("message", ""))
@@ -770,13 +466,16 @@ def _build_ai_context(summary, categories):
             "message": short_msg[:120],
         })
 
-    compact_cats = {}
-    for cat, data in categories.items():
-        compact_cats[cat] = {
-            "tests_pass": data["tests_pass"],
-            "tests_fail": data["tests_fail"],
-            "suites": sorted(data["suites"]),
-        }
+    compact_cats = defaultdict(lambda: {"tests_pass": 0, "tests_fail": 0,
+                                         "suites": set()})
+    for s in suites:
+        cat = s.get("category", "unknown")
+        compact_cats[cat]["suites"].add(s.get("suite", ""))
+        for t in s.get("tests", []):
+            if t.get("status") in ("PASS", "PASSED"):
+                compact_cats[cat]["tests_pass"] += 1
+            elif t.get("status") in ("FAIL", "FAILED", "ERROR"):
+                compact_cats[cat]["tests_fail"] += 1
 
     json_colors = {k: v for k, v in summary["by_color"].items()
                     if k not in ("Passed (no data)", "Skipped")}
@@ -786,16 +485,16 @@ def _build_ai_context(summary, categories):
         "by_color": json_colors,
         "failure_count": len(summary["failures"]),
         "failures": compact_failures,
-        "categories": compact_cats,
+        "categories": {cat: {"tests_pass": d["tests_pass"],
+                              "tests_fail": d["tests_fail"],
+                              "suites": sorted(d["suites"])}
+                        for cat, d in compact_cats.items()},
     }
     return json.dumps(output, indent=2, ensure_ascii=False)
 
 
 def call_ai_analysis(json_output, model=None):
-    """Call GitHub Models API for deep analysis with fallback chain.
-
-    Returns (content, model_used) or (None, None) on failure.
-    """
+    """Call GitHub Models API for deep analysis with fallback chain."""
     import requests
 
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
@@ -878,11 +577,9 @@ def write_job_summary(report):
 # ===========================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="Unified ANSI test analyzer")
+    parser = argparse.ArgumentParser(description="ANSI mode test analyzer")
     parser.add_argument("--json-dir", help="JSON directory from Tracker")
     parser.add_argument("--report-dir", help="Surefire XML directory")
-    parser.add_argument("--mode", choices=["summary", "matrix", "full", "json"],
-                        default="full")
     parser.add_argument("--pr-comment", action="store_true")
     parser.add_argument("--job-summary", action="store_true")
     parser.add_argument("--output-file", help="Write output to file")
@@ -898,25 +595,16 @@ def main():
     json_records = analyze_json_tests(suites)
     xml_tests = analyze_xml_tests(xml_results)
     summary = build_summary(json_records, xml_tests)
-    categories = analyze_expression_matrix(suites)
 
-    if args.mode == "summary":
-        report = format_summary(summary, json_records, suites)
-    elif args.mode == "matrix":
-        report = format_matrix(categories)
-    elif args.mode == "full":
-        ai_content, ai_model = None, None
-        if args.ai_analysis:
-            ai_context = _build_ai_context(summary, categories)
-            model = args.ai_model or os.environ.get("AI_MODEL", "")
-            ai_content, ai_model = call_ai_analysis(
-                ai_context, model or None)
-        report = format_full(summary, json_records, categories, suites,
-                             ai_content=ai_content, ai_model=ai_model)
-    elif args.mode == "json":
-        report = format_json_output(summary, json_records, xml_tests, categories)
+    ai_content, ai_model = None, None
+    if args.ai_analysis:
+        ai_context = _build_ai_context(summary, suites)
+        model = args.ai_model or os.environ.get("AI_MODEL", "")
+        ai_content, ai_model = call_ai_analysis(ai_context, model or None)
 
-    # Output
+    report = format_report(summary, json_records, suites,
+                           ai_content=ai_content, ai_model=ai_model)
+
     if args.output_file:
         with open(args.output_file, "w") as f:
             f.write(report)

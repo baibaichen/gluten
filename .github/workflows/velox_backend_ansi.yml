@@ -513,7 +513,6 @@ jobs:
           python3 .github/scripts/analyze-ansi.py \
             --json-dir ./ansi-offload/ \
             --report-dir ./test-reports/ \
-            --mode full \
             --ai-analysis \
             --ai-model "${AI_MODEL}" \
             --pr-comment
@@ -603,7 +602,6 @@ jobs:
           python3 .github/scripts/analyze-ansi.py \
             --json-dir ./ansi-offload/ \
             --report-dir ./test-reports/ \
-            --mode full \
             --ai-analysis \
             --ai-model "${AI_MODEL}" \
             --pr-comment

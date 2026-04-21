@@ -26,63 +26,37 @@ import argparse
 import glob
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 
+# Shared analysis prompt — single source of truth consumed by both this script
+# and the local agent SKILL (`.github/skills/ansi-analysis.md`).
+SHARED_PROMPT_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent
+    / "skills" / "ansi-analysis" / "shared.md"
+)
+PROMPT_PLACEHOLDER = "{json_data}"
+
+
+def _load_prompt_template():
+    """Load the shared prompt template. Fail-fast if missing — drift between
+    this script and the SKILL is exactly the bug this layout prevents."""
+    if not SHARED_PROMPT_PATH.is_file():
+        sys.exit(
+            f"FATAL: shared prompt not found at {SHARED_PROMPT_PATH}. "
+            f"Repository layout is broken — refusing to fall back to a stale "
+            f"in-script copy."
+        )
+    return SHARED_PROMPT_PATH.read_text(encoding="utf-8")
+
 NO_EXCEPTION_RE = re.compile(
     r"Expected .+ to be thrown, but no exception was thrown")
 WRONG_EXCEPTION_RE = re.compile(r"Expected (\S+) but got (\S+):")
 MSG_MISMATCH_RE = re.compile(r"Expected error message containing")
-
-ANALYSIS_PROMPT_TEMPLATE = """\
-You are an ANSI mode test analysis expert for the Gluten project. Gluten is a native engine \
-acceleration plugin for Apache Spark that offloads expression evaluation to Velox (C++). \
-ANSI mode requires throwing exceptions on overflow, invalid type casts, etc.
-
-Below is the structured output from JSON expression tests (not XML suite tests):
-
-```json
-{json_data}
-```
-
-Analyze only the JSON expression test data. Output key findings directly — no overview section.
-
-Generate analysis in Markdown:
-
-## Key Findings
-- Failure hotspot table (Suite / Failures / Root Cause)
-- failCause type statistics table (Type / Count / % / Interpretation):
-  - WRONG_EXCEPTION: Velox threw an exception but Spark's scheduling layer wrapped it as \
-SparkException, losing the original exception type
-  - NO_EXCEPTION: Velox did not throw the expected exception in ANSI mode
-  - OTHER: Result mismatch or other errors
-- Root cause deep analysis for WRONG_EXCEPTION (exception wrapping chain path, key code locations)
-- Breakdown of NO_EXCEPTION by root cause (arithmetic/cast/datetime etc.)
-
-## Fix Recommendations (P0 / P1 / P2 only)
-Each recommendation includes:
-- Symptom: test failure pattern
-- Root Cause: specific code path and logic issue
-- Fix Point: file path + change direction
-- Representative Tests: affected test names
-- Estimated Impact: number of tests that would turn green after fix
-
-Key source locations (for reference):
-- Exception lookup: gluten-ut/common/src/test/scala/org/apache/spark/sql/GlutenTestsTrait.scala (findCause method)
-- Exception wrapping: gluten-arrow/src/main/java/org/apache/gluten/vectorized/ColumnarBatchOutIterator.java (translateException)
-- Expression conversion: gluten-core/.../ExpressionConverter.scala
-- Type mapping: gluten-substrait/.../ConverterUtils.scala (getTypeNode)
-- Velox Cast: ep/build-velox/build/velox_ep/velox/functions/sparksql/SparkCastExpr.cpp
-- Velox Arithmetic: ep/build-velox/build/velox_ep/velox/functions/sparksql/Arithmetic.cpp
-
-Constraints:
-- Use Markdown tables, no ASCII box drawing characters
-- Maximum 3 fix recommendations
-- If source code is accessible, read key files to verify root cause analysis
-"""
 
 
 def classify_fail_cause(message):
@@ -508,7 +482,7 @@ def call_ai_analysis(json_output, model=None):
         models_to_try.append(model)
     models_to_try.extend(["gpt-4.1", "gpt-4o"])
 
-    prompt = ANALYSIS_PROMPT_TEMPLATE.format(json_data=json_output)
+    prompt = _load_prompt_template().replace(PROMPT_PLACEHOLDER, json_output)
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",

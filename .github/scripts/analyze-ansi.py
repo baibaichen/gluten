@@ -205,64 +205,67 @@ def _infer_job_name(xml_path):
 # ANALYSIS LAYER
 # ===========================================================================
 
-def classify_test(status, has_fallback, has_offload_data, last_record_fallback=None):
-    """Unified three-color classification.
+def classify_record(offload_status, record_status):
+    """Classify a single record (expression-level).
 
-    For failed tests, last_record_fallback (bool) determines Offload vs Fallback
-    because failure always occurs at the last record.
+    offload_status: "OFFLOAD" or "FALLBACK"
+    record_status: "PASS" or "FAIL"
     """
-    is_pass = status in ("PASSED", "PASS")
-    is_skip = status in ("SKIPPED", "SKIP")
-    is_fail = status in ("FAILED", "ERROR", "FAIL")
-    if is_skip:
-        return "⚪", "Skipped"
-    if not has_offload_data:
+    is_pass = record_status in ("PASSED", "PASS")
+    is_fallback = offload_status == "FALLBACK"
+    if is_fallback:
         if is_pass:
-            return "⚪", "Passed (no data)"
-        return "🟡", "Failed (no data)"
-    if is_fail:
-        if last_record_fallback:
-            return "🔴", "Failed+Fallback"
-        return "🟡", "Failed+Offload"
-    if has_fallback:
-        return "🔴", "Passed+Fallback"
+            return "🔴", "Fallback"
+        return "🔴", "Failed+Fallback"
     if is_pass:
-        return "🟢", "Passed+Offload"
+        return "🟢", "Passed"
     return "🟡", "Failed"
 
 
+def classify_test_for_xml(status):
+    """Classify XML tests (no offload data)."""
+    is_pass = status in ("PASSED", "PASS")
+    is_skip = status in ("SKIPPED", "SKIP")
+    if is_skip:
+        return "⚪", "Skipped"
+    if is_pass:
+        return "⚪", "Passed (no data)"
+    return "🟡", "Failed (no data)"
+
+
 def analyze_json_tests(suites):
-    """Analyze JSON data at test level. Returns summary dict + flat test list."""
-    tests = []
+    """Analyze JSON data at record (expression) level. Returns flat record list."""
+    records_out = []
     for suite_data in suites:
         suite_name = suite_data.get("suite", "")
         category = suite_data.get("category", "")
         for t in suite_data.get("tests", []):
-            records = t.get("records", [])
-            has_fallback = any(r.get("offload") == "FALLBACK" for r in records)
-            has_offload_data = len(records) > 0
-            last_record_fallback = (records[-1].get("offload") == "FALLBACK") if records else None
-            color, label = classify_test(
-                t.get("status", "PASSED"), has_fallback, has_offload_data,
-                last_record_fallback)
-            tests.append({
-                "suite": suite_name,
-                "test": t["name"],
-                "status": t.get("status", "PASSED"),
-                "color": color,
-                "label": label,
-                "category": category,
-                "has_fallback": has_fallback,
-                "records": records,
-            })
-    return tests
+            test_status = t.get("status", "PASSED")
+            for rec in t.get("records", []):
+                offload = rec.get("offload", "")
+                rec_status = rec.get("status", "PASS")
+                color, label = classify_record(offload, rec_status)
+                records_out.append({
+                    "suite": suite_name,
+                    "test": t["name"],
+                    "test_status": test_status,
+                    "status": rec_status,
+                    "color": color,
+                    "label": label,
+                    "category": category,
+                    "offload": offload,
+                    "expression": rec.get("expression", ""),
+                    "failCause": rec.get("failCause", ""),
+                    "meta": rec.get("meta", {}),
+                })
+    return records_out
 
 
 def analyze_xml_tests(xml_results):
     """Analyze surefire XML at test method level."""
     tests = []
     for t in xml_results:
-        color, label = classify_test(t["status"], False, False)
+        color, label = classify_test_for_xml(t["status"])
         tests.append({
             "suite": t["suite"],
             "test": t["test"],
@@ -276,26 +279,22 @@ def analyze_xml_tests(xml_results):
     return tests
 
 
-def build_summary(json_tests, xml_tests):
-    """Build unified summary from both data sources."""
+def build_summary(json_records, xml_tests):
+    """Build unified summary. json_records are at record (expression) level."""
     by_color = defaultdict(int)
     failures = []
     total = 0
 
-    for t in json_tests:
+    for r in json_records:
         total += 1
-        by_color[t["label"]] += 1
-        if t["status"] in ("FAILED", "ERROR", "FAIL"):
-            fail_cause = ""
-            for r in t.get("records", []):
-                if r.get("failCause"):
-                    fail_cause = r["failCause"]
-                    break
+        by_color[r["label"]] += 1
+        if r["status"] in ("FAILED", "ERROR", "FAIL"):
+            fail_cause = r.get("failCause", "")
             failures.append({
-                "suite": t["suite"],
-                "test": t["test"],
-                "color": t["color"],
-                "label": t["label"],
+                "suite": r["suite"],
+                "test": r["test"],
+                "color": r["color"],
+                "label": r["label"],
                 "message": fail_cause,
                 "source": "json",
             })
@@ -314,11 +313,17 @@ def build_summary(json_tests, xml_tests):
                 "source": "xml",
             })
 
+    # Count unique tests from JSON for the header
+    json_test_names = set()
+    for r in json_records:
+        json_test_names.add((r["suite"], r["test"]))
+
     return {
         "total": total,
         "by_color": dict(by_color),
         "failures": failures,
-        "json_test_count": len(json_tests),
+        "json_record_count": len(json_records),
+        "json_test_count": len(json_test_names),
         "xml_test_count": len(xml_tests),
     }
 
@@ -434,62 +439,68 @@ def _worse(a, b):
 # OUTPUT LAYER
 # ===========================================================================
 
-def format_summary(summary, json_tests, suites=None):
-    """Format test-level summary as markdown."""
-    lines = ["## ANSI Mode Test Analysis Report (Spark 4.1)\n"]
-    json_total = summary["json_test_count"]
+def format_summary(summary, json_records, suites=None):
+    """Format record-level summary as markdown."""
+    lines = ["# ANSI Mode Test Analysis Report (Spark 4.1)\n"]
+    lines.append("> [!NOTE]")
+    lines.append("> Expression-level ANSI mode offload coverage analysis.")
+    lines.append("> Test config: `spark.sql.ansi.enabled=true`,"
+                 " `spark.gluten.sql.ansiFallback.enabled=false`.")
+    lines.append("> - **Passed (🟢)**: Velox correctly handles ANSI semantics")
+    lines.append("> - **Fallback (🔴)**: Expression falls back to Spark execution,"
+                 " needs ANSI support in Velox")
+    lines.append("> - **Failed (🟡)**: Velox executes but ANSI error behavior"
+                 " differs from Spark, needs exception handling fix\n")
+    json_test_count = summary["json_test_count"]
+    json_record_count = summary["json_record_count"]
     xml_total = summary["xml_test_count"]
-    lines.append(f"**JSON tests: {json_total}** | "
-                 f"**XML suites: {xml_total} tests**\n")
+    lines.append(f"**ANSI Offload suites: {json_test_count} tests, "
+                 f"{json_record_count} records** | "
+                 f"**Other suites: {xml_total} tests**\n")
 
-    # --- Overview: JSON-only three-color stats ---
-    lines.append("### Overview (JSON Expression Tests)\n")
+    # --- ANSI Offload section ---
+    lines.append("## ANSI Offload\n")
+
+    # --- Overview: record-level stats ---
+    lines.append("### Overview (ANSI Offload Expression Records)\n")
     lines.append("| Classification | Count | % |")
     lines.append("|---|---|---|")
-    json_labels = ["Passed+Offload", "Failed+Offload", "Passed+Fallback",
-                   "Failed+Fallback", "Failed"]
-    color_map = {"Passed+Offload": "🟢", "Failed+Offload": "🟡",
-                 "Passed+Fallback": "🔴", "Failed+Fallback": "🔴",
-                 "Failed": "🟡"}
+    json_labels = ["Passed", "Failed", "Fallback"]
+    color_map = {"Passed": "🟢", "Failed": "🟡",
+                 "Fallback": "🔴"}
     for label in json_labels:
         count = summary["by_color"].get(label, 0)
         if count > 0:
             color = color_map.get(label, "")
-            pct = count * 100 / json_total if json_total else 0
+            pct = count * 100 / json_record_count if json_record_count else 0
             lines.append(f"| {color} {label} | {count} | {pct:.1f}% |")
     lines.append("")
 
-    # --- Per-Suite Summary (JSON only) ---
+    # --- Per-Suite Summary (record-level) ---
     if suites:
         lines.append("### Per-Suite Summary\n")
-        lines.append("| Suite | 🟢 Passed+Offload | 🟡 Failed+Offload "
-                     "| 🔴 Passed+Fallback | 🔴 Failed+Fallback |")
-        lines.append("|---|---|---|---|---|")
+        lines.append("| Suite | 🟢 Passed | 🟡 Failed "
+                     "| 🔴 Fallback |")
+        lines.append("|---|---|---|---|")
         suite_rows = []
         for s in suites:
             name = s.get("suite", "").split(".")[-1]
             cat = s.get("category", "")
-            tests = s.get("tests", [])
             counts = defaultdict(int)
-            for t in tests:
-                records = t.get("records", [])
-                has_fallback = any(r.get("offload") == "FALLBACK"
-                                   for r in records)
-                has_offload_data = len(records) > 0
-                last_fb = (records[-1].get("offload") == "FALLBACK") if records else None
-                _, label = classify_test(
-                    t.get("status", "PASSED"), has_fallback, has_offload_data,
-                    last_fb)
-                counts[label] += 1
+            for t in s.get("tests", []):
+                for rec in t.get("records", []):
+                    offload = rec.get("offload", "")
+                    rec_status = rec.get("status", "PASS")
+                    _, label = classify_record(offload, rec_status)
+                    counts[label] += 1
             total = sum(counts.values())
-            po = counts.get("Passed+Offload", 0)
+            po = counts.get("Passed", 0)
             pct = f"{po * 100 / total:.0f}%" if total else "0%"
             suite_rows.append((cat, name, po, pct,
-                               counts.get("Failed+Offload", 0),
-                               counts.get("Passed+Fallback", 0),
-                               counts.get("Failed+Fallback", 0)))
-        for cat, name, po, pct, fo, pfb, ffb in sorted(suite_rows):
-            lines.append(f"| {name} | {po} ({pct}) | {fo} | {pfb} | {ffb} |")
+                               counts.get("Failed", 0),
+                               counts.get("Fallback", 0)))
+        for cat, name, po, pct, fo, pfb in sorted(suite_rows):
+            lines.append(f"| {name} | {po} ({pct}) | {fo} | {pfb} |")
         lines.append("")
 
     # --- Failure Cause Analysis (JSON only) ---
@@ -503,7 +514,7 @@ def format_summary(summary, json_tests, suites=None):
             cause_counts[cause] += 1
 
         lines.append(f"### Failure Cause Analysis "
-                     f"({len(json_failures)} failures from JSON)\n")
+                     f"({len(json_failures)} failures)\n")
         cause_desc = {
             "NO_EXCEPTION": "Velox did not throw expected ANSI exception",
             "WRONG_EXCEPTION": "Exception wrapped as SparkException",
@@ -536,8 +547,8 @@ def format_summary(summary, json_tests, suites=None):
                 xml_suite_counts[short] += 1
                 xml_suite_tests[short].append(f.get("test", ""))
         if xml_suite_counts:
-            lines.append(f"### Failed XML Suites "
-                         f"(not in JSON, {sum(xml_suite_counts.values())} failures)\n")
+            lines.append(f"## Other "
+                         f"({sum(xml_suite_counts.values())} failures)\n")
             lines.append("| Suite | Failures |")
             lines.append("|---|---|")
             for suite, cnt in sorted(xml_suite_counts.items(),
@@ -709,10 +720,10 @@ def _format_generic_table(lines, matrix, suites, key_label):
         lines.append("")
 
 
-def format_full(summary, json_tests, categories, suites=None,
+def format_full(summary, json_records, categories, suites=None,
                 ai_content=None, ai_model=None):
     """Format full report: summary + matrix in <details> + optional AI analysis."""
-    parts = [format_summary(summary, json_tests, suites)]
+    parts = [format_summary(summary, json_records, suites)]
     if ai_content:
         parts.append("")
         parts.append("<details>")
@@ -723,7 +734,7 @@ def format_full(summary, json_tests, categories, suites=None,
     return "\n".join(parts)
 
 
-def format_json_output(summary, json_tests, xml_tests, categories):
+def format_json_output(summary, json_records, xml_tests, categories):
     """Format analysis results as JSON."""
     output = {
         "summary": summary,
@@ -773,7 +784,7 @@ def _build_ai_context(summary, categories):
                     if k not in ("Passed (no data)", "Skipped")}
 
     output = {
-        "json_test_count": summary["json_test_count"],
+        "json_record_count": summary["json_record_count"],
         "by_color": json_colors,
         "failure_count": len(summary["failures"]),
         "failures": compact_failures,

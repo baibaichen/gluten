@@ -205,24 +205,29 @@ def _infer_job_name(xml_path):
 # ANALYSIS LAYER
 # ===========================================================================
 
-def classify_test(status, has_fallback, has_offload_data):
-    """Unified three-color classification."""
+def classify_test(status, has_fallback, has_offload_data, last_record_fallback=None):
+    """Unified three-color classification.
+
+    For failed tests, last_record_fallback (bool) determines Offload vs Fallback
+    because failure always occurs at the last record.
+    """
     is_pass = status in ("PASSED", "PASS")
     is_skip = status in ("SKIPPED", "SKIP")
+    is_fail = status in ("FAILED", "ERROR", "FAIL")
     if is_skip:
         return "⚪", "Skipped"
-    if has_fallback:
-        if is_pass:
-            return "🔴", "Passed+Fallback"
-        return "🔴", "Failed+Fallback"
     if not has_offload_data:
         if is_pass:
             return "⚪", "Passed (no data)"
         return "🟡", "Failed (no data)"
+    if is_fail:
+        if last_record_fallback:
+            return "🔴", "Failed+Fallback"
+        return "🟡", "Failed+Offload"
+    if has_fallback:
+        return "🔴", "Passed+Fallback"
     if is_pass:
         return "🟢", "Passed+Offload"
-    if status in ("FAILED", "ERROR", "FAIL"):
-        return "🟡", "Failed+Offload"
     return "🟡", "Failed"
 
 
@@ -236,8 +241,10 @@ def analyze_json_tests(suites):
             records = t.get("records", [])
             has_fallback = any(r.get("offload") == "FALLBACK" for r in records)
             has_offload_data = len(records) > 0
+            last_record_fallback = (records[-1].get("offload") == "FALLBACK") if records else None
             color, label = classify_test(
-                t.get("status", "PASSED"), has_fallback, has_offload_data)
+                t.get("status", "PASSED"), has_fallback, has_offload_data,
+                last_record_fallback)
             tests.append({
                 "suite": suite_name,
                 "test": t["name"],
@@ -469,8 +476,10 @@ def format_summary(summary, json_tests, suites=None):
                 has_fallback = any(r.get("offload") == "FALLBACK"
                                    for r in records)
                 has_offload_data = len(records) > 0
+                last_fb = (records[-1].get("offload") == "FALLBACK") if records else None
                 _, label = classify_test(
-                    t.get("status", "PASSED"), has_fallback, has_offload_data)
+                    t.get("status", "PASSED"), has_fallback, has_offload_data,
+                    last_fb)
                 counts[label] += 1
             total = sum(counts.values())
             po = counts.get("Passed+Offload", 0)

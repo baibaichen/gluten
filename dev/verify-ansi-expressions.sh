@@ -15,28 +15,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# verify-ansi-expressions.sh — 按 expression-matrix 分类验证 ANSI 表达式
+# verify-ansi-expressions.sh — Verify ANSI expressions by expression-matrix category
 #
-# 用法：
+# Usage:
 #   cd /root/SourceCode/gluten
 #   bash dev/verify-ansi-expressions.sh <category> [spark41|spark40|all] [--clean]
 #
-# category（对应矩阵第三节）：
-#   cast        — §3.1.1 Cast + §3.3.1 try_cast
-#   arithmetic  — §3.1.2 算术 + §3.2.6 Abs/UnaryMinus + §3.3.1 try 算术
-#   collection  — §3.2.1 集合 + §3.3.2 try_element_at
-#   datetime    — §3.2.2 日期时间/Interval + §3.3.2 try_to_timestamp 等
-#   math        — §3.2.3 数学（Round/BRound/conv）
-#   decimal     — §3.2.4 Decimal（CheckOverflow）
-#   string      — §3.2.5 字符串 + §3.3.2 try_parse_url
-#   aggregate   — §3.1.3 聚合 + §3.4 间接（Sum/Avg/VAR/STDDEV，需人工校验）
+# category:
+#   cast        — Cast + try_cast
+#   arithmetic  — Arithmetic + Abs/UnaryMinus + try arithmetic
+#   collection  — Collection + try_element_at
+#   datetime    — DateTime/Interval + try_to_timestamp etc.
+#   math        — Math (Round/BRound/conv)
+#   decimal     — Decimal (CheckOverflow)
+#   string      — String + try_parse_url
+#   aggregate   — Aggregate + indirect (Sum/Avg/VAR/STDDEV, needs manual review)
 #   errors      — QueryExecutionAnsiErrorsSuite
-#   all         — 以上全部（一次性组装所有 suite，单次 JVM 执行）
+#   all         — All of the above (assembled into a single JVM execution)
 #
-# spark version（默认 spark41）：
+# spark version (default spark41):
 #   spark41     — Spark 4.1
 #   spark40     — Spark 4.0
-#   all         — 先 spark41 再 spark40
+#   all         — spark41 first, then spark40
 #
 
 set -uo pipefail
@@ -71,10 +71,10 @@ mkdir -p "${LOG_DIR}"
 # Symlink latest run for easy access
 ln -sfn "${LOG_DIR}" "/tmp/ansi-matrix/latest"
 
-# ── Suite 定义 ──────────────────────────────────────────────
-# 按矩阵第三节，强相关 Suite 映射
+# ── Suite definitions ──────────────────────────────────────────────
+# Suite mapping by expression-matrix category
 
-# §3.1.1 Cast + §3.3.1 try_cast
+# Cast + try_cast
 CAST_UT=(
   -s org.apache.spark.sql.catalyst.expressions.GlutenCastWithAnsiOnSuite
   -s org.apache.spark.sql.catalyst.expressions.GlutenCastWithAnsiOffSuite
@@ -84,7 +84,7 @@ CAST_BACKENDS=(
   -s org.apache.spark.sql.catalyst.expressions.VeloxCastSuite
 )
 
-# §3.1.2 算术 + §3.2.6 Abs/UnaryMinus + §3.3.1 try 算术
+# Arithmetic + Abs/UnaryMinus + try arithmetic
 ARITHMETIC_UT=(
   -s org.apache.spark.sql.catalyst.expressions.GlutenArithmeticExpressionSuite
   -s org.apache.spark.sql.catalyst.expressions.GlutenTryEvalSuite
@@ -94,19 +94,19 @@ ARITHMETIC_BACKENDS=(
   -s org.apache.gluten.functions.MathFunctionsValidateSuiteAnsiOn
 )
 
-# §3.2.1 集合 + §3.3.2 try_element_at
+# Collection + try_element_at
 COLLECTION_UT=(
   -s org.apache.spark.sql.catalyst.expressions.GlutenCollectionExpressionsSuite
 )
 
-# §3.2.2 日期时间/Interval + §3.3.2 try_to_timestamp 等
+# DateTime/Interval + try_to_timestamp etc.
 DATETIME_UT=(
   -s org.apache.spark.sql.catalyst.expressions.GlutenDateExpressionsSuite
   -s org.apache.spark.sql.catalyst.expressions.GlutenIntervalExpressionsSuite
   -s org.apache.spark.sql.GlutenDateFunctionsSuite
 )
 
-# §3.2.3 数学
+# Math
 MATH_UT=(
   -s org.apache.spark.sql.catalyst.expressions.GlutenMathExpressionsSuite
 )
@@ -116,23 +116,23 @@ DECIMAL_UT=(
   -s org.apache.spark.sql.catalyst.expressions.GlutenDecimalExpressionSuite
 )
 
-# §3.2.5 字符串 + §3.3.2 try_parse_url
+# String + try_parse_url
 STRING_UT=(
   -s org.apache.spark.sql.catalyst.expressions.GlutenStringExpressionsSuite
   -s org.apache.spark.sql.GlutenUrlFunctionsSuite
 )
 
-# §3.1.3 聚合 + §3.4 间接（VAR/STDDEV）— 需人工校验
+# Aggregate + indirect (VAR/STDDEV) — needs manual review
 AGGREGATE_UT=(
   -s org.apache.spark.sql.GlutenDataFrameAggregateSuite
 )
 
-# ANSI 错误语义
+# ANSI error semantics
 ERRORS_UT=(
   -s org.apache.spark.sql.errors.GlutenQueryExecutionAnsiErrorsSuite
 )
 
-# ── 运行函数 ──────────────────────────────────────────────
+# ── Run function ──────────────────────────────────────────────
 
 run_single() {
   local label="$1"
@@ -149,7 +149,7 @@ run_single() {
     -pl "${module}" \
     "$@" \
     2>&1 | tee "${log}"
-  # 只第一次 clean
+  # Only clean on first run
   CLEAN_FLAG=""
 }
 
@@ -181,7 +181,7 @@ get_backends_suites() {
 
 ALL_CATEGORIES=(cast arithmetic collection datetime math decimal string aggregate errors)
 
-# ── 分类执行 ──────────────────────────────────────────────
+# ── Category execution ──────────────────────────────────────────────
 
 run_category_single() {
   local cat="$1"
@@ -228,7 +228,7 @@ run_all() {
   fi
 }
 
-# ── 主入口 ──────────────────────────────────────────────
+# ── Main entry ──────────────────────────────────────────────
 
 run_for_spark_ver() {
   case "${CATEGORY}" in

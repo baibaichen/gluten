@@ -20,6 +20,7 @@
 
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <folly/executors/task_queue/UnboundedBlockingQueue.h>
+#include <folly/futures/ThreadWheelTimekeeper.h>
 
 #include "compute/delta/DeltaConnector.h"
 #include "operators/functions/RegistrationAllFunctions.h"
@@ -247,7 +248,11 @@ void VeloxBackend::init(
   velox::parquet::registerParquetWriterFactory();
   velox::orc::registerOrcReaderFactory();
   velox::exec::ExprToSubfieldFilterParser::registerParser(std::make_unique<SparkExprToSubfieldFilterParser>());
-  velox::connector::hive::BufferedInputBuilder::registerBuilder(std::make_shared<GlutenBufferedInputBuilder>());
+  // Build the FileCache manager (if enabled) before registering the buffered
+  // input builder so the three-branch builder sees a live manager.
+  initFileCache();
+  velox::connector::hive::BufferedInputBuilder::registerBuilder(
+      std::make_shared<GlutenBufferedInputBuilder>(fileCacheManager_.get()));
 
   // Register Velox functions
   registerAllFunctions();
@@ -381,6 +386,54 @@ void VeloxBackend::initCache() {
   }
 }
 
+void VeloxBackend::initFileCache() {
+  if (!backendConf_->get<bool>(kVeloxFileCacheEnabled, false)) {
+    return;
+  }
+  // Fail-close: FileCache and the native AsyncDataCache must not both be
+  // enabled, or reads would be double-cached. Surface the misconfiguration at
+  // init rather than silently picking one.
+  VELOX_USER_CHECK(
+      !backendConf_->get<bool>(kVeloxCacheEnabled, false),
+      "FileCache (fileCacheEnabled) and Velox AsyncDataCache (cacheEnabled) cannot both be enabled");
+
+  const std::string cacheRoot = backendConf_->get<std::string>(kVeloxFileCacheRoot, kVeloxFileCacheRootDefault);
+  const uint64_t cacheSize = backendConf_->get<uint64_t>(kVeloxFileCacheSize, kVeloxFileCacheSizeDefault);
+
+  std::error_code ec;
+  const std::string absCacheRoot = std::filesystem::absolute(cacheRoot).string();
+  std::filesystem::create_directories(absCacheRoot, ec);
+  VELOX_USER_CHECK(!ec, "Failed to create fileCacheRoot: {} ({})", absCacheRoot, ec.message());
+
+  constexpr const char* kCacheName = "gluten";
+  facebook::velox::ch::FileCacheConfig config;
+  config.path = absCacheRoot;
+  config.maxSize = cacheSize;
+  config.maxElements = 10'000'000;
+  config.maxFileSegmentSize = 8ULL << 20;
+  config.boundaryAlignment = 1;
+  config.reserveGranularity = 1;
+  config.cachePolicy = facebook::velox::ch::FileCachePolicy::LRU;
+  config.useSplitCache = false;
+  config.backgroundDownloadThreads = 0;
+  config.loadMetadataThreads = 2;
+  config.loadMetadataAsynchronously = false;
+  config.keepFreeSpaceSizeRatio = 0.0;
+  config.keepFreeSpaceElementsRatio = 0.0;
+
+  facebook::velox::ch::FileCacheManager::Options options;
+  options.commonUserId = "gluten";
+  options.localFileSystem = velox::filesystems::getFileSystem("/", nullptr);
+  options.timekeeper = std::make_shared<folly::ThreadWheelTimekeeper>();
+  options.initializeOnCreate = true;
+  options.defaultCacheName = kCacheName;
+  options.caches.push_back({kCacheName, config, "conf.gluten"});
+
+  fileCacheManager_ = facebook::velox::ch::FileCacheManager::create(options);
+  facebook::velox::ch::FileCacheManager::setInstance(fileCacheManager_.get());
+  LOG(INFO) << "FileCache is ready at " << absCacheRoot << " (maxSize=" << cacheSize << ")";
+}
+
 std::shared_ptr<facebook::velox::connector::Connector> VeloxBackend::createHiveConnector(
     const std::string& connectorId,
     folly::Executor* ioExecutor) const {
@@ -469,6 +522,15 @@ void VeloxBackend::tearDown() {
       }
     }
     asyncDataCache_->shutdown();
+  }
+
+  // Shut down the FileCache manager after the executors above are joined so no
+  // in-flight read still references the cache. The registered builder holds a
+  // FileCacheManager&, so this must be the last user of the manager.
+  if (fileCacheManager_ != nullptr) {
+    fileCacheManager_->shutdown();
+    facebook::velox::ch::FileCacheManager::setInstance(nullptr);
+    fileCacheManager_.reset();
   }
 }
 

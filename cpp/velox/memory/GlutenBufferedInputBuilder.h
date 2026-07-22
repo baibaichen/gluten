@@ -18,14 +18,35 @@
 #pragma once
 
 #include "GlutenDirectBufferedInput.h"
+#include "velox/ch/Disks/IO/FileCacheBufferedInputBuilder.h"
+#include "velox/ch/Interpreters/FileCache/FileCacheManager.h"
 #include "velox/connectors/hive/BufferedInputBuilder.h"
 #include "velox/connectors/hive/FileHandle.h"
 #include "velox/dwio/common/CachedBufferedInput.h"
 
 namespace gluten {
 
+/// Three-branch buffered-input builder for the Hive connector read path:
+///   1. `connectorQueryCtx->cache() != nullptr` -> native `CachedBufferedInput`
+///      (Gluten's AsyncDataCache path, unchanged);
+///   2. else if a ClickHouse `FileCache` default is available -> the ported
+///      `FileCacheBufferedInput` (via the fork's `FileCacheBufferedInputBuilder`);
+///   3. else -> `GlutenDirectBufferedInput` (direct path, unchanged).
+///
+/// The `FileCacheManager*` is nullable. When null, this builder behaves exactly
+/// like the original two-branch builder (branch 2 is never taken), so a build
+/// without FileCache configured is unchanged.
 class GlutenBufferedInputBuilder : public facebook::velox::connector::hive::BufferedInputBuilder {
  public:
+  GlutenBufferedInputBuilder() = default;
+
+  explicit GlutenBufferedInputBuilder(facebook::velox::ch::FileCacheManager* fileCacheManager)
+      : fileCacheManager_(fileCacheManager) {
+    if (fileCacheManager_ != nullptr && fileCacheManager_->hasDefault()) {
+      fileCacheBuilder_ = std::make_unique<facebook::velox::ch::FileCacheBufferedInputBuilder>(*fileCacheManager_);
+    }
+  }
+
   std::unique_ptr<facebook::velox::dwio::common::BufferedInput> create(
       const facebook::velox::FileHandle& fileHandle,
       const facebook::velox::dwio::common::ReaderOptions& readerOpts,
@@ -48,6 +69,16 @@ class GlutenBufferedInputBuilder : public facebook::velox::connector::hive::Buff
           readerOpts,
           fileReadOps);
     }
+    if (fileCacheBuilder_ != nullptr) {
+      return fileCacheBuilder_->create(
+          fileHandle,
+          readerOpts,
+          connectorQueryCtx,
+          std::move(ioStatistics),
+          std::move(ioStats),
+          executor,
+          fileReadOps);
+    }
     return std::make_unique<GlutenDirectBufferedInput>(
         fileHandle.file,
         dwio::common::MetricsLog::voidLog(),
@@ -60,6 +91,13 @@ class GlutenBufferedInputBuilder : public facebook::velox::connector::hive::Buff
         readerOpts,
         fileReadOps);
   }
+
+ private:
+  // Non-owning; the FileCacheManager is owned by VeloxBackend and must outlive
+  // this builder. Held only to document the dependency; branch 2 uses the
+  // delegate below.
+  facebook::velox::ch::FileCacheManager* fileCacheManager_{nullptr};
+  std::unique_ptr<facebook::velox::ch::FileCacheBufferedInputBuilder> fileCacheBuilder_;
 };
 
 } // namespace gluten

@@ -29,6 +29,8 @@
 #include "velox/common/memory/MmapAllocator.h"
 #include "velox/connectors/Connector.h"
 
+#include "velox/ch/Interpreters/FileCache/FileCacheManager.h"
+
 #include "jni/JniHashTable.h"
 #include "memory/VeloxMemoryManager.h"
 #include "shuffle/ReaderThreadPool.h"
@@ -106,6 +108,7 @@ class VeloxBackend {
 
   void init(std::unique_ptr<AllocationListener> listener, const std::unordered_map<std::string, std::string>& conf);
   void initCache();
+  void initFileCache();
   void initUdf();
   std::unique_ptr<facebook::velox::cache::SsdCache> initSsdCache(uint64_t ssdSize);
 
@@ -121,6 +124,10 @@ class VeloxBackend {
   std::unique_ptr<VeloxMemoryManager> globalMemoryManager_;
   // Instance of AsyncDataCache used for all large allocations.
   std::shared_ptr<facebook::velox::cache::AsyncDataCache> asyncDataCache_;
+
+  // ClickHouse-ported FileCache manager (owns the disk cache). Mutually
+  // exclusive with asyncDataCache_. Null unless kVeloxFileCacheEnabled.
+  std::shared_ptr<facebook::velox::ch::FileCacheManager> fileCacheManager_;
 
   std::unique_ptr<folly::Executor> executor_;
   std::unique_ptr<folly::Executor> spillExecutor_;

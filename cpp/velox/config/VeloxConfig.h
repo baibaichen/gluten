@@ -148,6 +148,14 @@ const std::string kVeloxSsdCheckSumEnabled = "spark.gluten.sql.columnar.backend.
 const std::string kVeloxSsdCheckSumReadVerificationEnabled =
     "spark.gluten.sql.columnar.backend.velox.ssdChecksumReadVerificationEnabled";
 
+// ClickHouse-ported FileCache (disk cache; mutually exclusive with the native
+// AsyncDataCache selected by kVeloxCacheEnabled).
+const std::string kVeloxFileCacheEnabled = "spark.gluten.sql.columnar.backend.velox.fileCacheEnabled";
+const std::string kVeloxFileCacheRoot = "spark.gluten.sql.columnar.backend.velox.fileCacheRoot";
+const std::string kVeloxFileCacheRootDefault = "/tmp/gluten-filecache";
+const std::string kVeloxFileCacheSize = "spark.gluten.sql.columnar.backend.velox.fileCacheSize";
+const uint64_t kVeloxFileCacheSizeDefault = 10737418240ULL; // 10G
+
 // async
 const std::string kNumTaskSlotsPerExecutor = "spark.gluten.numTaskSlotsPerExecutor";
 const std::string kVeloxIOThreads = "spark.gluten.sql.columnar.backend.velox.IOThreads";

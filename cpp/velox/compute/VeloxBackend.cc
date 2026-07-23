@@ -406,20 +406,12 @@ void VeloxBackend::initFileCache() {
   VELOX_USER_CHECK(!ec, "Failed to create fileCacheRoot: {} ({})", absCacheRoot, ec.message());
 
   constexpr const char* kCacheName = "gluten";
+  // Only path and size are Gluten-specific; every other field keeps the
+  // ClickHouse/velox default (32 MiB segments, 4 MiB alignment, SLRU policy,
+  // 16 metadata-load threads, 5 background-download threads).
   facebook::velox::ch::FileCacheConfig config;
   config.path = absCacheRoot;
   config.maxSize = cacheSize;
-  config.maxElements = 10'000'000;
-  config.maxFileSegmentSize = 8ULL << 20;
-  config.boundaryAlignment = 1;
-  config.reserveGranularity = 1;
-  config.cachePolicy = facebook::velox::ch::FileCachePolicy::LRU;
-  config.useSplitCache = false;
-  config.backgroundDownloadThreads = 0;
-  config.loadMetadataThreads = 2;
-  config.loadMetadataAsynchronously = false;
-  config.keepFreeSpaceSizeRatio = 0.0;
-  config.keepFreeSpaceElementsRatio = 0.0;
 
   facebook::velox::ch::FileCacheManager::Options options;
   options.commonUserId = "gluten";

@@ -233,6 +233,10 @@ concat_velox_param
 export VELOX_HOME
 
 function build_arrow {
+  if [ "$ENABLE_VCPKG" = "ON" ]; then
+    echo "ERROR: build_arrow is deprecated with --enable_vcpkg=ON; Arrow is managed by Gluten vcpkg." >&2
+    return 1
+  fi
   local GLUTEN_BUILD_TYPE="$BUILD_TYPE"
   if [ ! -d "$VELOX_HOME" ]; then
     get_velox

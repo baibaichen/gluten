@@ -114,7 +114,7 @@ function compile {
     -Wno-error=uninitialized -Wno-unknown-warning-option -Wno-deprecated-declarations'
   if [[ "$(uname)" == "Darwin" ]]; then
     CXX_FLAGS="$CXX_FLAGS -Wno-inconsistent-missing-override -Wno-macro-redefined"
-    if [[ -n "${INSTALL_PREFIX:-}" && "${INSTALL_PREFIX:-}" != "/usr/local" && "${INSTALL_PREFIX:-}" != /usr/local/* ]]; then
+    if [[ -z "${GLUTEN_VCPKG_ENABLED:-}" && -n "${INSTALL_PREFIX:-}" && "${INSTALL_PREFIX:-}" != "/usr/local" && "${INSTALL_PREFIX:-}" != /usr/local/* ]]; then
       # Add the dependency prefix as a system include: this finds deps that only
       # publish loose headers (e.g. xsimd) and demotes warnings in vendored
       # dependency headers (abseil's __is_trivially_relocatable, arrow's vendored

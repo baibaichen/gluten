@@ -33,6 +33,7 @@ set(VCPKG_HOST_TRIPLET $ENV{VCPKG_TRIPLET})
 set(VCPKG_INSTALLED_DIR $ENV{VCPKG_MANIFEST_DIR}/vcpkg_installed)
 set(VCPKG_INSTALL_OPTIONS --no-print-usage)
 
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 include($ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
 
 set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ON CACHE BOOL "Prefer package configuration files." FORCE)

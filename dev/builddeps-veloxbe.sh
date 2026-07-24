@@ -288,7 +288,7 @@ function build_gluten_cpp {
 
   if [ -n "${INSTALL_PREFIX:-}" ]; then
     GLUTEN_CMAKE_OPTIONS+=("-DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX")
-    if [ "$ENABLE_VCPKG" != "ON" ]; then
+    if [ -z "${GLUTEN_VCPKG_ENABLED:-}" ]; then
       GLUTEN_CMAKE_OPTIONS+=("-DCMAKE_PREFIX_PATH=$INSTALL_PREFIX")
     fi
   fi

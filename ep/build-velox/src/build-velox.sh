@@ -179,8 +179,14 @@ function compile {
   fi
   echo "NUM_THREADS_OPTS: $NUM_THREADS_OPTS"
 
-  export simdjson_SOURCE=AUTO
-  export Arrow_SOURCE=AUTO
+  if [ -n "${GLUTEN_VCPKG_ENABLED:-}" ]; then
+    export VELOX_DEPENDENCY_SOURCE=SYSTEM
+    export simdjson_SOURCE=SYSTEM
+    export Arrow_SOURCE=SYSTEM
+  else
+    export simdjson_SOURCE=AUTO
+    export Arrow_SOURCE=AUTO
+  fi
   if [ $ARCH == 'x86_64' ]; then
     make $COMPILE_TYPE $NUM_THREADS_OPTS EXTRA_CMAKE_FLAGS="${COMPILE_OPTION}"
   elif [[ "$ARCH" == 'arm64' || "$ARCH" == 'aarch64' || "$ARCH" == "ppc64le" ]]; then

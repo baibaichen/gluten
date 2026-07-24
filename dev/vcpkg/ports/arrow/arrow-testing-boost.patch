@@ -50,7 +50,7 @@ index c911f0f..84673d4 100644
 +++ b/cpp/src/arrow/CMakeLists.txt
 @@ -645,11 +645,11 @@ else()
  endif()
- 
+
  set(ARROW_TESTING_SHARED_LINK_LIBS arrow_shared ${ARROW_GTEST_GTEST})
 -set(ARROW_TESTING_SHARED_PRIVATE_LINK_LIBS arrow::flatbuffers RapidJSON Boost::process)
 +set(ARROW_TESTING_SHARED_PRIVATE_LINK_LIBS arrow::flatbuffers RapidJSON Boost::filesystem Boost::system)

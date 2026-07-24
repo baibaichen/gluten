@@ -17,6 +17,6 @@ index f3e4902..65ceac8 100644
    endif()
 -endif()
 +
- 
+
  function(extract_thrift_version)
    if(ThriftAlt_INCLUDE_DIR)

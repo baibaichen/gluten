@@ -45,6 +45,7 @@ VELOX_BRANCH=""
 VELOX_HOME="$GLUTEN_DIR/ep/build-velox/build/velox_ep"
 VELOX_PARAMETER=""
 BUILD_ARROW=ON
+BUILD_ARROW_EXPLICIT=OFF
 SPARK_VERSION=ALL
 
 # set default number of threads as cpu cores minus 2
@@ -141,6 +142,7 @@ do
         ;;
         --build_arrow=*)
         BUILD_ARROW="${arg#*=}"
+        BUILD_ARROW_EXPLICIT=ON
         shift # Remove argument name from processing
         ;;
         --num_threads=*)
@@ -157,6 +159,14 @@ do
         ;;
     esac
 done
+
+if [ "$ENABLE_VCPKG" = "ON" ]; then
+    if [ "$BUILD_ARROW_EXPLICIT" = "ON" ] && [ "$BUILD_ARROW" = "ON" ]; then
+        echo "ERROR: --build_arrow=ON is deprecated with --enable_vcpkg=ON; Arrow is managed by Gluten vcpkg." >&2
+        exit 1
+    fi
+    BUILD_ARROW=OFF
+fi
 
 if [[ "$(uname)" == "Darwin" ]]; then
     export INSTALL_PREFIX=${INSTALL_PREFIX:-${VELOX_HOME}/deps-install}

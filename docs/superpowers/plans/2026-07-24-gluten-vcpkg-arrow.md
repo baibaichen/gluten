@@ -761,7 +761,7 @@ git commit -m "[VL] Isolate vcpkg dependency discovery" \
 **Files:**
 - Verify: all files changed in Tasks 2-6
 
-- [ ] **Step 1: Validate JSON and shell syntax**
+- [x] **Step 1: Validate JSON and shell syntax**
 
 Run:
 
@@ -777,7 +777,7 @@ bash -n ep/build-velox/src/build-velox.sh
 
 Expected: every command exits zero.
 
-- [ ] **Step 2: Reconfirm Arrow and Boost artifacts**
+- [x] **Step 2: Reconfirm Arrow and Boost artifacts**
 
 Run:
 
@@ -799,7 +799,7 @@ fi
 
 Expected: all Arrow files exist and the Boost check prints nothing.
 
-- [ ] **Step 3: Verify the original vcpkg build command**
+- [x] **Step 3: Verify the original vcpkg build command**
 
 Run:
 
@@ -820,7 +820,7 @@ Expected: the build uses SYSTEM Arrow from `vcpkg_installed`, does not create
 an Arrow ExternalProject, and does not reproduce the shared-zstd or
 Boost.Process compilation errors.
 
-- [ ] **Step 4: Check the final diff**
+- [x] **Step 4: Check the final diff**
 
 Run:
 

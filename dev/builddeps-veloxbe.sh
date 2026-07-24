@@ -160,7 +160,11 @@ do
     esac
 done
 
-if [ "$ENABLE_VCPKG" = "ON" ]; then
+function vcpkg_is_active {
+    [ "$ENABLE_VCPKG" = "ON" ] || [ -n "${GLUTEN_VCPKG_ENABLED:-}" ]
+}
+
+if vcpkg_is_active; then
     if [ "$BUILD_ARROW_EXPLICIT" = "ON" ] && [ "$BUILD_ARROW" = "ON" ]; then
         echo "ERROR: --build_arrow=ON is deprecated with --enable_vcpkg=ON; Arrow is managed by Gluten vcpkg." >&2
         exit 1
@@ -233,7 +237,7 @@ concat_velox_param
 export VELOX_HOME
 
 function build_arrow {
-  if [ "$ENABLE_VCPKG" = "ON" ]; then
+  if vcpkg_is_active; then
     echo "ERROR: build_arrow is deprecated with --enable_vcpkg=ON; Arrow is managed by Gluten vcpkg." >&2
     return 1
   fi

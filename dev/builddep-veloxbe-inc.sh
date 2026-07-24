@@ -139,6 +139,7 @@ else
         export VCPKG_TRIPLET="x64-linux-avx"
     fi
 
+    export VCPKG_MANIFEST_DIR="$GLUTEN_DIR/dev/vcpkg"
     export VCPKG_TRIPLET_INSTALL_DIR="$GLUTEN_DIR/dev/vcpkg/vcpkg_installed/${VCPKG_TRIPLET}"
     export CMAKE_TOOLCHAIN_FILE="$GLUTEN_DIR/dev/vcpkg/toolchain.cmake"
     unset PKG_CONFIG_PATH

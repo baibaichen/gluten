@@ -477,7 +477,7 @@ git commit -m "[VL] Deprecate vcpkg build-arrow path" \
 **Files:**
 - Modify: `ep/build-velox/src/build-velox.sh:179-180`
 
-- [ ] **Step 1: Replace unconditional AUTO exports**
+- [x] **Step 1: Replace unconditional AUTO exports**
 
 Replace:
 
@@ -499,7 +499,7 @@ else
 fi
 ```
 
-- [ ] **Step 2: Configure and build the Velox target**
+- [x] **Step 2: Configure and build the Velox target**
 
 Run:
 
@@ -524,7 +524,7 @@ set -o pipefail
 Expected: Velox configuration reports SYSTEM Arrow from
 `dev/vcpkg/vcpkg_installed`, and no `arrow_ep` build is started.
 
-- [ ] **Step 3: Verify the selected dependency sources**
+- [x] **Step 3: Verify the selected dependency sources**
 
 Run:
 
@@ -543,7 +543,7 @@ find ep/build-velox/build/velox_ep/_build/debug \
 Expected: both source values are SYSTEM and no Arrow ExternalProject path is
 printed.
 
-- [ ] **Step 4: Commit SYSTEM source selection**
+- [x] **Step 4: Commit SYSTEM source selection**
 
 Run:
 

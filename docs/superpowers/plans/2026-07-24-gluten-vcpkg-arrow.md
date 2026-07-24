@@ -379,7 +379,7 @@ git commit -m "[VL] Manage Arrow through Gluten vcpkg" \
 **Files:**
 - Modify: `dev/builddeps-veloxbe.sh:47,142-145,160-205`
 
-- [ ] **Step 1: Add the explicit-option state**
+- [x] **Step 1: Add the explicit-option state**
 
 Immediately after `BUILD_ARROW=ON`, add:
 
@@ -397,7 +397,7 @@ shift
 ;;
 ```
 
-- [ ] **Step 2: Add the failing vcpkg-mode guard**
+- [x] **Step 2: Add the failing vcpkg-mode guard**
 
 After argument parsing and before sourcing `dev/vcpkg/env.sh`, add:
 
@@ -411,7 +411,7 @@ if [ "$ENABLE_VCPKG" = "ON" ]; then
 fi
 ```
 
-- [ ] **Step 3: Verify explicit ON fails before vcpkg starts**
+- [x] **Step 3: Verify explicit ON fails before vcpkg starts**
 
 Run:
 
@@ -431,7 +431,7 @@ grep -F -- '--build_arrow=ON is deprecated' <<<"$output"
 Expected: nonzero status, deprecation message present, no dependency
 installation starts.
 
-- [ ] **Step 4: Verify non-vcpkg behavior is unchanged**
+- [x] **Step 4: Verify non-vcpkg behavior is unchanged**
 
 Run:
 
@@ -445,7 +445,7 @@ bash -x ./dev/builddeps-veloxbe.sh \
 Expected: trace contains the original default `BUILD_ARROW=ON` and the command
 exits zero.
 
-- [ ] **Step 5: Verify omitted vcpkg `build_arrow` resolves to OFF**
+- [x] **Step 5: Verify omitted vcpkg `build_arrow` resolves to OFF**
 
 Run:
 
@@ -461,7 +461,7 @@ grep -F 'BUILD_ARROW=OFF' /tmp/gluten-vcpkg-build-arrow-default.log
 Expected: vcpkg dependency initialization may run, the resolved value is OFF,
 and the independent Arrow script is not sourced.
 
-- [ ] **Step 6: Commit the argument behavior**
+- [x] **Step 6: Commit the argument behavior**
 
 Run:
 

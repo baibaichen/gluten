@@ -563,7 +563,7 @@ git commit -m "[VL] Use vcpkg Arrow in Velox builds" \
 - Candidate modify: `dev/builddeps-veloxbe.sh:275-278`
 - Candidate modify: `ep/build-velox/src/build-velox.sh:127-129`
 
-- [ ] **Step 1: Stop importing arbitrary CMake prefixes**
+- [x] **Step 1: Stop importing arbitrary CMake prefixes**
 
 Remove from `dev/vcpkg/toolchain.cmake`:
 
@@ -572,7 +572,7 @@ Remove from `dev/vcpkg/toolchain.cmake`:
 set(CMAKE_PREFIX_PATH $ENV{CMAKE_PREFIX_PATH})
 ```
 
-- [ ] **Step 2: Add vcpkg package isolation after the standard toolchain**
+- [x] **Step 2: Add vcpkg package isolation after the standard toolchain**
 
 Immediately after:
 
@@ -607,7 +607,7 @@ unset(GLUTEN_VCPKG_IGNORED_PREFIXES)
 Do not set `CMAKE_SYSTEM_IGNORE_PREFIX_PATH` or
 `CMAKE_SYSTEM_IGNORE_PATH`.
 
-- [ ] **Step 3: Lock pkg-config to vcpkg**
+- [x] **Step 3: Lock pkg-config to vcpkg**
 
 Replace `dev/vcpkg/env.sh`'s `PKG_CONFIG_PATH` export with:
 
@@ -619,7 +619,7 @@ export PKG_CONFIG_LIBDIR=${VCPKG_TRIPLET_INSTALL_DIR}/lib/pkgconfig:${VCPKG_TRIP
 In `dev/builddep-veloxbe-inc.sh`, replace the manual `PKG_CONFIG_PATH` export
 with the same two lines.
 
-- [ ] **Step 4: Keep explicit install prefixes out of Gluten dependency search**
+- [x] **Step 4: Keep explicit install prefixes out of Gluten dependency search**
 
 In `dev/builddeps-veloxbe.sh`, change the `INSTALL_PREFIX` handling to:
 
@@ -643,7 +643,7 @@ if [ -n "${INSTALL_PREFIX:-}" ]; then
 fi
 ```
 
-- [ ] **Step 5: Verify environment poisoning is removed**
+- [x] **Step 5: Verify environment poisoning is removed**
 
 Run:
 
@@ -670,7 +670,7 @@ env \
 Expected: the inherited pkg-config path is unset and only vcpkg directories
 remain.
 
-- [ ] **Step 6: Reconfigure the requested Velox matrix**
+- [x] **Step 6: Reconfigure the requested Velox matrix**
 
 Remove only the generated Velox CMake build directory, not the source tree:
 
@@ -700,7 +700,7 @@ env \
 
 Expected: configuration and build succeed without using the poison prefixes.
 
-- [ ] **Step 7: Apply the case-by-case decision gate**
+- [x] **Step 7: Apply the case-by-case decision gate**
 
 If Step 6 fails on a non-Arrow dependency:
 
@@ -715,7 +715,7 @@ If Step 6 fails on a non-Arrow dependency:
 
 Do not commit Task 6 changes until this decision gate passes.
 
-- [ ] **Step 8: Audit resolved managed dependency paths**
+- [x] **Step 8: Audit resolved managed dependency paths**
 
 Run:
 
@@ -733,7 +733,7 @@ Review every hit. Compiler/runtime SDK hits allowed by the design must be
 identified explicitly. Any Folly, Arrow, Boost, zstd, gflags, glog, protobuf,
 or other vcpkg-managed include/library hit blocks the commit.
 
-- [ ] **Step 9: Commit isolation only if the matrix passes**
+- [x] **Step 9: Commit isolation only if the matrix passes**
 
 Run:
 

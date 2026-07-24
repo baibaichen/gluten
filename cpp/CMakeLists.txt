@@ -191,6 +191,9 @@ find_package(Threads REQUIRED)
 find_package(JNI REQUIRED)
 
 find_package(glog REQUIRED)
+if(ENABLE_GLUTEN_VCPKG AND TARGET glog::glog AND NOT TARGET google::glog)
+  add_library(google::glog ALIAS glog::glog)
+endif()
 
 if(BUILD_TESTS)
   set(GLUTEN_GTEST_MIN_VERSION "1.13.0")

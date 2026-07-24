@@ -287,8 +287,10 @@ function build_gluten_cpp {
   )
 
   if [ -n "${INSTALL_PREFIX:-}" ]; then
-    GLUTEN_CMAKE_OPTIONS+=("-DCMAKE_PREFIX_PATH=$INSTALL_PREFIX")
     GLUTEN_CMAKE_OPTIONS+=("-DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX")
+    if [ "$ENABLE_VCPKG" != "ON" ]; then
+      GLUTEN_CMAKE_OPTIONS+=("-DCMAKE_PREFIX_PATH=$INSTALL_PREFIX")
+    fi
   fi
   if [ $OS == 'Darwin' ]; then
     if [[ -n "${INSTALL_PREFIX:-}" && "${INSTALL_PREFIX:-}" != "/usr/local" && "${INSTALL_PREFIX:-}" != /usr/local/* ]]; then

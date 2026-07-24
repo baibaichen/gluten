@@ -251,7 +251,7 @@ Expected: JSON validation succeeds and both grep commands find one line.
 - Modify: `dev/vcpkg/vcpkg.json`
 - Modify: `dev/vcpkg/vcpkg-configuration.json`
 
-- [ ] **Step 1: Add Arrow to the Velox feature**
+- [x] **Step 1: Add Arrow to the Velox feature**
 
 Add this entry to the `velox` dependencies in `dev/vcpkg/vcpkg.json`:
 
@@ -266,7 +266,7 @@ Add this entry to the `velox` dependencies in `dev/vcpkg/vcpkg.json`:
 Place it near the compression and Boost dependencies so the native dependency
 group remains readable.
 
-- [ ] **Step 2: Route all Boost modules to the 1.84 baseline**
+- [x] **Step 2: Route all Boost modules to the 1.84 baseline**
 
 Add this registry to `dev/vcpkg/vcpkg-configuration.json`:
 
@@ -282,7 +282,7 @@ Add this registry to `dev/vcpkg/vcpkg-configuration.json`:
 Do not change the root `builtin-baseline`; unrelated packages must stay on the
 current baseline.
 
-- [ ] **Step 3: Validate both manifests**
+- [x] **Step 3: Validate both manifests**
 
 Run:
 
@@ -293,7 +293,7 @@ python3 -m json.tool dev/vcpkg/vcpkg-configuration.json >/dev/null
 
 Expected: both commands exit zero.
 
-- [ ] **Step 4: Re-run the formerly failing feature probe**
+- [x] **Step 4: Re-run the formerly failing feature probe**
 
 Run:
 
@@ -315,7 +315,7 @@ SYSTEM dependency, add that package to
 `dev/vcpkg/ports/arrow/vcpkg.json`, rerun the command, and record the exact
 dependency in the commit message.
 
-- [ ] **Step 5: Verify Arrow artifacts and configuration**
+- [x] **Step 5: Verify Arrow artifacts and configuration**
 
 Run:
 
@@ -332,7 +332,7 @@ grep -R '^ARROW_TESTING:BOOL=ON$' \
 
 Expected: all files exist and both cache values are found.
 
-- [ ] **Step 6: Verify the complete Boost family version**
+- [x] **Step 6: Verify the complete Boost family version**
 
 Run:
 
@@ -345,7 +345,7 @@ dev/vcpkg/.vcpkg/vcpkg list \
 
 Expected: no output. Any output is a mixed Boost graph and blocks progress.
 
-- [ ] **Step 7: Commit the vcpkg package**
+- [x] **Step 7: Commit the vcpkg package**
 
 Run the repository header check:
 

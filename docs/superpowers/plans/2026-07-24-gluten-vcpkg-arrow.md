@@ -832,3 +832,15 @@ git --no-pager log -5 --oneline
 
 Expected: no whitespace errors; only the user's pre-existing
 `tools/gluten-it/spark-home/` remains unrelated and untracked.
+
+- [x] **Step 5: Audit compiler-resolved host headers**
+
+Run:
+
+```bash
+if ninja -C cpp/build -t deps | grep -F '/usr/local/include'; then
+  exit 1
+fi
+```
+
+Expected: no compiled object depends on headers from `/usr/local/include`.

@@ -354,12 +354,19 @@ Run the repository header check:
 ```
 
 If the checkout still lacks `dev/license-header.py`, run the tracked checker
-directly for changed CMake files:
+directly for changed supported files. Its configured exclusions intentionally
+skip `dev/*`; check changed non-`dev` CMake modules explicitly because the
+tracked checker does not recognize the `.cmake` extension:
 
 ```bash
-PYTHONPATH=.github/workflows/util \
-  .github/workflows/util/license-header.py -k \
-  dev/vcpkg/ports/arrow/portfile.cmake
+git diff --name-only origin/main...HEAD |
+  grep -E '(^|/)CMakeLists\.txt$|\.sh$' |
+  PYTHONPATH=.github/workflows/util \
+    .github/workflows/util/license-header.py -k -
+
+for file in $(git diff --name-only origin/main...HEAD | grep -E '^(cpp|ep)/.*\.cmake$'); do
+  head -n 20 "$file" | grep -q 'Licensed to the Apache Software Foundation'
+done
 ```
 
 Then commit:
@@ -779,10 +786,15 @@ triplet=dev/vcpkg/vcpkg_installed/x64-linux-avx
 test -f "$triplet/lib/libarrow.a"
 test -f "$triplet/lib/libarrow_testing.a"
 test -f "$triplet/include/arrow/api.h"
-dev/vcpkg/.vcpkg/vcpkg list \
-  --x-install-root=dev/vcpkg/vcpkg_installed |
-  awk -F: '/^boost-/{print $1, $2}' |
-  grep -v ' 1.84.0'
+boost_versions=$(
+  dev/vcpkg/.vcpkg/vcpkg list \
+    --x-install-root=dev/vcpkg/vcpkg_installed |
+    awk '$1 ~ /^boost-/ && $2 ~ /^[0-9]/ {print $2}'
+)
+test -n "$boost_versions"
+if grep -vE '^1\.84\.0(#[0-9]+)?$' <<<"$boost_versions"; then
+  exit 1
+fi
 ```
 
 Expected: all Arrow files exist and the Boost check prints nothing.

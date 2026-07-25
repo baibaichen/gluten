@@ -866,3 +866,10 @@ fi
 
 Expected: no production caller invokes the deprecated vcpkg Arrow installer or
 rewrites `--build_arrow=OFF` to `ON`. Non-vcpkg Arrow callers remain supported.
+
+### Task 8: Synchronize the Final Design
+
+- [x] **Step 1: Compare the design against the reviewed implementation**
+- [x] **Step 2: Document final package discovery and static link behavior**
+- [x] **Step 3: Close and document the incremental SYSTEM-source gap**
+- [x] **Step 4: Commit the synchronized design separately**

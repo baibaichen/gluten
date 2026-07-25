@@ -844,3 +844,25 @@ fi
 ```
 
 Expected: no compiled object depends on headers from `/usr/local/include`.
+
+- [x] **Step 6: Audit production vcpkg Arrow callers**
+
+Run:
+
+```bash
+if rg -U -n \
+  'enable_vcpkg=ON(?s:.{0,500}?)(--build_arrow=ON|[[:space:]]build_arrow([;[:space:]"]|$))' \
+  .github dev/docker tools/workload \
+  -g 'Dockerfile*' -g '*.yml' -g '*.yaml' -g '*.ipynb'; then
+  exit 1
+fi
+
+if rg -n \
+  's/--build_arrow=OFF/--build_arrow=ON/|package-vcpkg\.sh[^\\n]*--build_arrow=ON' \
+  .github tools/workload -g '*.yml' -g '*.yaml' -g '*.ipynb'; then
+  exit 1
+fi
+```
+
+Expected: no production caller invokes the deprecated vcpkg Arrow installer or
+rewrites `--build_arrow=OFF` to `ON`. Non-vcpkg Arrow callers remain supported.

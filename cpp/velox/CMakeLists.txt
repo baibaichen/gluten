@@ -354,9 +354,8 @@ if(BUILD_TESTS)
     facebook::velox::constrained_vector_generator
     ${VELOX_BUILD_PATH}/velox/vector/fuzzer/libvelox_constrained_vector_generator.a
   )
-  target_link_libraries(
-    facebook::velox::constrained_vector_generator
-    INTERFACE facebook::velox::vector_fuzzer_util)
+  target_link_libraries(facebook::velox::constrained_vector_generator
+                        INTERFACE facebook::velox::vector_fuzzer_util)
   import_library(
     facebook::velox::vector_fuzzer
     ${VELOX_BUILD_PATH}/velox/vector/fuzzer/libvelox_vector_fuzzer.a)
@@ -369,8 +368,7 @@ if(BUILD_TESTS)
     ${VELOX_BUILD_PATH}/velox/exec/tests/utils/libvelox_exec_test_lib.a)
   target_link_libraries(
     facebook::velox::exec_test_lib
-    INTERFACE facebook::velox::vector_test_lib
-              facebook::velox::vector_fuzzer
+    INTERFACE facebook::velox::vector_test_lib facebook::velox::vector_fuzzer
               facebook::velox::dwio_common_test
               facebook::velox::file_test_utils)
   target_link_libraries(velox PUBLIC facebook::velox::exec_test_lib)

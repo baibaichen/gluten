@@ -149,7 +149,12 @@ fi
 
 # Step 2: Build Velox
 step 2 "Building Velox (incremental)"
-cmake --build "$VELOX_BUILD_DIR" --target velox -j $NUM_THREADS
+env \
+  VELOX_DEPENDENCY_SOURCE=SYSTEM \
+  simdjson_SOURCE=SYSTEM \
+  Arrow_SOURCE=SYSTEM \
+  GLUTEN_VCPKG_PREFER_CONFIG=OFF \
+  cmake --build "$VELOX_BUILD_DIR" --target velox -j $NUM_THREADS
 echo "[Step 2/4] Velox build complete."
 
 # Step 3: Build Gluten C++

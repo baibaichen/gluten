@@ -16,7 +16,7 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
-import org.apache.spark.sql.GlutenExpressionOffloadTracker
+import org.apache.spark.sql.{GlutenExpressionOffloadTracker, GlutenExpressionTestsTrait}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateUnsafeProjection
 import org.apache.spark.sql.catalyst.util.DateTimeConstants._
@@ -37,7 +37,8 @@ import java.util.concurrent.TimeUnit._
 class GlutenDateExpressionsSuite
   extends DateExpressionsSuite
   with GlutenExpressionOffloadTracker
-  with GlutenTestsTrait {
+  with GlutenTestsTrait
+  with GlutenExpressionTestsTrait {
   override protected def offloadCategory: String = "datetime"
   override def testIntegralInput(testFunc: Number => Unit): Unit = {
     def checkResult(input: Long): Unit = {

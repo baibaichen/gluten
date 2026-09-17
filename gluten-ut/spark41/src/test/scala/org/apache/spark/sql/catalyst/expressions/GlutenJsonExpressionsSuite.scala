@@ -16,6 +16,6 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
-import org.apache.spark.sql.GlutenTestsTrait
+import org.apache.spark.sql.GlutenExpressionTestsTrait
 
-class GlutenJsonExpressionsSuite extends JsonExpressionsSuite with GlutenTestsTrait {}
+class GlutenJsonExpressionsSuite extends JsonExpressionsSuite with GlutenExpressionTestsTrait {}

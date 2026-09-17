@@ -16,6 +16,10 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
-import org.apache.spark.sql.shim
+import org.apache.spark.sql.GlutenExpressionTestsTrait
 
-class GlutenTimeExpressionsSuite extends TimeExpressionsSuite with shim.GlutenTestsTrait {}
+class GlutenTimeExpressionsSuite extends TimeExpressionsSuite with GlutenExpressionTestsTrait {
+  override protected def prepareQueryExpression(expression: Expression): Expression = {
+    replace(super.prepareQueryExpression(expression))
+  }
+}

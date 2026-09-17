@@ -1,0 +1,202 @@
+{
+  "spark_source_commit": "ed2ca238cdca06c151a3400932b2f1d374f02b01",
+  "inventory_baseline": "e06cf951b4a245e31059a5061dd98f4acd08888f",
+  "original_reference_only_suites": [
+    "org.apache.spark.sql.catalyst.expressions.GlutenCallMethodViaReflectionSuite",
+    "org.apache.spark.sql.catalyst.expressions.GlutenCastWithAnsiOnSuite",
+    "org.apache.spark.sql.catalyst.expressions.GlutenCollationExpressionSuite",
+    "org.apache.spark.sql.catalyst.expressions.GlutenCollationRegexpExpressionsSuite",
+    "org.apache.spark.sql.catalyst.expressions.GlutenCsvExpressionsSuite",
+    "org.apache.spark.sql.catalyst.expressions.GlutenScalaUDFSuite",
+    "org.apache.spark.sql.catalyst.expressions.GlutenToPrettyStringSuite"
+  ],
+  "registered_suites": {
+    "native_scalar_candidates": [
+      "org.apache.spark.sql.catalyst.expressions.GlutenArithmeticExpressionSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenBitwiseExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenCallMethodViaReflectionSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenCastWithAnsiOffSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenCastWithAnsiOnSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenCollationExpressionSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenCollationRegexpExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenCollectionExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenComplexTypeSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenConditionalExpressionSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenConstraintExpressionSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenCsvExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenDateExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenDecimalExpressionSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenHashExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenHigherOrderFunctionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenIntervalExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenJsonExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenLiteralExpressionSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenMathExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenMiscExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenNullExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenPredicateSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenRandomSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenScalaUDFSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenStringExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenTimeExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenToPrettyStringSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenTryCastSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenTryEvalSuite"
+    ],
+    "mixed_scalar_and_query": [
+      "org.apache.spark.sql.catalyst.expressions.GlutenRegexpExpressionsSuite"
+    ],
+    "spark_mechanisms": [
+      "org.apache.spark.sql.catalyst.expressions.GlutenAttributeMapSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenAttributeResolutionSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenAttributeSetSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenBindReferencesSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenBitmapExpressionUtilsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenCanonicalizeSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenCodeGenerationSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenCodeGeneratorWithInterpretedFallbackSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenDecimalPrecisionSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenExprIdSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenExpressionEvalHelperSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenExpressionImplUtilsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenExpressionSQLBuilderSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenExpressionSetSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenExtractPredicatesWithinOutputSetSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenHexSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenMutableProjectionSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenNamedExpressionSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenObjectExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenOrderingSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenSchemaPruningSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenSelectedFieldSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenSortOrderExpressionsSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenSubexpressionEliminationSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenTimeWindowSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenUnsafeRowConverterSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenUnwrapUDTExpressionSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenV2ExpressionUtilsSuite"
+    ],
+    "query_dependent": [
+      "org.apache.spark.sql.catalyst.expressions.GlutenDynamicPruningSubquerySuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenGeneratorExpressionSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenNondeterministicSuite",
+      "org.apache.spark.sql.catalyst.expressions.GlutenValidateExternalTypeSuite"
+    ],
+    "aggregate_mechanisms": [
+      "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenAggregateExpressionSuite",
+      "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenApproxCountDistinctForIntervalsSuite",
+      "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenApproxTopKSuite",
+      "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenApproximatePercentileSuite",
+      "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenCentralMomentAggSuite",
+      "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenCountMinSketchAggSuite",
+      "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenCovarianceAggSuite",
+      "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenDatasketchesHllSketchSuite",
+      "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenFirstLastTestSuite",
+      "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenHistogramNumericSuite",
+      "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenHyperLogLogPlusPlusSuite",
+      "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenProductAggSuite",
+      "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenThetasketchesAggSuite"
+    ]
+  },
+  "unregistered_suites": {
+    "org.apache.spark.sql.catalyst.expressions.GlutenCastSuite": "Not registered in VeloxTestSettings.",
+    "org.apache.spark.sql.catalyst.expressions.GlutenXmlExpressionsSuite": "Not registered in VeloxTestSettings; the existing comment records seven failures.",
+    "org.apache.spark.sql.catalyst.expressions.aggregate.GlutenPercentileSuite": "Not registered in VeloxTestSettings."
+  },
+  "excluded_tests": {
+    "org.apache.spark.sql.catalyst.expressions.GlutenArithmeticExpressionSuite": [
+      "SPARK-45786: Decimal multiply, divide, remainder, quot"
+    ],
+    "org.apache.spark.sql.catalyst.expressions.GlutenCastWithAnsiOffSuite": [
+      "Process Infinity, -Infinity, NaN in case insensitive manner",
+      "data type casting",
+      "cast string to timestamp",
+      "cast from timestamp II",
+      "SPARK-36286: invalid string cast to timestamp",
+      "SPARK-39749: cast Decimal to string",
+      "Fast fail for cast string type to decimal type"
+    ],
+    "org.apache.spark.sql.catalyst.expressions.GlutenTryCastSuite": [
+      "Process Infinity, -Infinity, NaN in case insensitive manner",
+      "cast from timestamp II",
+      "ANSI mode: Throw exception on casting out-of-range value to byte type",
+      "ANSI mode: Throw exception on casting out-of-range value to short type",
+      "ANSI mode: Throw exception on casting out-of-range value to int type",
+      "ANSI mode: Throw exception on casting out-of-range value to long type",
+      "cast from invalid string to numeric should throw NumberFormatException",
+      "SPARK-26218: Fix the corner case of codegen when casting float to Integer",
+      "data type casting",
+      "cast string to timestamp",
+      "cast from array III",
+      "cast from struct III",
+      "Casting to char/varchar",
+      "SPARK-39749: cast Decimal to string",
+      "Fast fail for cast string type to decimal type in ansi mode"
+    ],
+    "org.apache.spark.sql.catalyst.expressions.GlutenCollectionExpressionsSuite": [
+      "Shuffle",
+      "Gluten - Shuffle",
+      "MapFromEntries"
+    ],
+    "org.apache.spark.sql.catalyst.expressions.GlutenDateExpressionsSuite": [
+      "TIMESTAMP_MICROS",
+      "unix_timestamp",
+      "to_unix_timestamp",
+      "Hour",
+      "SPARK-33498: GetTimestamp,UnixTimestamp,ToUnixTimestamp with parseError",
+      "DateFormat",
+      "to_timestamp exception mode",
+      "from_unixtime",
+      "SPARK-42635: timestampadd near daylight saving transition",
+      "Gluten - from_unixtime",
+      "months_between"
+    ],
+    "org.apache.spark.sql.catalyst.expressions.GlutenJsonExpressionsSuite": [
+      "$.store.book",
+      "$",
+      "$.store.book[0]",
+      "from_json - invalid data"
+    ],
+    "org.apache.spark.sql.catalyst.expressions.GlutenLiteralExpressionSuite": [
+      "default",
+      "SPARK-37967: Literal.create support ObjectType"
+    ],
+    "org.apache.spark.sql.catalyst.expressions.GlutenMathExpressionsSuite": [
+      "round/bround/floor/ceil"
+    ],
+    "org.apache.spark.sql.catalyst.expressions.GlutenRegexpExpressionsSuite": [
+      "SPLIT"
+    ],
+    "org.apache.spark.sql.catalyst.expressions.GlutenComplexTypeSuite": [
+      "CreateMap",
+      "MapFromArrays",
+      "StringToMap"
+    ]
+  },
+  "ignored_tests": {
+    "org.apache.spark.sql.catalyst.expressions.GlutenDateExpressionsSuite": [
+      "Gluten - unix_timestamp",
+      "Gluten - to_unix_timestamp",
+      "Gluten - SPARK-42635: timestampadd near daylight saving transition"
+    ]
+  },
+  "commented_checks": {
+    "org.apache.spark.sql.catalyst.expressions.GlutenDateExpressionsSuite": [
+      "checkResult(Int.MaxValue)",
+      "checkResult(Int.MinValue)",
+      "checkResult(Int.MaxValue.toLong + 100)",
+      "checkResult(Int.MinValue.toLong - 100)"
+    ],
+    "org.apache.spark.sql.catalyst.expressions.GlutenRegexpExpressionsSuite": [
+      "checkEvaluation(RegExpReplace(s, null, r), null, row5)",
+      "checkEvaluation(RegExpReplace(s, null, r, 4), null, row5)"
+    ],
+    "org.apache.spark.sql.catalyst.expressions.GlutenTryCastSuite": [
+      "checkEvaluation(cast(\"6E-120\", DecimalType(38, 0)), Decimal(\"0\"))"
+    ]
+  },
+  "adapter_suites": [
+    "org.apache.spark.sql.catalyst.expressions.GlutenNativeExpressionAdapterSuite",
+    "org.apache.spark.sql.catalyst.expressions.GlutenExpressionRoutingSuite"
+  ]
+}

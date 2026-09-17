@@ -228,7 +228,21 @@ class VeloxSparkPlanExecApi extends SparkPlanExecApi with Logging {
       case LambdaFunction(_, arguments, _) if arguments.size == 2 =>
         throw new GlutenNotSupportException(
           "exists on array with lambda using index argument is not supported yet")
-      case _ => GenericExpressionTransformer(substraitExprName, Seq(argument, function), expr)
+      case _ =>
+        val predicate = function match {
+          case lambda: LambdaFunctionTransformer if !expr.followThreeValuedLogic =>
+            // Ignore NULL predicates in legacy mode, without changing NULL-array behavior.
+            val body = Coalesce(Seq(lambda.original.function, Literal.FalseLiteral))
+            lambda.copy(
+              function = GenericExpressionTransformer(
+                ExpressionNames.COALESCE,
+                Seq(lambda.function, LiteralTransformer(Literal.FalseLiteral)),
+                body),
+              original = lambda.original.copy(function = body)
+            )
+          case other => other
+        }
+        GenericExpressionTransformer(substraitExprName, Seq(argument, predicate), expr)
     }
   }
 

@@ -14,10 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.expressions
+package org.apache.spark.sql
 
-import org.apache.spark.sql.GlutenExpressionTestsTrait
-
-class GlutenHigherOrderFunctionsSuite
-  extends HigherOrderFunctionsSuite
-  with GlutenExpressionTestsTrait {}
+/** Keep ClickHouse's existing execution path independent of the Velox test adapter. */
+trait GlutenExpressionTestsTrait extends GlutenTestsTrait

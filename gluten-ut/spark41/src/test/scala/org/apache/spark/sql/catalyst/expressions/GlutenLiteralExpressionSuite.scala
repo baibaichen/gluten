@@ -16,7 +16,7 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
-import org.apache.spark.sql.GlutenTestsTrait
+import org.apache.spark.sql.{GlutenExpressionTestsTrait, GlutenTestsTrait}
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.internal.SQLConf
@@ -26,7 +26,10 @@ import org.apache.spark.unsafe.types.CalendarInterval
 import java.nio.charset.StandardCharsets
 import java.time.{Instant, LocalDate}
 
-class GlutenLiteralExpressionSuite extends LiteralExpressionSuite with GlutenTestsTrait {
+class GlutenLiteralExpressionSuite
+  extends LiteralExpressionSuite
+  with GlutenTestsTrait
+  with GlutenExpressionTestsTrait {
   testGluten("default") {
     checkEvaluation(Literal.default(BooleanType), false)
     checkEvaluation(Literal.default(ByteType), 0.toByte)

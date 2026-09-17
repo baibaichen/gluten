@@ -16,6 +16,8 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
-import org.apache.spark.sql.GlutenTestsTrait
+import org.apache.spark.sql.GlutenExpressionTestsTrait
 
-class GlutenBitwiseExpressionsSuite extends BitwiseExpressionsSuite with GlutenTestsTrait {}
+class GlutenBitwiseExpressionsSuite
+  extends BitwiseExpressionsSuite
+  with GlutenExpressionTestsTrait {}

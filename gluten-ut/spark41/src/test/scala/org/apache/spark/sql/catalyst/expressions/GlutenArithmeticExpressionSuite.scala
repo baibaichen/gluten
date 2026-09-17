@@ -16,13 +16,14 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
-import org.apache.spark.sql.GlutenExpressionOffloadTracker
+import org.apache.spark.sql.{GlutenExpressionOffloadTracker, GlutenExpressionTestsTrait}
 import org.apache.spark.sql.shim.GlutenTestsTrait
 
 class GlutenArithmeticExpressionSuite
   extends ArithmeticExpressionSuite
   with GlutenExpressionOffloadTracker
-  with GlutenTestsTrait {
+  with GlutenTestsTrait
+  with GlutenExpressionTestsTrait {
   override protected def panoramaMeta(expression: Expression): Map[String, String] =
     expression match {
       case _: Add => Map("operator" -> "Add")

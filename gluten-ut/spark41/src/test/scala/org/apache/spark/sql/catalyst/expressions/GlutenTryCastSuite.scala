@@ -17,7 +17,7 @@
 package org.apache.spark.sql.catalyst.expressions
 
 import org.apache.spark.SparkThrowable
-import org.apache.spark.sql.GlutenExpressionOffloadTracker
+import org.apache.spark.sql.{GlutenExpressionOffloadTracker, GlutenExpressionTestsTrait}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.DateTimeTestUtils.{withDefaultTimeZone, ALL_TIMEZONES, UTC, UTC_OPT}
 import org.apache.spark.sql.catalyst.util.DateTimeUtils.{fromJavaTimestamp, millisToMicros, TimeZoneUTC}
@@ -34,7 +34,8 @@ import scala.reflect.ClassTag
 class GlutenTryCastSuite
   extends TryCastSuite
   with GlutenExpressionOffloadTracker
-  with GlutenTestsTrait {
+  with GlutenTestsTrait
+  with GlutenExpressionTestsTrait {
   override protected def panoramaMeta(expression: Expression): Map[String, String] =
     expression match {
       case c: Cast =>

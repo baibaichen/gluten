@@ -16,6 +16,7 @@
  */
 
 #include "VeloxRuntime.h"
+#include "VeloxExpressionEvaluator.h"
 
 #include <operators/plannodes/RowVectorStream.h>
 
@@ -353,6 +354,18 @@ void VeloxRuntime::unregisterConnectors() {
     velox::connector::unregisterConnector(connectorIds_.iceberg);
     connectorIds_.icebergRegistered = false;
   }
+}
+
+std::shared_ptr<VeloxExpressionEvaluator> VeloxRuntime::compileExpression(const uint8_t* data, int32_t size) {
+  const auto partitionId = taskInfo_.has_value() ? taskInfo_->partitionId : 0;
+  auto queryCtx = velox::core::QueryCtx::create(
+      nullptr,
+      velox::core::QueryConfig{createVeloxQueryConfig(veloxCfg_, partitionId, "none")},
+      {},
+      nullptr,
+      memoryManager()->getAggregateMemoryPool());
+  return std::make_shared<VeloxExpressionEvaluator>(
+      memoryManager()->getLeafMemoryPool(), std::move(queryCtx), data, size);
 }
 
 void VeloxRuntime::parsePlan(const uint8_t* data, int32_t size) {

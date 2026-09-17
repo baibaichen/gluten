@@ -17,7 +17,9 @@
 
 #pragma once
 
+#include <memory>
 #include "config/GlutenConfig.h"
+#include "velox/common/config/Config.h"
 
 namespace gluten {
 // memory
@@ -262,5 +264,10 @@ const int32_t kGpuAsyncShuffleReaderThreadsDefault = 1;
 
 const std::string kStaticBackendConfPrefix = "spark.gluten.velox.";
 const std::string kDynamicBackendConfPrefix = "spark.gluten.sql.columnar.backend.velox.";
+
+std::unordered_map<std::string, std::string> createVeloxQueryConfig(
+    const std::shared_ptr<facebook::velox::config::ConfigBase>& config,
+    int32_t partitionId,
+    const std::string& spillStrategy);
 
 } // namespace gluten

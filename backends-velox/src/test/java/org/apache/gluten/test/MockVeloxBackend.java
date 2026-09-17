@@ -16,6 +16,7 @@
  */
 package org.apache.gluten.test;
 
+import org.apache.gluten.backendsapi.velox.VeloxListenerApi;
 import org.apache.gluten.config.GlutenConfig;
 import org.apache.gluten.config.GlutenCoreConfig;
 import org.apache.gluten.config.VeloxConfig;
@@ -24,12 +25,23 @@ import com.codahale.metrics.MetricRegistry;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.plugin.PluginContext;
 import org.apache.spark.resource.ResourceInformation;
+import org.apache.spark.util.SparkDirectoryUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.util.Map;
 
 public final class MockVeloxBackend {
+  /** Initializes native libraries without creating Spark RPC endpoints or a SparkContext. */
+  public static void initialize() {
+    initialize(newSparkConf());
+  }
+
+  public static void initialize(SparkConf conf) {
+    SparkDirectoryUtil.init(conf);
+    new VeloxListenerApi().initializeNative(conf, false);
+  }
+
   public static PluginContext mockPluginContext() {
     return new PluginContext() {
       @Override

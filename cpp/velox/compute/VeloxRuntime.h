@@ -32,6 +32,8 @@
 
 namespace gluten {
 
+class VeloxExpressionEvaluator;
+
 class VeloxRuntime final : public Runtime {
  public:
   explicit VeloxRuntime(
@@ -53,6 +55,8 @@ class VeloxRuntime final : public Runtime {
   void parseSplitInfo(const uint8_t* data, int32_t size, int32_t splitIndex) override;
 
   VeloxMemoryManager* memoryManager() override;
+
+  std::shared_ptr<VeloxExpressionEvaluator> compileExpression(const uint8_t* data, int32_t size);
 
   // FIXME This is not thread-safe?
   std::shared_ptr<ResultIterator> createResultIterator(

@@ -530,6 +530,13 @@ void WholeStageResultIterator::collectMetrics() {
 }
 
 std::unordered_map<std::string, std::string> WholeStageResultIterator::getQueryContextConf() {
+  return createVeloxQueryConfig(veloxCfg_, taskInfo_.partitionId, spillStrategy_);
+}
+
+std::unordered_map<std::string, std::string> createVeloxQueryConfig(
+    const std::shared_ptr<facebook::velox::config::ConfigBase>& veloxCfg_,
+    int32_t partitionId,
+    const std::string& spillStrategy_) {
   std::unordered_map<std::string, std::string> configs = {};
   // Find batch size from Spark confs. If found, set the preferred and max batch size.
   configs[velox::core::QueryConfig::kPreferredOutputBatchRows] =
@@ -648,7 +655,7 @@ std::unordered_map<std::string, std::string> WholeStageResultIterator::getQueryC
     // Disable driver cpu time slicing.
     configs[velox::core::QueryConfig::kDriverCpuTimeSliceLimitMs] = "0";
 
-    configs[SparkQueryConfig::qualify(SparkQueryConfig::kPartitionId)] = std::to_string(taskInfo_.partitionId);
+    configs[SparkQueryConfig::qualify(SparkQueryConfig::kPartitionId)] = std::to_string(partitionId);
 
     // Enable Spark legacy date formatter if spark.sql.legacy.timeParserPolicy is set to 'LEGACY'
     // or 'legacy'

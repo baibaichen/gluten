@@ -17,12 +17,26 @@
 
 #include "compute/VeloxRuntime.h"
 
+#include <mutex>
+
 #include <gtest/gtest.h>
 #include "compute/VeloxBackend.h"
+#include "compute/VeloxExpressionEvaluator.h"
+#include "config/VeloxConfig.h"
 #include "memory.pb.h"
+#include "memory/VeloxColumnarBatch.h"
+#include "substrait/extended_expression.pb.h"
 #include "threads/ThreadInitializer.h"
+#include "velox/vector/tests/utils/VectorMaker.h"
 
 namespace gluten {
+
+namespace {
+void ensureVeloxBackendCreated() {
+  static std::once_flag initialized;
+  std::call_once(initialized, [] { VeloxBackend::create(AllocationListener::noop(), {}); });
+}
+} // namespace
 
 class DummyMemoryManager final : public MemoryManager {
  public:
@@ -160,13 +174,79 @@ TEST(TestRuntime, CreateRuntime) {
 }
 
 TEST(TestRuntime, CreateVeloxRuntime) {
-  VeloxBackend::create(AllocationListener::noop(), {});
+  ensureVeloxBackendCreated();
   auto mm = MemoryManager::create(kVeloxBackendKind, AllocationListener::noop());
   auto tm = ThreadManager::create(kVeloxBackendKind, ThreadInitializer::noop());
   auto runtime = Runtime::create(kVeloxBackendKind, mm, tm);
   ASSERT_EQ(typeid(*runtime), typeid(VeloxRuntime));
   Runtime::release(runtime);
   ThreadManager::release(tm);
+}
+
+TEST(TestRuntime, ExpressionInputsFromDifferentRuntime) {
+  ensureVeloxBackendCreated();
+  std::shared_ptr<MemoryManager> mm(
+      MemoryManager::create(kVeloxBackendKind, AllocationListener::noop()), MemoryManager::release);
+  std::shared_ptr<ThreadManager> tm(
+      ThreadManager::create(kVeloxBackendKind, ThreadInitializer::noop()), ThreadManager::release);
+  const std::unordered_map<std::string, std::string> conf = {{kSessionTimezone, "UTC"}};
+  std::shared_ptr<Runtime> inputRuntime(Runtime::create(kVeloxBackendKind, mm.get(), tm.get(), conf), Runtime::release);
+  std::shared_ptr<Runtime> expressionRuntime(
+      Runtime::create(kVeloxBackendKind, mm.get(), tm.get(), conf), Runtime::release);
+  auto* veloxRuntime = dynamic_cast<VeloxRuntime*>(expressionRuntime.get());
+  ASSERT_NE(veloxRuntime, nullptr);
+  auto* veloxMm = dynamic_cast<VeloxMemoryManager*>(mm.get());
+  ASSERT_NE(veloxMm, nullptr);
+  facebook::velox::test::VectorMaker maker(veloxMm->getLeafMemoryPool().get());
+
+  for (auto withColumn : {false, true}) {
+    ::substrait::ExtendedExpression expression;
+    auto* schema = expression.mutable_base_schema();
+    schema->mutable_struct_();
+    auto* reference = expression.add_referred_expr();
+    reference->add_output_names("result");
+    if (withColumn) {
+      schema->add_names("input");
+      schema->mutable_struct_()->add_types()->mutable_string();
+      auto* field = reference->mutable_expression()->mutable_selection();
+      field->mutable_root_reference();
+      field->mutable_direct_reference()->mutable_struct_field()->set_field(0);
+    } else {
+      reference->mutable_expression()->mutable_literal()->set_string("literal");
+    }
+    auto bytes = expression.SerializeAsString();
+    auto evaluatorHandle = expressionRuntime->saveObject(
+        veloxRuntime->compileExpression(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()));
+    auto evaluator = expressionRuntime->retrieveObject<VeloxExpressionEvaluator>(evaluatorHandle);
+    EXPECT_ANY_THROW(inputRuntime->retrieveObject<VeloxExpressionEvaluator>(evaluatorHandle));
+    EXPECT_ANY_THROW(ObjectStore::retrieveChecked<ColumnarBatch>(evaluatorHandle));
+
+    for (auto size : {0, 3}) {
+      std::shared_ptr<ColumnarBatch> input;
+      if (withColumn) {
+        input = std::make_shared<VeloxColumnarBatch>(maker.rowVector(
+            {"source_name"},
+            {maker.flatVector<std::string>(size, [](auto row) { return "row" + std::to_string(row); })}));
+      } else {
+        input = inputRuntime->createOrGetEmptySchemaBatch(size);
+      }
+      auto inputHandle = inputRuntime->saveObject(input);
+      EXPECT_ANY_THROW(expressionRuntime->retrieveObject<ColumnarBatch>(inputHandle));
+      auto output = evaluator->evaluate(ObjectStore::retrieveChecked<ColumnarBatch>(inputHandle));
+      EXPECT_EQ(output->numRows(), size);
+      EXPECT_EQ(output->numColumns(), 1);
+      ObjectStore::release(inputHandle);
+      input.reset();
+      EXPECT_ANY_THROW(ObjectStore::retrieveChecked<ColumnarBatch>(inputHandle));
+      auto* values =
+          output->getRowVector()->childAt(0)->as<facebook::velox::SimpleVector<facebook::velox::StringView>>();
+      for (auto row = 0; row < size; ++row) {
+        EXPECT_EQ(values->valueAt(row).str(), withColumn ? "row" + std::to_string(row) : "literal");
+      }
+    }
+    ObjectStore::release(evaluatorHandle);
+    EXPECT_ANY_THROW(expressionRuntime->retrieveObject<VeloxExpressionEvaluator>(evaluatorHandle));
+  }
 }
 
 TEST(TestRuntime, GetResultIterator) {

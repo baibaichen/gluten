@@ -135,7 +135,7 @@ class VeloxListenerApi extends ListenerApi with Logging {
     }
 
     SparkDirectoryUtil.init(conf)
-    initialize(conf, isDriver = true)
+    initializeNative(conf, isDriver = true)
     UdfJniWrapper.registerFunctionSignatures()
   }
 
@@ -163,11 +163,21 @@ class VeloxListenerApi extends ListenerApi with Logging {
     }
 
     SparkDirectoryUtil.init(conf)
-    initialize(conf, isDriver = false)
+    initializeNative(conf, isDriver = false)
     addIfNeedMemoryDumpShutdownHook(conf)
   }
 
   override def onExecutorShutdown(): Unit = shutdown()
+
+  private[gluten] def initializeNative(conf: SparkConf, isDriver: Boolean): Unit =
+    VeloxListenerApi.synchronized {
+      if (nativeInitialized) {
+        logInfo("Reusing the initialized native backend.")
+      } else {
+        initialize(conf, isDriver)
+        nativeInitialized = true
+      }
+    }
 
   private def initialize(conf: SparkConf, isDriver: Boolean): Unit = {
     // Sets this configuration only once, since not undoable.
@@ -267,6 +277,7 @@ object VeloxListenerApi {
   //  As spark conf may change when active Spark session is recreated.
   private val driverInitialized: AtomicBoolean = new AtomicBoolean(false)
   private val executorInitialized: AtomicBoolean = new AtomicBoolean(false)
+  private var nativeInitialized = false
   private val platformLibDir: String = {
     val osName = System.getProperty("os.name") match {
       case n if n.contains("Linux") => "linux"

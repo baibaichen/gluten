@@ -221,10 +221,14 @@ makeOrdinalFieldReferenceExpr(uint32_t index, const RowTypePtr& inputType, core:
 core::TypedExprPtr toVeloxOrdinalFieldReferenceExpr(
     const ::substrait::Expression::FieldReference& substraitField,
     const RowTypePtr& inputType) {
+  VELOX_USER_CHECK(
+      !substraitField.has_outer_reference() && !substraitField.has_expression(),
+      "Only input-root field references are supported");
   auto typeCase = substraitField.reference_type_case();
   switch (typeCase) {
     case ::substrait::Expression::FieldReference::ReferenceTypeCase::kDirectReference: {
       const auto& directRef = substraitField.direct_reference();
+      VELOX_USER_CHECK(directRef.has_struct_field(), "Expected a struct field reference");
       core::TypedExprPtr fieldReference{nullptr};
       const auto* tmp = &directRef.struct_field();
 
@@ -248,6 +252,7 @@ core::TypedExprPtr toVeloxOrdinalFieldReferenceExpr(
         VELOX_USER_CHECK_NOT_NULL(
             inputColumnType,
             "Nested field reference into a non-struct type (e.g. an array or map element) is not supported.");
+        VELOX_USER_CHECK(tmp->child().has_struct_field(), "Expected a nested struct field reference");
         tmp = &tmp->child().struct_field();
       }
       return fieldReference;
@@ -266,10 +271,14 @@ namespace gluten {
 std::shared_ptr<const core::FieldAccessTypedExpr> SubstraitVeloxExprConverter::toVeloxExpr(
     const ::substrait::Expression::FieldReference& substraitField,
     const RowTypePtr& inputType) {
+  VELOX_USER_CHECK(
+      !substraitField.has_outer_reference() && !substraitField.has_expression(),
+      "Only input-root field references are supported");
   auto typeCase = substraitField.reference_type_case();
   switch (typeCase) {
     case ::substrait::Expression::FieldReference::ReferenceTypeCase::kDirectReference: {
       const auto& directRef = substraitField.direct_reference();
+      VELOX_USER_CHECK(directRef.has_struct_field(), "Expected a struct field reference");
       core::FieldAccessTypedExprPtr fieldAccess{nullptr};
       const auto* tmp = &directRef.struct_field();
 
@@ -299,6 +308,7 @@ std::shared_ptr<const core::FieldAccessTypedExpr> SubstraitVeloxExprConverter::t
         VELOX_USER_CHECK_NOT_NULL(
             inputColumnType,
             "Nested field reference into a non-struct type (e.g. an array or map element) is not supported.");
+        VELOX_USER_CHECK(tmp->child().has_struct_field(), "Expected a nested struct field reference");
         tmp = &tmp->child().struct_field();
       }
       return fieldAccess;

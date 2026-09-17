@@ -158,6 +158,7 @@ set(VELOX_SRCS
     ${VELOX_PROTO_SRCS}
     compute/VeloxBackend.cc
     compute/VeloxRuntime.cc
+    compute/VeloxExpressionEvaluator.cc
     compute/VeloxPlanConverter.cc
     compute/WholeStageResultIterator.cc
     compute/delta/DeltaConnector.cpp
@@ -361,6 +362,12 @@ target_link_libraries(velox ${GLUTEN_VELOX_LINK_SCOPE} facebook::velox)
 target_link_libraries(velox PUBLIC ${GLUTEN_ROARING_LINK_LIBRARY})
 
 find_re2()
+if(ENABLE_GLUTEN_VCPKG AND NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
+  # Keep the complete matching RE2 ABI private via symbols.map, rather than
+  # resolving missing archive objects from Gluten's older Arrow-bundled RE2.
+  target_link_libraries(velox PRIVATE -Wl,--whole-archive ${RE2_LIBRARY}
+                                      -Wl,--no-whole-archive)
+endif()
 target_link_libraries(velox PUBLIC ${RE2_LIBRARY})
 
 set(CMAKE_FIND_LIBRARY_SUFFIXES_BCK ${CMAKE_FIND_LIBRARY_SUFFIXES})

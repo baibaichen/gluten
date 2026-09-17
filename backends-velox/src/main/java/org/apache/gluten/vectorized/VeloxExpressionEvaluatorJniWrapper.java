@@ -52,6 +52,9 @@ public final class VeloxExpressionEvaluatorJniWrapper implements RuntimeAware {
    */
   public native long evaluate(long evaluatorHandle, long inputBatchHandle);
 
+  /** Borrows a live result batch and sums byte lengths, with -1 for each null result. */
+  public native long consumeStringLengths(long resultBatchHandle);
+
   /** Releases the compiled evaluator, without invalidating previously returned batches. */
   public native void close(long evaluatorHandle);
 }

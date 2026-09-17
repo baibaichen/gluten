@@ -414,6 +414,75 @@ class NativeExpressionEvalHelperSuite
     }
   }
 
+  // scalastyle:off nonascii
+  test("JNI length consumption observes actual results and borrows live output batches") {
+    val values = Seq("value", null, "", "   ", "tail  ", "中文 ")
+    val expected = Seq("value", null, "", "", "tail", "中文")
+    withInput(values) {
+      input =>
+        val prepared = prepareNativeExpression(Seq(StringTrimRight(bound)), attributes)
+        val output = prepared.evaluate(input)
+        try {
+          assert(prepared.consumeStringLengths(output) == 14L)
+          assert(prepared.consumeStringLengths(output) == 14L)
+          assert(readStrings(output) == expected)
+          prepared.close()
+          assert(prepared.consumeStringLengths(output) == 14L)
+          assert(readStrings(output) == expected)
+          assert(readStrings(input) == values)
+        } finally {
+          output.close()
+          prepared.close()
+        }
+    }
+  }
+
+  test("JNI length consumption covers constant NULL empty and zero-row results") {
+    TaskResources.runUnsafe {
+      Seq((Literal("中 "), 4L), (Literal(null, StringType), -1L), (Literal(""), 0L)).foreach {
+        case (expression, length) =>
+          val prepared = prepareNativeExpression(Seq(expression), attributes)
+          try {
+            Seq(0, 1, 5).foreach {
+              size =>
+                withInput(Seq.fill(size)("ignored")) {
+                  input =>
+                    val output = prepared.evaluate(input)
+                    try {
+                      assert(prepared.consumeStringLengths(output) == size * length)
+                      assert(readStrings(output).size == size)
+                    } finally {
+                      output.close()
+                    }
+                }
+            }
+          } finally {
+            prepared.close()
+          }
+      }
+    }
+  }
+
+  test("JNI length consumption rejects non-string result without invalidating its owner") {
+    withInput(Seq("value")) {
+      input =>
+        val prepared = prepareNativeExpression(Seq(Literal(7)), attributes)
+        val output = prepared.evaluate(input)
+        try {
+          intercept[GlutenException] {
+            prepared.consumeStringLengths(output)
+          }
+          assert(output.numRows() == 1 && output.numCols() == 1)
+          checkEvaluationWithNative(StringTrimRight(bound), Seq("value"), input, attributes)
+        } finally {
+          output.close()
+          prepared.close()
+        }
+    }
+  }
+
+  // scalastyle:on nonascii
+
   test("unsupported expressions never fall back to JVM evaluation") {
     case class JvmOnlyExpression() extends LeafExpression with CodegenFallback {
       override def nullable: Boolean = false

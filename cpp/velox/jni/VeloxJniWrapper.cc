@@ -292,6 +292,19 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_VeloxExpressionEvaluat
   JNI_METHOD_END(kInvalidObjectHandle)
 }
 
+JNIEXPORT jlong JNICALL
+Java_org_apache_gluten_vectorized_VeloxExpressionEvaluatorJniWrapper_consumeStringLengths( // NOLINT
+    JNIEnv* env,
+    jobject wrapper,
+    jlong resultBatchHandle) {
+  JNI_METHOD_START
+  auto* runtime = dynamic_cast<VeloxRuntime*>(getRuntime(env, wrapper));
+  GLUTEN_CHECK(runtime != nullptr, "Expression evaluation requires a Velox runtime");
+  auto result = ObjectStore::retrieveChecked<ColumnarBatch>(resultBatchHandle);
+  return VeloxExpressionEvaluator::consumeStringLengths(result);
+  JNI_METHOD_END(0)
+}
+
 JNIEXPORT void JNICALL Java_org_apache_gluten_vectorized_VeloxExpressionEvaluatorJniWrapper_close( // NOLINT
     JNIEnv* env,
     jobject wrapper,

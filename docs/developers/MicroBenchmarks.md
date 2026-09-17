@@ -26,6 +26,153 @@ not included.
 Please refer to the sections below to learn how to dump the Substrait plan and create the input data
 files.
 
+## Direct columnar expression checks
+
+`NativeExpressionEvalHelper` in the `backends-velox` test sources extends Spark's
+`ExpressionEvalHelper` with a columnar native path:
+
+```scala
+evaluateWithNative(expression, inputBatch, inputAttributes)
+checkEvaluationWithNative(expression, expectedValues, inputBatch, inputAttributes)
+prepareNativeExpression(Seq(expression), inputAttributes)
+```
+
+Preparation accepts multiple input attributes but exactly one output expression;
+empty or multiple output sequences fail before native allocation.
+The input is an already-offloaded `ColumnarBatch`, not an `InternalRow`.
+`inputAttributes` supplies names, types and nullability because native batch handles
+do not expose Spark column metadata. The evaluator borrows the input and returns a
+single-column native `ColumnarBatch` with the same row count, including empty input.
+The caller closes the output. The check helper compares every result with the
+corresponding expected Catalyst value using `VeloxInputBatch` and Spark's
+`checkResult`, then closes both the read view and the output. No Arrow conversion
+is needed to inspect results. Encoded results use a batch-owned flat read view
+when needed for comparison; this materialization is outside expression evaluation.
+
+Initialize the native backend with `MockVeloxBackend.initialize()`, then create inputs, evaluate and consume
+outputs inside the same `TaskResources.runUnsafe` scope. This provides native
+memory/resource management without creating a `SparkContext`, `SparkSession`,
+DataFrame or Spark job. The input remains caller-owned and must stay open until
+evaluation finishes. The output remains valid after the evaluator is closed, within
+the enclosing resource scope. Unsupported expressions fail instead of using Spark fallback.
+Inputs may come from a different named Gluten runtime within that scope; compiled
+evaluator handles remain bound to the runtime that compiled them.
+
+Generate a string input directly with
+`org.apache.gluten.velox.vector.VeloxWritableColumnVector`: allocate the row count,
+fill `putByteArray`/`putNull`, then call `finishStringColumn`. Assemble the column
+owner handles with `VeloxOutputBatchJniWrapper.makeVeloxBatch`, using the same
+attribute names as the expression schema, and wrap the result with
+`ColumnarBatches.create`. The assembled batch owns shared references to the
+vectors, so close the writable columns after assembly. No Arrow intermediate is
+needed. Keep this allocation and data filling outside the evaluation loop.
+
+The implementation serializes Substrait's standard `ExtendedExpression` and calls
+Gluten's `VeloxExpressionEvaluatorJniWrapper`. Native compilation uses the existing
+Substrait expression converter and Velox `ExprSet`; execution evaluates the input
+vectors directly, with no ReadRel, Project operator, query task, scan or hash guard.
+For repeated execution, prepare once, call `prepared.evaluate(inputBatch)` for each
+batch, close every output, and finally close the prepared evaluator. The evaluator
+is not thread-safe. Keep generation, Arrow-to-Velox conversion, compilation and
+correctness assertions outside the timed loop. JNI and result ownership costs
+remain part of this entry point; it is not a bare C++ function timer.
+
+After building the Velox backend and its native libraries, run the focused suite:
+
+```shell
+./build/mvn -P 'java-17,backends-velox,spark-4.1,scala-2.13,delta,!scalatest-single-suite-from-surefire-test' \
+  -pl gluten-velox-vector,backends-velox -Dtest=none -DfailIfNoTests=false \
+  -DwildcardSuites=org.apache.spark.sql.catalyst.expressions.NativeExpressionEvalHelperSuite \
+  test
+```
+
+## Direct expression performance benchmarks
+
+`RTrimExpressionBenchmark` and `LTrimExpressionBenchmark` use Spark's standard
+`Benchmark.addCase` and `run`, with separate catalogs and input generators.
+Vanilla evaluates stable `UnsafeRow` inputs with the requested expression's
+`child.genCode` inside Spark's standard `Predicate.create` wrapper. The Boolean
+control result is not the expression result. Both engines consume each computed
+String's **byte length**, with **NULL=-1** and **empty=0**, into a signed 64-bit sum
+reset and published once per full pass. This signature is not a content hash or
+correctness proof. The JVM timed terminal passes only a primitive length to its
+accumulator; it does not publish or return the String reference. Native keeps the
+real `ExprSet` result vector and uses one additional JNI call per live batch to
+consume `StringView` lengths before the existing output close. Encoded results
+are read through native decoding, without payload copying or a new result vector.
+
+Full content/reference checks and `UnsafeProjection` input encoding/oracle are
+untimed. The original String expression is unchanged: it is not replaced with a
+SQL length expression. This measures the expression plus result-property
+consumption, not full String-production latency or pure trim time. Materialization
+that the JIT can legally eliminate while computing this property is part of the
+protocol; retained engine work and allocation still require separate profile
+proof. Previous final-projection, reference-publication and handwritten-evaluator
+results use different protocols and must not be combined as one performance run.
+
+See the Scala entrypoints for Java17, offline full-reactor build/classpath setup,
+case selection, engine order and reproducible invocation examples. Arguments are
+`rows [native-batch-size [seed [case-name [engine [order]]]]]`, with defaults
+10240, 20260912, both, vanilla-first. Engine selection only controls timed Spark
+cases; every mode checks the actual JVM terminal and native results against the
+untimed oracle. Spark owns warmup and iteration timing and prints every measured
+iteration. No Python benchmark launcher or custom timing/fork framework is used.
+
+### Aligned trim coverage
+
+Each independent RTrim/LTrim catalog has **41 cases**, in the same coverage order:
+
+| Coverage | Cases per function |
+|---|---:|
+| Byte widths10/12/13/64/256 × none/first/cluster/half-even/last/penultimate/all |35|
+| 64-byte NULL50 and UTF8-half-even |2|
+| 10/256-byte identity controls |2|
+| Opposite-side preservation boundary and two-input custom trim |2|
+
+Positions describe rows within the **actual native batch**, not the side of the
+string being trimmed. `first` selects row0, `cluster` the first `min(16,count)`
+rows, `half-even` even rows, and `last` the actual last row, including a partial
+batch. `penultimate` swaps the complete last/penultimate rows and their identities;
+a singleton stays unchanged. Selected strings have two target spaces. Input byte
+widths, seeded eight-hex row identities, bodies, NULL positions and UTF8 rules
+match across functions; RTrim places target spaces after the body, LTrim before it.
+LTrim generates its data independently, using body-relative offsets rather than
+reversing UTF8 or calling RTrim's generator.
+
+Both standalone entrypoints accept `aligned` (all41), `representative` (the
+corresponding12) or a case ID. Omitting the selector runs all41. The historical
+RTrim12 IDs, byte fingerprints and representative ordering remain unchanged.
+The old LTrim128-row groups, injected regular-grid empty strings and
+`ltrim-pattern-lN` IDs are replaced by batch-local `ltrim-lN-pattern` definitions;
+old measurements must not be combined with the aligned dataset. Empty/all-space
+semantics remain covered in UTs. The opposite-boundary and custom cases retain
+matching joint inputs and test preservation at the other string end.
+
+### Three-process combined run
+
+`TrimExpressionBenchmark` copies only result labels from the two independent
+catalogs, with `rtrim/` and `ltrim/` namespaces, then calls the shared runner once.
+It runs RTrim41 followed by LTrim41, releasing each case before the next and
+shutting down native state once after all82. Qualified identity labels avoid
+collisions; for example `ltrim/identity-l10` selects one case.
+
+Run three sequential fresh JVMs using the commands in that Scala source:
+Vanilla with A's JVM classpath, NativeA, then NativeB. Each uses the `aligned`
+selector and only its `vanilla` or `native` timed engine. With4,000,000rows per
+case, batch10240 and seed20260912 this is **3 processes ×82 cases =246 result
+groups**, not246 processes or multiple independent forks. Use identical Java17,
+heap/GC/thread settings and CPU affinity, no concurrent builds, and a distinct
+output cwd per process with `SPARK_GENERATE_BENCHMARK_FILES=1`. Preserve complete
+commands, source/diff/jar/native identities, preflight records, raw iterations,
+standard results and exits; do not discard slow samples or subtract identity time.
+
+The uniform native version contrast is A/Velox752d before both optimizations and
+B/Veloxab79 after RTrim and unary LTrim optimization. The earlier LTrim comparison
+used6bec as its baseline and remains a separate experiment. Uncommitted benchmark
+changes require base-commit plus diff provenance, not a clean-artifact claim.
+One process per engine measures within-process iteration variation only; it does
+not provide cross-process confidence intervals or per-case cold-start isolation.
+
 ## Try the example
 
 To run a micro benchmark, user should provide one file that contains the Substrait plan in JSON

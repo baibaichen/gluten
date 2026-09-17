@@ -20,6 +20,7 @@
 #include "substrait/SubstraitToVeloxExpr.h"
 #include "substrait/extended_expression.pb.h"
 #include "utils/Exception.h"
+#include "velox/vector/DecodedVector.h"
 
 namespace gluten {
 using namespace facebook::velox;
@@ -96,6 +97,30 @@ std::shared_ptr<VeloxColumnarBatch> VeloxExpressionEvaluator::evaluate(const std
   // Never prepareForReuse here: previously returned batches remain observable.
   return std::make_shared<VeloxColumnarBatch>(
       std::make_shared<RowVector>(pool_.get(), outputType_, nullptr, row->size(), std::move(result)));
+}
+
+int64_t VeloxExpressionEvaluator::consumeStringLengths(const std::shared_ptr<ColumnarBatch>& result) {
+  GLUTEN_CHECK(result != nullptr, "Result columnar batch must not be null");
+  auto batch = std::dynamic_pointer_cast<VeloxColumnarBatch>(result);
+  GLUTEN_CHECK(batch != nullptr, "Length consumption requires a native Velox result batch");
+  const auto row = batch->getRowVector();
+  GLUTEN_CHECK(row != nullptr, "Result columnar batch contains no row vector");
+  GLUTEN_CHECK(row->childrenSize() == 1, "Length consumption requires exactly one result column");
+  const auto& column = row->childAt(0);
+  GLUTEN_CHECK(column != nullptr && column->typeKind() == TypeKind::VARCHAR, "Length consumption requires VARCHAR");
+  GLUTEN_CHECK(row->size() == result->numRows(), "Result columnar batch row count mismatch");
+  GLUTEN_CHECK(column->size() >= row->size(), "Result column contains too few rows");
+  SelectivityVector rows(row->size());
+  DecodedVector decoded(*column, rows);
+  int64_t total = 0;
+  for (vector_size_t i = 0; i < row->size(); ++i) {
+    if (row->isNullAt(i) || decoded.isNullAt(i)) {
+      total -= 1;
+    } else {
+      total += decoded.valueAt<StringView>(i).size();
+    }
+  }
+  return total;
 }
 
 } // namespace gluten

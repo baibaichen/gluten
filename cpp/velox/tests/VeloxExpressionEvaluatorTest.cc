@@ -441,4 +441,71 @@ TEST_F(VeloxExpressionEvaluatorTest, nestedCollectionNamesDoNotMutateInputs) {
   EXPECT_EQ(arrays->type(), arrayTypeBefore);
 }
 
+TEST_F(VeloxExpressionEvaluatorTest, consumesActualResultByteLengthsWithoutChangingBatches) {
+  auto evaluator = compile(rtrim());
+  auto inputValues = makeNullableFlatVector<std::string>(
+      {"unchanged", "tail  ", "", "   ", std::nullopt, "\xE4\xB8\xAD\xE6\x96\x87 ", std::string(256, 'x')});
+  auto input = batch(inputValues);
+  auto output = evaluator->evaluate(input);
+  auto expected = makeNullableFlatVector<std::string>(
+      {"unchanged", "tail", "", "", std::nullopt, "\xE4\xB8\xAD\xE6\x96\x87", std::string(256, 'x')});
+  EXPECT_EQ(VeloxExpressionEvaluator::consumeStringLengths(output), 274);
+  EXPECT_EQ(VeloxExpressionEvaluator::consumeStringLengths(output), 274);
+  test::assertEqualVectors(expected, output->getRowVector()->childAt(0));
+  test::assertEqualVectors(
+      makeNullableFlatVector<std::string>(
+          {"unchanged", "tail  ", "", "   ", std::nullopt, "\xE4\xB8\xAD\xE6\x96\x87 ", std::string(256, 'x')}),
+      input->getRowVector()->childAt(0));
+  evaluator.reset();
+  input.reset();
+  EXPECT_EQ(VeloxExpressionEvaluator::consumeStringLengths(output), 274);
+  test::assertEqualVectors(expected, output->getRowVector()->childAt(0));
+}
+
+TEST_F(VeloxExpressionEvaluatorTest, consumesFlatConstantDictionaryAndNullLengths) {
+  auto base = makeNullableFlatVector<std::string>({"abcd", "", std::nullopt, "\xE4\xB8\xAD"});
+  auto consume = [&](const VectorPtr& values, int64_t expected) {
+    const auto encoding = values->encoding();
+    auto snapshot = BaseVector::copy(*values, pool_.get());
+    auto output = batch(values);
+    EXPECT_EQ(VeloxExpressionEvaluator::consumeStringLengths(output), expected);
+    EXPECT_EQ(output->getRowVector()->childAt(0).get(), values.get());
+    EXPECT_EQ(values->encoding(), encoding);
+    test::assertEqualVectors(snapshot, values);
+  };
+  consume(base, 6);
+  consume(makeFlatVector<std::string>({"", "abcd"}), 4);
+  consume(makeFlatVector<std::string>(std::vector<std::string>{}), 0);
+  consume(BaseVector::wrapInConstant(7, 0, base), 28);
+  consume(BaseVector::wrapInConstant(7, 1, base), 0);
+  consume(BaseVector::wrapInConstant(7, 2, base), -7);
+  consume(BaseVector::wrapInConstant(7, 3, base), 21);
+  consume(wrapInDictionary(makeIndices({3, 0, 2, 1, 3}), base), 9);
+  auto outerNulls = BaseVector::wrapInDictionary(
+      makeNulls(5, [](vector_size_t row) { return row == 1; }), makeIndices({3, 0, 2, 1, 3}), 5, base);
+  consume(outerNulls, 4);
+}
+
+TEST_F(VeloxExpressionEvaluatorTest, lengthConsumerUsesLogicalRowCountAndSigned64BitSum) {
+  auto values = makeFlatVector<std::string>({"abc", "ignored", "ignored"});
+  auto partial = std::make_shared<VeloxColumnarBatch>(
+      std::make_shared<RowVector>(pool(), ROW({"result"}, {VARCHAR()}), nullptr, 1, std::vector<VectorPtr>{values}));
+  EXPECT_EQ(VeloxExpressionEvaluator::consumeStringLengths(partial), 3);
+  EXPECT_EQ(values->size(), 3);
+  auto large = makeFlatVector<std::string>({std::string(65536, 'x')});
+  auto repeated = batch(BaseVector::wrapInConstant(65536, 0, large));
+  EXPECT_EQ(VeloxExpressionEvaluator::consumeStringLengths(repeated), int64_t{4294967296});
+}
+
+TEST_F(VeloxExpressionEvaluatorTest, lengthConsumerRejectsUnsupportedSchemaBeforeReadingValues) {
+  EXPECT_THROW(VeloxExpressionEvaluator::consumeStringLengths(nullptr), GlutenException);
+  auto noColumns = std::make_shared<VeloxColumnarBatch>(
+      std::make_shared<RowVector>(pool(), ROW({}, {}), nullptr, 0, std::vector<VectorPtr>{}));
+  EXPECT_THROW(VeloxExpressionEvaluator::consumeStringLengths(noColumns), GlutenException);
+  EXPECT_THROW(VeloxExpressionEvaluator::consumeStringLengths(batch(makeFlatVector<int32_t>({1, 2}))), GlutenException);
+  auto twoColumns = std::make_shared<VeloxColumnarBatch>(
+      makeRowVector({makeFlatVector<std::string>({"a"}), makeFlatVector<std::string>({"b"})}));
+  EXPECT_THROW(VeloxExpressionEvaluator::consumeStringLengths(twoColumns), GlutenException);
+}
+
 } // namespace gluten

@@ -147,6 +147,12 @@ trait NativeExpressionEvalHelper extends ExpressionEvalHelper {
       }
     }
 
+    /** Borrows a live output, including after this evaluator is closed within the task scope. */
+    def consumeStringLengths(output: ColumnarBatch): Long = {
+      ColumnarBatches.checkOffloaded(output)
+      jni.consumeStringLengths(ColumnarBatches.getNativeHandle(backendName, output))
+    }
+
     override def close(): Unit = {
       if (!closed) {
         jni.close(handle)

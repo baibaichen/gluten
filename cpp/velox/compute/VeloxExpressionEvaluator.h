@@ -34,6 +34,9 @@ class VeloxExpressionEvaluator final {
 
   std::shared_ptr<VeloxColumnarBatch> evaluate(const std::shared_ptr<ColumnarBatch>& input);
 
+  // Borrows one VARCHAR result column; null rows contribute -1, otherwise StringView byte size.
+  static int64_t consumeStringLengths(const std::shared_ptr<ColumnarBatch>& result);
+
  private:
   const std::shared_ptr<facebook::velox::memory::MemoryPool> pool_;
   const std::shared_ptr<facebook::velox::core::QueryCtx> queryCtx_;

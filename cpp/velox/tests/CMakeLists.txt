@@ -140,6 +140,8 @@ add_velox_test(
 add_velox_test(spark_functions_test SOURCES SparkFunctionTest.cc
                FunctionTest.cc)
 add_velox_test(runtime_test SOURCES RuntimeTest.cc)
+add_velox_test(velox_column_handle_test SOURCES VeloxColumnHandleTest.cc VeloxColumnHandleJniTest.cc)
+add_velox_test(velox_column_handle_batch_test SOURCES VeloxColumnHandleBatchTest.cc)
 add_velox_test(velox_memory_test SOURCES MemoryManagerTest.cc)
 add_velox_test(buffer_outputstream_test SOURCES BufferOutputStreamTest.cc)
 if(ENABLE_S3)

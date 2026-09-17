@@ -2076,6 +2076,7 @@
       </activation>
       <modules>
         <module>gluten-arrow</module>
+        <module>gluten-velox-vector</module>
         <module>backends-velox</module>
       </modules>
       <properties>

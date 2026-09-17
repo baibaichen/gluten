@@ -62,6 +62,19 @@ class ObjectStore {
     return store->retrieveInternal<T>(resourceId);
   }
 
+  template <typename T>
+  static std::shared_ptr<T> retrieveChecked(ObjectHandle handle) {
+    auto [store, resourceId] = lookup(handle);
+    return store->retrieveCheckedInternal<T>(resourceId);
+  }
+
+  template <typename T>
+  std::shared_ptr<T> retrieveOwned(ObjectHandle handle) {
+    auto [store, resourceId] = lookup(handle);
+    GLUTEN_CHECK(store == this, "Object handle belongs to a different runtime");
+    return retrieveCheckedInternal<T>(resourceId);
+  }
+
   virtual ~ObjectStore();
 
   StoreHandle id() {
@@ -101,6 +114,16 @@ class ObjectStore {
     // Programming carefully. This will lead to ub if wrong typename T was passed in.
     auto casted = std::static_pointer_cast<T>(object);
     return casted;
+  }
+
+  template <typename T>
+  std::shared_ptr<T> retrieveCheckedInternal(ResourceHandle handle) {
+    const std::lock_guard<std::mutex> lock(mtx_);
+    auto object = store_.lookup(handle);
+    GLUTEN_CHECK(object != nullptr, "Object handle refers to a null resource");
+    GLUTEN_CHECK(
+        aliveObjects_.at(handle).typeName == typeid(T).name(), "Object handle has an unexpected resource type");
+    return std::static_pointer_cast<T>(object);
   }
 
   void releaseInternal(ResourceHandle handle);

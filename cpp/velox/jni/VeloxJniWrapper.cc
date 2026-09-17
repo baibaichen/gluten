@@ -43,6 +43,7 @@
 #include "substrait/SubstraitToVeloxPlanValidator.h"
 #include "utils/ObjectStore.h"
 #include "utils/VeloxBatchResizer.h"
+#include "vector/VeloxColumnHandleExport.h"
 #include "velox/common/base/BloomFilter.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/exec/HashTable.h"
@@ -261,6 +262,36 @@ JNIEXPORT jboolean JNICALL Java_org_apache_gluten_vectorized_PlanEvaluatorJniWra
     return false;
   }
   JNI_METHOD_END(false)
+}
+
+JNIEXPORT jlong JNICALL Java_org_apache_gluten_columnarbatch_VeloxOutputBatchJniWrapper_makeVeloxBatch( // NOLINT
+    JNIEnv* env,
+    jobject wrapper,
+    jlongArray ownerHandles,
+    jobjectArray names) {
+  JNI_METHOD_START
+  auto ctx = getRuntime(env, wrapper);
+  VELOX_CHECK_NOT_NULL(ownerHandles, "makeVeloxBatch: null owner handles");
+  VELOX_CHECK_NOT_NULL(names, "makeVeloxBatch: null names");
+  jsize n = env->GetArrayLength(ownerHandles);
+  VELOX_CHECK_EQ(env->GetArrayLength(names), n, "makeVeloxBatch: handles/names size mismatch");
+  std::vector<int64_t> handles(static_cast<size_t>(n));
+  if (n > 0) {
+    env->GetLongArrayRegion(ownerHandles, 0, n, reinterpret_cast<jlong*>(handles.data()));
+  }
+  std::vector<std::string> columnNames(static_cast<size_t>(n));
+  for (jsize i = 0; i < n; ++i) {
+    auto name = static_cast<jstring>(env->GetObjectArrayElement(names, i));
+    VELOX_CHECK_NOT_NULL(name, "makeVeloxBatch: null name element at index {}", i);
+    const char* chars = env->GetStringUTFChars(name, nullptr);
+    VELOX_CHECK_NOT_NULL(chars, "makeVeloxBatch: GetStringUTFChars failed at index {}", i);
+    columnNames[static_cast<size_t>(i)] = chars;
+    env->ReleaseStringUTFChars(name, chars);
+    env->DeleteLocalRef(name);
+  }
+  return gluten::makeVeloxBatch(
+      handles, columnNames, [&](std::shared_ptr<ColumnarBatch> batch) { return ctx->saveObject(std::move(batch)); });
+  JNI_METHOD_END(kInvalidObjectHandle)
 }
 
 JNIEXPORT jlong JNICALL Java_org_apache_gluten_columnarbatch_VeloxColumnarBatchJniWrapper_from( // NOLINT

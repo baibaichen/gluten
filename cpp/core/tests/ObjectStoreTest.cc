@@ -53,6 +53,25 @@ TEST(ObjectStore, release) {
   ASSERT_ANY_THROW(ObjectStore::retrieve<int32_t>(handle));
 }
 
+TEST(ObjectStore, checkedOwnershipAndType) {
+  auto store = ObjectStore::create();
+  auto other = ObjectStore::create();
+  auto handle = store->save(std::make_shared<int32_t>(42));
+  EXPECT_EQ(*store->retrieveOwned<int32_t>(handle), 42);
+  EXPECT_EQ(*ObjectStore::retrieveChecked<int32_t>(handle), 42);
+  EXPECT_ANY_THROW(ObjectStore::retrieveChecked<std::string>(handle));
+  EXPECT_ANY_THROW(ObjectStore::retrieveChecked<int32_t>(kInvalidObjectHandle));
+  EXPECT_ANY_THROW(store->retrieveOwned<std::string>(handle));
+  EXPECT_ANY_THROW(other->retrieveOwned<int32_t>(handle));
+  EXPECT_ANY_THROW(store->retrieveOwned<int32_t>(kInvalidObjectHandle));
+  ObjectStore::release(handle);
+  EXPECT_ANY_THROW(store->retrieveOwned<int32_t>(handle));
+  EXPECT_ANY_THROW(ObjectStore::retrieveChecked<int32_t>(handle));
+  auto nullHandle = store->save(std::shared_ptr<int32_t>{});
+  EXPECT_ANY_THROW(ObjectStore::retrieveChecked<int32_t>(nullHandle));
+  EXPECT_ANY_THROW(store->retrieveOwned<int32_t>(nullHandle));
+}
+
 TEST(ObjectStore, releaseMultiple) {
   ObjectHandle handle1 = kInvalidObjectHandle;
   ObjectHandle handle2 = kInvalidObjectHandle;

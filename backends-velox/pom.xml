@@ -41,6 +41,12 @@
       <scope>compile</scope>
     </dependency>
     <dependency>
+      <groupId>org.apache.gluten</groupId>
+      <artifactId>gluten-velox-vector</artifactId>
+      <version>${project.version}</version>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
       <groupId>com.google.protobuf</groupId>
       <artifactId>protobuf-java</artifactId>
       <version>${protobuf.version}</version>

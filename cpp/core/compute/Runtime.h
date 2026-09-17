@@ -18,6 +18,7 @@
 #pragma once
 
 #include <glog/logging.h>
+#include <type_traits>
 
 #include "compute/ProtobufUtils.h"
 #include "compute/ResultIterator.h"
@@ -192,6 +193,20 @@ class Runtime : public std::enable_shared_from_this<Runtime> {
 
   ObjectHandle saveObject(std::shared_ptr<void> obj) {
     return objStore_->save(obj);
+  }
+
+  template <typename T>
+  ObjectHandle saveObject(std::shared_ptr<T> obj) {
+    if constexpr (std::is_base_of_v<ColumnarBatch, T>) {
+      return objStore_->save<ColumnarBatch>(std::move(obj));
+    } else {
+      return objStore_->save<T>(std::move(obj));
+    }
+  }
+
+  template <typename T>
+  std::shared_ptr<T> retrieveObject(ObjectHandle handle) {
+    return objStore_->retrieveOwned<T>(handle);
   }
 
  protected:

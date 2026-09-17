@@ -30,9 +30,10 @@ import org.apache.spark.{SparkContext, SparkEnv, SparkFunSuite}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
+import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
+import org.apache.spark.sql.vectorized.{ColumnarArray, ColumnarBatch, ColumnVector}
 import org.apache.spark.task.TaskResources
 import org.apache.spark.unsafe.types.UTF8String
 
@@ -53,6 +54,20 @@ class NativeExpressionEvalHelperSuite
   private val attributes: Seq[Attribute] =
     Seq(AttributeReference("input", StringType, nullable = true)())
   private val bound = BoundReference(0, StringType, nullable = true)
+  private var checkBorrowedArrays = false
+  private var borrowedArraysCompared = 0
+
+  override protected def checkResult(
+      result: Any,
+      expected: Any,
+      dataType: DataType,
+      nullable: Boolean): Boolean = {
+    if (checkBorrowedArrays && result.isInstanceOf[ArrayData]) {
+      assert(result.isInstanceOf[ColumnarArray], "Native arrays must be compared without copying")
+      borrowedArraysCompared += 1
+    }
+    super.checkResult(result, expected, dataType, nullable)
+  }
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -162,6 +177,43 @@ class NativeExpressionEvalHelperSuite
             input.close()
           }
       }
+    }
+  }
+
+  test("borrowed native arrays maps and structs compare nested NULLs before reading values") {
+    val nullInt = Literal.create(null, IntegerType)
+    val array = CreateArray(Seq(nullInt, nullInt))
+    val nested = CreateNamedStruct(
+      Seq(
+        Literal("array"),
+        array,
+        Literal("map"),
+        CreateMap(Seq(Literal("key"), array)),
+        Literal("struct"),
+        CreateNamedStruct(Seq(Literal("value"), nullInt)),
+        Literal("missing"),
+        Literal.create(null, ArrayType(IntegerType))
+      ))
+    val expected =
+      create_row(Seq(null, null), create_map("key" -> Seq(null, null)), create_row(null), null)
+    checkBorrowedArrays = true
+    borrowedArraysCompared = 0
+    try {
+      TaskResources.runUnsafe {
+        val input = new ColumnarBatch(Array.empty[ColumnVector], 1)
+        try {
+          checkEvaluationWithNative(nested, Seq(expected), input, Seq.empty)
+          assert(borrowedArraysCompared > 0)
+          intercept[TestFailedException] {
+            checkEvaluationWithNative(array, Seq(Seq(0, null)), input, Seq.empty)
+          }
+          checkEvaluationWithNative(array, Seq(Seq(null, null)), input, Seq.empty)
+        } finally {
+          input.close()
+        }
+      }
+    } finally {
+      checkBorrowedArrays = false
     }
   }
 

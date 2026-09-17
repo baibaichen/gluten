@@ -18,8 +18,12 @@ package org.apache.spark.sql.catalyst.expressions
 
 import org.apache.gluten.backendsapi.BackendsApiManager
 import org.apache.gluten.columnarbatch.{ColumnarBatches, ColumnarBatchJniWrapper, VeloxOutputBatchJniWrapper}
-import org.apache.gluten.expression.ConverterUtils
+import org.apache.gluten.config.GlutenCoreConfig
+import org.apache.gluten.exception.GlutenNotSupportException
+import org.apache.gluten.expression.{ConverterUtils, ExpressionConverter}
 import org.apache.gluten.runtime.Runtimes
+import org.apache.gluten.substrait.`type`.TypeBuilder
+import org.apache.gluten.substrait.SubstraitContext
 import org.apache.gluten.velox.vector.{VeloxColumnarRow, VeloxWritableColumnVector}
 
 import org.apache.spark.SparkFunSuite
@@ -27,50 +31,103 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
 import org.apache.spark.task.TaskResources
 
+import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 
 /** Row adaptation belongs to unit tests; the native evaluator remains columnar. */
 trait NativeExpressionRowEvalHelper extends NativeExpressionEvalHelper {
   self: SparkFunSuite =>
 
+  private case class NativeRow(
+      expression: Expression,
+      attributes: Seq[Attribute],
+      values: () => Seq[Any])
+
+  private def prepareNativeRow(expression: Expression, inputRow: InternalRow): NativeRow = {
+    val expr = NativeExpressionPreparation(expression)
+    require(expr.resolved, s"Unresolved native expression: $expr")
+    val references = expr
+      .collect { case ref: BoundReference => ref }
+      .groupBy(_.ordinal)
+      .toSeq
+      .sortBy(_._1)
+    references.foreach {
+      case (ordinal, refs) =>
+        require(
+          ordinal >= 0 && ordinal < inputRow.numFields,
+          s"Input ordinal $ordinal is outside ${inputRow.numFields} fields")
+        require(
+          refs.map(_.dataType).distinct.size == 1,
+          s"Conflicting input types for ordinal $ordinal")
+    }
+    val inputAttributes = references.map {
+      case (ordinal, refs) =>
+        AttributeReference(s"input_$ordinal", refs.head.dataType, refs.exists(_.nullable))()
+    }
+    // Preserve the test literal's nonfoldable contract by supplying its value as input.
+    val literals = expr.collect { case literal: NonFoldableLiteral => literal }.distinct
+    val literalOrdinals = literals.zipWithIndex.toMap
+    val attributes = inputAttributes ++ literals.zipWithIndex.map {
+      case (literal, index) =>
+        AttributeReference(s"non_foldable_$index", literal.dataType, literal.nullable)()
+    }
+    val ordinals = references.map(_._1).zipWithIndex.toMap
+    val bound = expr.transform {
+      case ref: BoundReference => ref.copy(ordinal = ordinals(ref.ordinal))
+      case literal: NonFoldableLiteral =>
+        BoundReference(
+          references.size + literalOrdinals(literal),
+          literal.dataType,
+          literal.nullable)
+    }
+    NativeRow(
+      bound,
+      attributes,
+      () =>
+        references.map {
+          case (ordinal, refs) =>
+            if (inputRow.isNullAt(ordinal)) null else inputRow.get(ordinal, refs.head.dataType)
+        } ++ literals.map(_.value)
+    )
+  }
+
+  protected def nativeExpressionFallbackReason(
+      expression: Expression,
+      attributes: Seq[Attribute]): Option[String] = {
+    if (!GlutenCoreConfig.get.enableGluten) {
+      return Some("Gluten is disabled")
+    }
+    val context = new SubstraitContext
+    val (node, inputType) =
+      try {
+        val transformer =
+          ExpressionConverter.replaceWithExpressionTransformer(expression, attributes)
+        val inputType = TypeBuilder.makeStruct(
+          false,
+          attributes.map(a => ConverterUtils.getTypeNode(a.dataType, a.nullable)).asJava)
+        (transformer.doTransform(context), inputType)
+      } catch {
+        case error: GlutenNotSupportException => return Some(error.getMessage)
+      }
+    if (
+      BackendsApiManager.getValidatorApiInstance
+        .doNativeValidateExpression(context, node, inputType)
+    ) {
+      None
+    } else {
+      Some("Native expression validation returned false")
+    }
+  }
+
   protected def withNativeInput(expression: Expression, inputRow: InternalRow)(
       f: (Expression, ColumnarBatch, Seq[Attribute]) => Unit): Unit = {
+    withNativeInput(prepareNativeRow(expression, inputRow))(f)
+  }
+
+  private def withNativeInput(prepared: NativeRow)(
+      f: (Expression, ColumnarBatch, Seq[Attribute]) => Unit): Unit = {
     TaskResources.runUnsafe {
-      val expr = NativeExpressionPreparation(expression)
-      val references = expr
-        .collect { case ref: BoundReference => ref }
-        .groupBy(_.ordinal)
-        .toSeq
-        .sortBy(_._1)
-      references.foreach {
-        case (ordinal, refs) =>
-          require(
-            ordinal >= 0 && ordinal < inputRow.numFields,
-            s"Input ordinal $ordinal is outside ${inputRow.numFields} fields")
-          require(
-            refs.map(_.dataType).distinct.size == 1,
-            s"Conflicting input types for ordinal $ordinal")
-      }
-      val inputAttributes = references.map {
-        case (ordinal, refs) =>
-          AttributeReference(s"input_$ordinal", refs.head.dataType, refs.exists(_.nullable))()
-      }
-      // Preserve the test literal's nonfoldable contract by supplying its value as input.
-      val literals = expr.collect { case literal: NonFoldableLiteral => literal }.distinct
-      val literalOrdinals = literals.zipWithIndex.toMap
-      val attributes = inputAttributes ++ literals.zipWithIndex.map {
-        case (literal, index) =>
-          AttributeReference(s"non_foldable_$index", literal.dataType, literal.nullable)()
-      }
-      val ordinals = references.map(_._1).zipWithIndex.toMap
-      val bound = expr.transform {
-        case ref: BoundReference => ref.copy(ordinal = ordinals(ref.ordinal))
-        case literal: NonFoldableLiteral =>
-          BoundReference(
-            references.size + literalOrdinals(literal),
-            literal.dataType,
-            literal.nullable)
-      }
+      val attributes = prepared.attributes
       val columns = ArrayBuffer.empty[VeloxWritableColumnVector]
       var batch: ColumnarBatch = null
       try {
@@ -80,13 +137,7 @@ trait NativeExpressionRowEvalHelper extends NativeExpressionEvalHelper {
           batch = new ColumnarBatch(Array.empty[ColumnVector], 1)
         } else {
           val row = new VeloxColumnarRow(columns.toArray)
-          references.zipWithIndex.foreach {
-            case ((ordinal, _), index) =>
-              row.update(index, inputRow.get(ordinal, attributes(index).dataType))
-          }
-          literals.zipWithIndex.foreach {
-            case (literal, index) => row.update(references.size + index, literal.value)
-          }
+          prepared.values().zipWithIndex.foreach { case (value, index) => row.update(index, value) }
           row.finishWriteRow()
           val runtime = Runtimes.contextInstance(
             BackendsApiManager.getBackendName(backendClass),
@@ -105,7 +156,7 @@ trait NativeExpressionRowEvalHelper extends NativeExpressionEvalHelper {
             }
           }
         }
-        f(bound, batch, attributes)
+        f(prepared.expression, batch, attributes)
       } finally {
         try {
           if (batch != null) {
@@ -115,6 +166,25 @@ trait NativeExpressionRowEvalHelper extends NativeExpressionEvalHelper {
           columns.reverseIterator.foreach(_.close())
         }
       }
+    }
+  }
+
+  protected def checkEvaluationWithNativeRowIfSupported(
+      expression: Expression,
+      expected: Any,
+      inputRow: InternalRow): Boolean = {
+    val prepared = prepareNativeRow(expression, inputRow)
+    nativeExpressionFallbackReason(prepared.expression, prepared.attributes) match {
+      case Some(reason) =>
+        logInfo(s"Native expression fallback: $expression; $reason")
+        false
+      case None =>
+        // Allocation, compilation, execution and comparison failures are not fallback decisions.
+        withNativeInput(prepared) {
+          (expr, batch, attributes) =>
+            checkEvaluationWithNative(expr, Seq(expected), batch, attributes)
+        }
+        true
     }
   }
 

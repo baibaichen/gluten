@@ -17,384 +17,217 @@
 package org.apache.spark.sql.catalyst.expressions
 
 import org.apache.gluten.config.GlutenConfig
+import org.apache.gluten.exception.GlutenNotSupportException
 import org.apache.gluten.test.TestStats
 
-import org.apache.spark.sql.{GlutenExpressionTestsTrait, Row}
+import org.apache.spark.sql.{DataFrame, GlutenExpressionTestsTrait, Row}
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
 import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, GenericArrayData}
-import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.apache.spark.unsafe.types.UTF8String
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import org.scalatest.{Args, Reporter}
-import org.scalatest.events.{Event, TestFailed}
 import org.scalatest.exceptions.TestFailedException
 
-import java.nio.file.{Files, Paths}
-
-import scala.collection.JavaConverters._
-
 class GlutenExpressionRoutingSuite extends GlutenExpressionTestsTrait {
+  import GlutenExpressionRoutingSuite._
+
   override protected def shouldRun(testName: String): Boolean = true
 
-  private var directCalls = 0
-  private var executeDirect = false
-  private var failDirect = false
-  private var allowTypePolicy = true
+  private var nativeCalls = 0
+  private var sparkCalls = 0
+  private var nativeFailure: Option[RuntimeException] = None
+  private var validationFailure: Option[RuntimeException] = None
 
   override protected def beforeEach(): Unit = {
     super.beforeEach()
-    directCalls = 0
-    executeDirect = false
-    failDirect = false
-    allowTypePolicy = true
+    nativeCalls = 0
+    sparkCalls = 0
+    nativeFailure = None
+    validationFailure = None
   }
 
-  override def checkDataTypeSupported(expression: Expression): Boolean = {
-    allowTypePolicy && super.checkDataTypeSupported(expression)
+  override protected def expressionDataFrame(
+      expression: Expression,
+      inputRow: InternalRow): DataFrame = {
+    fail("Scalar dispatch must not build or collect a DataFrame")
   }
 
-  override protected def checkOffloadedExpression(
+  override protected def nativeExpressionFallbackReason(
+      expression: Expression,
+      attributes: Seq[Attribute]): Option[String] = {
+    validationFailure.foreach(throw _)
+    super.nativeExpressionFallbackReason(expression, attributes)
+  }
+
+  override protected def checkEvaluationWithNative(
       expression: => Expression,
+      expected: Seq[Any],
+      input: ColumnarBatch,
+      attributes: Seq[Attribute]): Unit = {
+    nativeCalls += 1
+    nativeFailure.foreach(throw _)
+    super.checkEvaluationWithNative(expression, expected, input, attributes)
+  }
+
+  override protected def checkEvaluationWithoutCodegen(
+      expression: Expression,
       expected: Any,
-      inputRow: InternalRow): Unit = {
-    directCalls += 1
-    if (failDirect) {
-      throw new IllegalStateException("confirmed native failure")
-    }
-    if (executeDirect) {
-      super.checkOffloadedExpression(expression, expected, inputRow)
-    }
+      inputRow: InternalRow = EmptyRow): Unit = {
+    sparkCalls += 1
+    super.checkEvaluationWithoutCodegen(expression, expected, inputRow)
   }
 
-  test("legacy fallback never invokes the direct hook") {
+  test("supported RTRIM selects native only and constructs its expression once") {
+    var constructed = 0
+    checkEvaluation(
+      {
+        constructed += 1
+        StringTrimRight(Literal("value "))
+      },
+      "value")
+    assert(constructed == 1)
+    assert(nativeCalls == 1)
+    assert(sparkCalls == 0)
+    assert(TestStats.offloadGluten)
+  }
+
+  test("unmapped expressions select Spark only") {
+    checkEvaluation(SparkOnly(7), 7)
+    assert(nativeCalls == 0)
+    assert(sparkCalls > 0)
+    assert(!TestStats.offloadGluten)
+  }
+
+  test("disabled Gluten and existing expression blacklist select Spark only") {
     withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "false") {
       checkEvaluation(StringTrimRight(Literal("value ")), "value")
     }
-    assert(directCalls == 0)
-  }
-
-  test("baseline-only native preflight invokes zero new direct hooks") {
-    val key = "gluten.expression.baselineOnly"
-    val previous = Option(System.getProperty(key))
-    System.setProperty(key, "true")
-    failDirect = true
-    try {
-      withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "true") {
-        val expr = StringTrimRight(Literal("value "))
-        assert(checkEvaluationWithQuery(expr, "value", EmptyRow).contains(true))
-        checkEvaluation(expr, "value")
-        allowTypePolicy = false
-        assert(checkEvaluationWithQuery(expr, "value", EmptyRow).contains(true))
-        checkEvaluation(expr, "value")
-      }
-      assert(directCalls == 0)
-    } finally {
-      previous match {
-        case Some(value) => System.setProperty(key, value)
-        case None => System.clearProperty(key)
-      }
-    }
-  }
-
-  test("legacy fallback retains its original query comparator") {
-    withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "false") {
-      checkEvaluation(Literal(1.0d), 1.000001d)
-    }
-    assert(directCalls == 0)
-  }
-
-  test("confirmed legacy native route invokes the direct hook once") {
-    withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "true") {
+    withSQLConf(GlutenConfig.EXPRESSION_BLACK_LIST.key -> "rtrim") {
       checkEvaluation(StringTrimRight(Literal("value ")), "value")
     }
-    assert(directCalls == 1)
+    assert(nativeCalls == 0)
+    assert(sparkCalls > 0)
   }
 
-  test("confirmed native failure propagates without retrying through fallback") {
-    failDirect = true
-    val error = intercept[IllegalStateException] {
-      withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "true") {
-        checkEvaluation(StringTrimRight(Literal("value ")), "value")
-      }
-    }
-    assert(error.getMessage == "confirmed native failure")
-    assert(directCalls == 1)
-  }
-
-  test("RTRIM remains eligible for actual direct native evaluation") {
-    executeDirect = true
-    withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "true") {
-      checkEvaluation(StringTrimRight(Literal("value ")), "value")
-    }
-    assert(directCalls == 1)
-  }
-
-  test("confirmed native checks retain the original query comparison contract") {
-    executeDirect = true
-    withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "true") {
-      checkEvaluation(Literal(1.0d), 1.000001d)
-    }
-    assert(directCalls == 1)
-  }
-
-  test("planner-folded operators remain old-route-only rather than raw native coverage") {
-    failDirect = true
+  test("unsupported native signatures use the existing native validator before fallback") {
     val values = Literal.create(Seq(1L, 2L), ArrayType(LongType))
-    withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "true") {
-      checkEvaluation(GreaterThan(values, values), false)
-    }
-    assert(directCalls == 0)
+    val expression = GreaterThan(values, values)
+    val reason = nativeExpressionFallbackReason(expression, Seq.empty)
+    assert(reason.contains("Native expression validation returned false"))
+    checkEvaluation(expression, false)
+    assert(nativeCalls == 0)
+    assert(sparkCalls > 0)
   }
 
-  test("native replay uses the observed legacy three-valued-logic normalization") {
-    executeDirect = true
+  test("native execution failures including unsupported exceptions never retry in Spark") {
+    Seq(
+      new IllegalStateException("native execution failure"),
+      new GlutenNotSupportException("unsupported during execution")).foreach {
+      failure =>
+        nativeFailure = Some(failure)
+        val error = intercept[RuntimeException] {
+          checkEvaluation(StringTrimRight(Literal("value ")), "value")
+        }
+        assert(error eq failure)
+        assert(sparkCalls == 0)
+    }
+    assert(nativeCalls == 2)
+  }
+
+  test("unexpected validation and invalid binding failures remain errors") {
+    val failure = new IllegalStateException("validation JNI failure")
+    validationFailure = Some(failure)
+    assert(intercept[IllegalStateException](checkEvaluation(Literal(1), 1)) eq failure)
+    validationFailure = None
+    intercept[IllegalArgumentException] {
+      checkEvaluation(BoundReference(1, IntegerType, true), null, InternalRow(null))
+    }
+    assert(nativeCalls == 0)
+    assert(sparkCalls == 0)
+  }
+
+  test("support rejection precedes native input allocation and allocation failures propagate") {
+    val expression = StringTrimRight(BoundReference(0, StringType, nullable = true))
+    val input = InternalRow(UTF8String.fromString("value "))
+    withSQLConf("spark.sql.inMemoryColumnarStorage.hugeVectorThreshold" -> "0") {
+      withSQLConf(GlutenConfig.EXPRESSION_BLACK_LIST.key -> "rtrim") {
+        checkEvaluation(expression, "value", input)
+      }
+      val fallbackChecks = sparkCalls
+      assert(fallbackChecks > 0)
+      intercept[UnsupportedOperationException] {
+        checkEvaluation(expression, "value", input)
+      }
+      assert(sparkCalls == fallbackChecks)
+      assert(nativeCalls == 0)
+    }
+  }
+
+  test("native and fallback expected mismatches fail on the selected branch") {
+    intercept[TestFailedException] {
+      checkEvaluation(StringTrimRight(Literal("value ")), "wrong")
+    }
+    assert(nativeCalls == 1)
+    assert(sparkCalls == 0)
+    intercept[TestFailedException] {
+      checkEvaluation(SparkOnly(7), 8)
+    }
+    assert(nativeCalls == 1)
+    assert(sparkCalls > 0)
+  }
+
+  test("native and fallback retain the historical query comparison contract") {
+    checkEvaluation(Literal(1.0d), 1.000001d)
+    withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "false") {
+      checkEvaluation(Literal(1.0d), 1.000001d)
+    }
+    assert(nativeCalls == 1)
+    assert(sparkCalls > 0)
+  }
+
+  test("literal functions stay foldable with one row and no input columns") {
+    val expression = StringTrimRight(Literal("value "))
+    withNativeInput(expression, InternalRow(new Object)) {
+      (prepared, input, attributes) =>
+        assert(prepared.isInstanceOf[StringTrimRight])
+        assert(prepared.foldable)
+        assert(prepared.children.head.isInstanceOf[Literal])
+        assert(attributes.isEmpty)
+        assert(input.numCols() == 0 && input.numRows() == 1)
+    }
+    checkEvaluation(expression, "value", InternalRow(new Object))
+    assert(nativeCalls == 1)
+    assert(sparkCalls == 0)
+  }
+
+  test("bound nested input is evaluated rather than skipped by the old DataFrame gate") {
+    val schema = new StructType().add("values", ArrayType(IntegerType))
+    val value = InternalRow(new GenericArrayData(Array[Any](1, null)))
+    checkEvaluation(BoundReference(1, schema, true), value, InternalRow(new Object, value))
+    assert(nativeCalls == 1)
+    assert(sparkCalls == 0)
+  }
+
+  test("mixed checks cannot restore native-only statistics") {
+    checkEvaluation(SparkOnly(7), 7)
+    checkEvaluation(Literal(7), 7)
+    assert(!TestStats.offloadGluten)
+    checkEvaluation(SparkOnly(7), 7)
+    assert(!TestStats.offloadGluten)
+  }
+
+  test("native ArrayExists preserves legacy three-valued-logic normalization") {
     val variable = NamedLambdaVariable("element", IntegerType, nullable = false)
     val predicate = LambdaFunction(Literal.create(null, BooleanType), Seq(variable))
-    val expr = ArrayExists(
+    val expression = ArrayExists(
       Literal.create(Seq(1, 2, 3), ArrayType(IntegerType)),
       predicate,
       followThreeValuedLogic = false)
-    withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "true") {
-      checkEvaluation(expr, false)
-    }
-    assert(directCalls == 1)
-  }
-
-  test("legacy unsupported input remains uncovered without a direct hook") {
-    checkEvaluation(
-      throw new IllegalStateException("the skipped expression must not be constructed"),
-      "unused",
-      InternalRow(InternalRow(1)))
-    assert(directCalls == 0)
-  }
-
-  test("ledger records per-check fallback and uncovered routes separately") {
-    val key = "gluten.expression.routeLog"
-    val previous = Option(System.getProperty(key))
-    val path = Paths.get(basePath, "routing-ledger.jsonl")
-    System.setProperty(key, path.toString)
-    try {
-      withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "false") {
-        checkEvaluation(StringTrimRight(Literal("value ")), "value")
-      }
-      withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "true") {
-        checkEvaluation(StringTrimRight(Literal("value ")), "value")
-      }
-      allowTypePolicy = false
-      withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "true") {
-        checkEvaluation(StringTrimRight(Literal("value ")), "value")
-      }
-      checkEvaluation(Literal("unused"), "unused", InternalRow(InternalRow(1)))
-      val mapper = new ObjectMapper()
-      val records = Files
-        .readAllLines(path)
-        .asScala
-        .map(line => mapper.readTree(line))
-        .filter(_.get("event_type").asText() == "evaluation")
-      assert(
-        records.map(_.get("route").asText()).toSeq ==
-          Seq("fallback", "native", "type-policy-excluded", "uncovered"))
-      assert(records.forall(_.get("occurrence_count").asInt() == 1))
-      assert(records.head.get("suite").asText() == getClass.getName)
-      assert(
-        records.head.get("test").asText() ==
-          "ledger records per-check fallback and uncovered routes separately")
-      assert(records.head.get("sql").asText().contains("rtrim"))
-      assert(records.head.get("result_type").asText() == "STRING")
-      assert(records.head.get("plan").asText().contains("Project"))
-      assert(records.head.get("confirmed_spark_projection_fallback").asBoolean())
-      assert(!records(2).get("legacy_eligible").asBoolean())
-      assert(!records(2).get("legacy_type_policy_eligible").asBoolean())
-      assert(records(2).get("project_exec_transformer_count").asInt() == 1)
-      assert(!records(2).get("confirmed_spark_projection_fallback").asBoolean())
-      assert(records(2).get("direct_native_eligible").asBoolean())
-      assert(records.last.get("expression").isNull)
-      val baseline = sys.props.getOrElse("gluten.expression.baselineOnly", "true").toBoolean
-      assert(directCalls == (if (baseline) 0 else 2))
-    } finally {
-      previous match {
-        case Some(value) => System.setProperty(key, value)
-        case None => System.clearProperty(key)
-      }
-    }
-  }
-
-  private def withBaselineMode(value: String)(body: => Unit): Unit = {
-    val key = "gluten.expression.baselineOnly"
-    val previous = Option(System.getProperty(key))
-    if (value == null) System.clearProperty(key) else System.setProperty(key, value)
-    try {
-      body
-    } finally {
-      previous match {
-        case Some(original) => System.setProperty(key, original)
-        case None => System.clearProperty(key)
-      }
-    }
-  }
-
-  // Exercise the actual routing hooks and per-test accounting without constructing a query plan.
-  private class RouteStatsProbe(scenarios: Seq[(String, Seq[String])])
-    extends GlutenExpressionTestsTrait {
-    override protected def shouldRun(testName: String): Boolean = true
-    override def beforeAll(): Unit = ()
-    override def afterAll(): Unit = ()
-    private var route = "uncovered"
-    private var hooks = 0
-
-    override protected def evaluateHistoricalQuery(
-        expression: => Expression,
-        expected: Any,
-        inputRow: InternalRow): Option[(Boolean, Expression, Seq[Attribute])] = {
-      if (route == "uncovered") {
-        onQueryNoEvaluation(inputRow)
-        None
-      } else {
-        val expr = expression
-        val isNative = route == "native"
-        onQueryEvaluationRoute(
-          expr,
-          offloaded = isNative || route == "mixed",
-          supportedTypes = route != "excluded",
-          nativeProjectCount = if (route == "fallback") 0 else 1,
-          sparkProjectCount = if (route == "fallback" || route == "mixed") 1 else 0,
-          projectedExpression = if (isNative) Some(expr) else None,
-          plannerOnly = false,
-          reason = "routing statistics fixture",
-          plan = "<fixture>"
-        )
-        Some((isNative, expr, Seq.empty))
-      }
-    }
-
-    override protected def checkOffloadedExpression(
-        expression: => Expression,
-        expected: Any,
-        inputRow: InternalRow): Unit = {
-      hooks += 1
-    }
-
-    scenarios.foreach {
-      case (name, routes) =>
-        test(name) {
-          assert(!TestStats.offloadGluten, "Each test starts without native evidence")
-          var seen = Vector.empty[String]
-          routes.foreach {
-            current =>
-              route = current
-              val input =
-                if (current == "uncovered") InternalRow(InternalRow(1))
-                else InternalRow.empty
-              checkEvaluation(Literal(1), 1, input)
-              seen :+= current
-              assert(TestStats.offloadGluten == seen.forall(_ == "native"))
-          }
-        }
-    }
-
-    def observe(): (Seq[(Boolean, Int)], Int) = {
-      val failures = scala.collection.mutable.ArrayBuffer.empty[String]
-      val reporter = new Reporter {
-        override def apply(event: Event): Unit = event match {
-          case failed: TestFailed => failures += failed.message
-          case _ =>
-        }
-      }
-      val results = scenarios.map {
-        case (name, _) =>
-          val before = TestStats.offloadGlutenTestNumber
-          val status = runTest(name, Args(reporter))
-          assert(status.succeeds(), failures.mkString("; "))
-          (TestStats.offloadGluten, TestStats.offloadGlutenTestNumber - before)
-      }
-      (results, hooks)
-    }
-  }
-
-  private def checkRouteStatistics(scenarios: Seq[Seq[String]], baseline: String): Unit = {
-    val originalOffload = TestStats.offloadGluten
-    val originalSuiteCount = TestStats.suiteTestNumber
-    val originalOffloadCount = TestStats.offloadGlutenTestNumber
-    val named = scenarios.zipWithIndex.map { case (routes, i) => s"route-$i" -> routes }
-    // Nested probes must not replace the enclosing test case in TestStats private bookkeeping.
-    val probeConf = SQLConf.get.clone()
-    probeConf.setConfString(GlutenConfig.UT_STATISTIC.key, "false")
-    try {
-      SQLConf.withExistingConf(probeConf) {
-        withBaselineMode(baseline) {
-          val (observed, hooks) = new RouteStatsProbe(named).observe()
-          val expected = scenarios.map {
-            routes =>
-              val nativeOnly = routes.nonEmpty && routes.forall(_ == "native")
-              (nativeOnly, if (nativeOnly) 1 else 0)
-          }
-          assert(observed == expected)
-          val expectedHooks =
-            if (baseline == "false") scenarios.flatten.count(_ == "native") else 0
-          assert(hooks == expectedHooks)
-        }
-      }
-    } finally {
-      TestStats.offloadGluten = originalOffload
-      TestStats.suiteTestNumber = originalSuiteCount
-      TestStats.offloadGlutenTestNumber = originalOffloadCount
-    }
-  }
-
-  test("native-only query evidence updates TestStats even in baseline-only mode") {
-    checkRouteStatistics(Seq(Seq("native", "native")), "true")
-  }
-
-  test("native-only replay updates TestStats and invokes the direct hook") {
-    checkRouteStatistics(Seq(Seq("native", "native")), "false")
-  }
-
-  test("default baseline mode records native-only evidence without direct replay") {
-    checkRouteStatistics(Seq(Seq("native")), null)
-  }
-
-  test("fallback and excluded query routes never count as native-only") {
-    checkRouteStatistics(Seq(Seq("fallback"), Seq("excluded"), Seq("mixed")), "false")
-  }
-
-  test("fallback and native route ordering cannot restore native-only status") {
-    checkRouteStatistics(Seq(Seq("native", "fallback"), Seq("fallback", "native")), "false")
-  }
-
-  test("policy and uncovered routes keep a mixed test non-native in either order") {
-    checkRouteStatistics(
-      Seq(
-        Seq("native", "excluded"),
-        Seq("excluded", "native"),
-        Seq("native", "mixed"),
-        Seq("mixed", "native"),
-        Seq("native", "uncovered"),
-        Seq("uncovered", "native")),
-      "false"
-    )
-  }
-
-  test("empty and uncovered checks retain the default non-native classification") {
-    checkRouteStatistics(Seq(Seq.empty, Seq("uncovered")), null)
-  }
-
-  test("native classification and disqualifying routes reset between tests on one suite") {
-    checkRouteStatistics(
-      Seq(Seq("fallback"), Seq("native"), Seq.empty, Seq("excluded"), Seq("native")),
-      "false")
-  }
-
-  test("successful actual direct native evaluation marks the test as offloaded") {
-    executeDirect = true
-    withBaselineMode("false") {
-      withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "true") {
-        checkEvaluation(StringTrimRight(Literal("value ")), "value")
-      }
-      assert(directCalls == 1)
-      assert(TestStats.offloadGluten)
-    }
+    checkEvaluation(expression, false)
+    assert(nativeCalls == 1)
+    assert(sparkCalls == 0)
   }
 
   private class ComparatorProbe(acceptMarker: Boolean) extends GlutenExpressionTestsTrait {
@@ -416,12 +249,19 @@ class GlutenExpressionRoutingSuite extends GlutenExpressionTestsTrait {
 
     def assertResult(expression: Expression, actual: Any, expected: Any): Unit =
       assertQueryResult(expression, expected, EmptyRow, Array(Row(actual)))
+
+    def verify(expression: Expression, expected: Any, input: InternalRow = EmptyRow): Unit =
+      checkEvaluation(expression, expected, input)
   }
 
-  test("query assertions dispatch through an overridden result comparator") {
+  test("query and native assertions dispatch through an overridden result comparator") {
     val custom = new ComparatorProbe(acceptMarker = true)
     assert(custom.compare(7, 70, IntegerType))
     custom.assertResult(Literal(7), 7, 70)
+    custom.verify(Literal(7), 70)
+    withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "false") {
+      custom.verify(Literal(7), 70)
+    }
   }
 
   test("struct comparisons dispatch nested fields through the overridden comparator") {
@@ -439,6 +279,7 @@ class GlutenExpressionRoutingSuite extends GlutenExpressionTestsTrait {
     val expected = new GenericArrayData(Array[Any](70, null))
     assert(custom.compare(actual, expected, ArrayType(IntegerType)))
     assert(!custom.compare(actual, new GenericArrayData(Array[Any](70)), ArrayType(IntegerType)))
+    custom.verify(BoundReference(0, ArrayType(IntegerType), true), expected, InternalRow(actual))
   }
 
   test("map comparisons dispatch sorted keys and nested values through the overridden comparator") {
@@ -450,7 +291,9 @@ class GlutenExpressionRoutingSuite extends GlutenExpressionTestsTrait {
       new GenericArrayData(Array[Any](1, 2)),
       new GenericArrayData(Array[Any](InternalRow(70), null)))
     val valueType = new StructType().add("value", IntegerType, nullable = false)
-    assert(custom.compare(actual, expected, MapType(IntegerType, valueType)))
+    val mapType = MapType(IntegerType, valueType)
+    assert(custom.compare(actual, expected, mapType))
+    custom.verify(BoundReference(0, mapType, true), expected, InternalRow(actual))
     val actualKey = new ArrayBasedMapData(
       new GenericArrayData(Array[Any](7)),
       new GenericArrayData(Array[Any](UTF8String.fromString("value"))))
@@ -477,9 +320,10 @@ class GlutenExpressionRoutingSuite extends GlutenExpressionTestsTrait {
     assert(original.compare(Float.NaN, Float.NaN, FloatType))
     assert(original.compare(0.0f, -0.0f, FloatType))
     assert(!original.compare(1.0f, 1.000001f, FloatType))
+    assert(original.compare(Decimal("1.23"), Decimal("1.230"), DecimalType(10, 3)))
   }
 
-  test("default comparator preserves nested nulls and unordered-map equality") {
+  test("default comparator preserves nested nulls unordered maps and duplicate-key behavior") {
     val original = new ComparatorProbe(acceptMarker = false)
     val actual = new ArrayBasedMapData(
       new GenericArrayData(Array[Any](2, 1)),
@@ -494,6 +338,40 @@ class GlutenExpressionRoutingSuite extends GlutenExpressionTestsTrait {
         InternalRow(new GenericArrayData(Array[Any](1.0d, null))),
         InternalRow(new GenericArrayData(Array[Any](1.000001d, null))),
         schema))
+    val duplicates = new ArrayBasedMapData(
+      new GenericArrayData(Array[Any](1, 1, 2)),
+      new GenericArrayData(Array[Any](9.0d, 1.0d, null)))
+    assert(original.compare(duplicates, expected, MapType(IntegerType, DoubleType)))
+    original.verify(
+      BoundReference(0, schema, true),
+      InternalRow(null),
+      InternalRow(InternalRow(null)))
   }
 
+  test("borrowed maps preserve last-value duplicate complex keys") {
+    val arrayType = ArrayType(IntegerType)
+    val array = new GenericArrayData(Array[Any](1, null))
+    val structType = new StructType().add("values", arrayType)
+    Seq((arrayType, array), (structType, InternalRow(array))).foreach {
+      case (keyType, key) =>
+        val mapType = MapType(keyType, IntegerType)
+        val actual = new ArrayBasedMapData(
+          new GenericArrayData(Array.fill[Any](8)(key)),
+          new GenericArrayData((0 until 8).map(Int.box).toArray))
+        val expected = new ArrayBasedMapData(
+          new GenericArrayData(Array[Any](key)),
+          new GenericArrayData(Array[Any](7)))
+        val original = new ComparatorProbe(acceptMarker = false)
+        assert(original.compare(actual, expected, mapType))
+        original.verify(BoundReference(0, mapType, true), expected, InternalRow(actual))
+    }
+  }
+}
+
+object GlutenExpressionRoutingSuite {
+  case class SparkOnly(value: Int) extends LeafExpression with CodegenFallback {
+    override def nullable: Boolean = false
+    override def dataType: DataType = IntegerType
+    override def eval(input: InternalRow): Any = value
+  }
 }

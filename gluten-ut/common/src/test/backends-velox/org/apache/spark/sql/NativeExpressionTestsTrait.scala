@@ -18,36 +18,19 @@ package org.apache.spark.sql
 
 import org.apache.gluten.backendsapi.SubstraitBackend
 import org.apache.gluten.backendsapi.velox.{VeloxBackend, VeloxListenerApi}
-import org.apache.gluten.test.{MockVeloxBackend, TestStats}
+import org.apache.gluten.test.MockVeloxBackend
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.types._
 
-import org.scalatest.{Args, Status}
-
-import java.util.concurrent.atomic.AtomicLong
-
-/** Runs Spark's original expression checks, then a direct native scalar check. */
+/** Standalone scalar checks use the same native-support decision without a SparkSession. */
 trait NativeExpressionTestsTrait extends GlutenTestsCommonTrait with NativeExpressionRowEvalHelper {
 
   implicit override protected val backendClass: Class[_ <: SubstraitBackend] =
     classOf[VeloxBackend]
 
   override protected def defaultOffloadGluten: Boolean = false
-
-  private val nativeChecksSucceeded = new AtomicLong
-  private val nativeChecksFailed = new AtomicLong
-
-  private val nativeExpressionConf = Seq(
-    "spark.gluten.experimental.enabled" -> "true",
-    "spark.gluten.experimental.from_csv.enabled" -> "true",
-    "spark.gluten.experimental.to_csv.enabled" -> "true",
-    "spark.gluten.experimental.to_number.enabled" -> "true",
-    "spark.gluten.experimental.to_char.enabled" -> "true",
-    "spark.gluten.sql.timestampNtzAsTimestampUtc.enabled" -> "true",
-    "spark.gluten.sql.enableRegexpInstrOffload" -> "true"
-  )
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -66,20 +49,10 @@ trait NativeExpressionTestsTrait extends GlutenTestsCommonTrait with NativeExpre
       expression: => Expression,
       expected: Any,
       inputRow: InternalRow = EmptyRow): Unit = {
-    checkEvaluationWithSpark(expression, expected, inputRow)
-    var succeeded = false
-    try {
-      val nativeExpression = expression
-      withSQLConf(nativeExpressionConf: _*) {
-        checkEvaluationWithNativeRow(nativeExpression, expected, inputRow)
-      }
-      nativeChecksSucceeded.incrementAndGet()
-      TestStats.offloadGluten = true
-      succeeded = true
-    } finally {
-      if (!succeeded) {
-        nativeChecksFailed.incrementAndGet()
-      }
+    val offloaded = checkEvaluationWithNativeRowIfSupported(expression, expected, inputRow)
+    recordExpressionEvaluation(offloaded)
+    if (!offloaded) {
+      checkEvaluationWithSpark(expression, expected, inputRow)
     }
   }
 
@@ -107,29 +80,4 @@ trait NativeExpressionTestsTrait extends GlutenTestsCommonTrait with NativeExpre
     super.checkEvaluationWithUnsafeProjection(expression, boxed, inputRow)
   }
 
-  override protected def checkResult(
-      result: Any,
-      expected: Any,
-      dataType: DataType,
-      nullable: Boolean): Boolean = {
-    checkResultWithSpark(result, expected, dataType, nullable)
-  }
-
-  override def runTest(testName: String, args: Args): Status = {
-    val succeeded = nativeChecksSucceeded.get()
-    val failed = nativeChecksFailed.get()
-    try {
-      super.runTest(testName, args)
-    } finally {
-      val validated = nativeChecksSucceeded.get() - succeeded
-      // scalastyle:off println
-      println(
-        s"[native-expression] $testName: " +
-          s"validated=$validated, " +
-          s"failed=${nativeChecksFailed.get() - failed}; " +
-          (if (validated == 0) "not native coverage"
-           else "validated native coverage"))
-      // scalastyle:on println
-    }
-  }
 }

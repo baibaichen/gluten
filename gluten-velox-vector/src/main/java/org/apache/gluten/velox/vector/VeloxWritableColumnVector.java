@@ -1493,6 +1493,9 @@ public class VeloxWritableColumnVector extends WritableColumnVector {
       curChunkCap = 0L;
       curChunkOffset = 0L;
       chunkUsed.clear();
+      // releaseMemory() is a no-op; superclass cleanup only drops Java-side resources.
+      childColumn = null;
+      super.close();
       closed = true;
     }
   }

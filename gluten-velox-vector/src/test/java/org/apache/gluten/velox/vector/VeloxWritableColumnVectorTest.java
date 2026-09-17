@@ -477,6 +477,27 @@ public class VeloxWritableColumnVectorTest {
     }
   }
 
+  @Test
+  public void closeClearsChildAndDictionaryReferences() {
+    long[] ptrs = allocArrayIntDescriptor(2, 3);
+    try {
+      VeloxWritableColumnVector w =
+          new VeloxWritableColumnVector(
+              ptrs[0], 0L, 2, DataTypes.createArrayType(DataTypes.IntegerType));
+      assertNotNull(w.getChildColumn());
+      WritableColumnVector dictionaryIds = w.reserveDictionaryIds(2);
+      assertSame(dictionaryIds, w.getDictionaryIds());
+
+      w.close();
+
+      assertNull(w.getChildColumn());
+      assertNull(w.getDictionaryIds());
+      assertDoesNotThrow(w::close);
+    } finally {
+      freeArrayIntDescriptor(ptrs);
+    }
+  }
+
   /**
    * Verifies that an unsupported type throws {@link UnsupportedOperationException} rather than
    * producing a silent incorrect result.

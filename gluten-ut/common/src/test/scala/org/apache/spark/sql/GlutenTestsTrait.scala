@@ -31,7 +31,6 @@ import org.apache.spark.sql.catalyst.optimizer.{ConstantFolding, ConvertToLocalR
 import org.apache.spark.sql.catalyst.util.{ArrayData, GenericArrayData, MapData, TypeUtils}
 import org.apache.spark.sql.classic.ClassicColumn
 import org.apache.spark.sql.classic.ClassicConversions._
-import org.apache.spark.sql.execution.ProjectExec
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
@@ -46,8 +45,6 @@ import scala.annotation.nowarn
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
-import scala.util.Try
-import scala.util.control.NonFatal
 
 trait GlutenTestsTrait extends GlutenTestsCommonTrait {
 
@@ -156,33 +153,11 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
       expression: => Expression,
       expected: Any,
       inputRow: InternalRow): Option[Boolean] = {
-    evaluateHistoricalQuery(expression, expected, inputRow).map(_._1)
-  }
-
-  protected def evaluateHistoricalQuery(
-      expression: => Expression,
-      expected: Any,
-      inputRow: InternalRow): Option[(Boolean, Expression, Seq[Attribute])] = {
     if (canConvertToDataFrame(inputRow)) {
-      var observed: Option[Expression] = None
-      val expr =
-        try {
-          val original = expression
-          observed = Some(original)
-          val resolved = prepareQueryExpression(original)
-          assert(resolved.resolved)
-          resolved
-        } catch {
-          case NonFatal(error) =>
-            onQueryBaselineError(
-              observed,
-              error,
-              "<plan unavailable during expression preparation>")
-            throw error
-        }
+      val expr = prepareQueryExpression(expression)
+      assert(expr.resolved)
       Some(glutenCheckExpressionWithRoute(expr, expected, inputRow))
     } else {
-      onQueryNoEvaluation(inputRow)
       logWarning(
         "Skipping evaluation - Nonempty inputRow cannot be converted to DataFrame " +
           "due to complex/unsupported types.\n")
@@ -226,10 +201,15 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
       input: MapData,
       kt: DataType,
       vt: DataType): (ArrayData, ArrayData) = {
-    val keyArray = input.keyArray().toArray[Any](kt)
-    val valueArray = input.valueArray().toArray[Any](vt)
-    val newMap = (keyArray.zip(valueArray)).toMap
-    val sortedMap = mutable.SortedMap(newMap.toSeq: _*)(TypeUtils.getInterpretedOrdering(kt))
+    def values(array: ArrayData, dataType: DataType): Seq[Any] =
+      (0 until array.numElements()).map {
+        i => if (array.isNullAt(i)) null else array.get(i, dataType)
+      }
+    val keyArray = values(input.keyArray(), kt)
+    val valueArray = values(input.valueArray(), vt)
+    // Borrowed composite keys need interpreted ordering, not JVM object identity.
+    val sortedMap =
+      mutable.SortedMap(keyArray.zip(valueArray): _*)(TypeUtils.getInterpretedOrdering(kt))
     (new GenericArrayData(sortedMap.keys.toArray), new GenericArrayData(sortedMap.values.toArray))
   }
 
@@ -253,8 +233,8 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
         st.zipWithIndex.forall {
           case (f, i) =>
             checkResult(
-              result.get(i, f.dataType),
-              expected.get(i, f.dataType),
+              if (result.isNullAt(i)) null else result.get(i, f.dataType),
+              if (expected.isNullAt(i)) null else expected.get(i, f.dataType),
               f.dataType,
               f.nullable)
         }
@@ -264,7 +244,11 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
           var isSame = true
           var i = 0
           while (isSame && i < result.numElements) {
-            isSame = checkResult(result.get(i, et), expected.get(i, et), et, cn)
+            isSame = checkResult(
+              if (result.isNullAt(i)) null else result.get(i, et),
+              if (expected.isNullAt(i)) null else expected.get(i, et),
+              et,
+              cn)
             i += 1
           }
           isSame
@@ -343,99 +327,36 @@ trait GlutenTestsTrait extends GlutenTestsCommonTrait {
     assertQueryResult(expression, expected, inputRow, result)
   }
 
-  protected def onQueryEvaluationRoute(
-      expression: Expression,
-      offloaded: Boolean,
-      supportedTypes: Boolean,
-      nativeProjectCount: Int,
-      sparkProjectCount: Int,
-      projectedExpression: Option[Expression],
-      plannerOnly: Boolean,
-      reason: String,
-      plan: => String): Unit = {}
-
-  protected def onQueryNoEvaluation(inputRow: InternalRow): Unit = {}
-
-  protected def onQueryBaselineError(
-      expression: Option[Expression],
-      error: Throwable,
-      plan: String): Unit = {}
-
   private def glutenCheckExpressionWithRoute(
       expression: Expression,
       expected: Any,
-      inputRow: InternalRow): (Boolean, Expression, Seq[Attribute]) = {
-    var resultDF: DataFrame = null
-    try {
-      resultDF = expressionDataFrame(expression, inputRow)
-      doCheckExpression(expression, expected, inputRow, resultDF)
-      TestStats.testUnitNumber = TestStats.testUnitNumber + 1
-      val supportedTypes =
-        checkDataTypeSupported(expression) &&
-          expression.children.forall(checkDataTypeSupported)
-      val executedPlan = resultDF.queryExecution.executedPlan
-      val nativeProjects = executedPlan.collect { case p: ProjectExecTransformer => p }
-      val projectCount = nativeProjects.size
-      val sparkProjectCount = executedPlan.collect { case p: ProjectExec => p }.size
-      val offloaded = if (supportedTypes) {
-        if (projectCount == 1) {
-          TestStats.offloadGlutenUnitNumber += 1
-          logInfo("Offload to native backend in the test.\n")
-          true
-        } else {
-          logInfo("Not supported in native backend, fall back to vanilla spark in the test.\n")
-          shouldNotFallback()
-          false
-        }
+      inputRow: InternalRow): Boolean = {
+    val resultDF = expressionDataFrame(expression, inputRow)
+    doCheckExpression(expression, expected, inputRow, resultDF)
+    TestStats.testUnitNumber = TestStats.testUnitNumber + 1
+    val supportedTypes =
+      checkDataTypeSupported(expression) &&
+        expression.children.forall(checkDataTypeSupported)
+    val executedPlan = resultDF.queryExecution.executedPlan
+    val nativeProjects = executedPlan.collect { case p: ProjectExecTransformer => p }
+    val projectCount = nativeProjects.size
+    val offloaded = if (supportedTypes) {
+      if (projectCount == 1) {
+        TestStats.offloadGlutenUnitNumber += 1
+        logInfo("Offload to native backend in the test.\n")
+        true
       } else {
-        logInfo("Has unsupported data type, fall back to vanilla spark.\n")
+        logInfo("Not supported in native backend, fall back to vanilla spark in the test.\n")
         shouldNotFallback()
         false
       }
-
-      val physicalNativeOnly = projectCount == 1 && sparkProjectCount == 0
-      val projection = if (physicalNativeOnly && nativeProjects.head.projectList.size == 1) {
-        val project = nativeProjects.head
-        val projected = project.projectList.head match {
-          case alias: Alias => alias.child
-          case other => other
-        }
-        Some((projected, project.child.output))
-      } else {
-        None
-      }
-      val plannerOnly = projection.exists {
-        case (projected, _) =>
-          projected.isInstanceOf[Literal] && !expression.isInstanceOf[Literal]
-      }
-      onQueryEvaluationRoute(
-        expression,
-        offloaded,
-        supportedTypes,
-        projectCount,
-        sparkProjectCount,
-        projection.map(_._1),
-        plannerOnly,
-        if (!supportedTypes) "unsupported logical result/child type"
-        else s"ProjectExecTransformer count=$projectCount (required exactly 1)",
-        executedPlan.treeString
-      )
-      projection match {
-        case Some((projected, attributes)) if !plannerOnly =>
-          (true, projected, attributes)
-        case _ =>
-          (false, expression, Seq.empty)
-      }
-    } catch {
-      case NonFatal(error) =>
-        val plan = if (resultDF == null) {
-          "<plan unavailable>"
-        } else {
-          Try(resultDF.queryExecution.executedPlan.treeString).getOrElse("<plan unavailable>")
-        }
-        onQueryBaselineError(Some(expression), error, plan)
-        throw error
+    } else {
+      logInfo("Has unsupported data type, fall back to vanilla spark.\n")
+      shouldNotFallback()
+      false
     }
+
+    offloaded
   }
 
   protected def assertQueryResult(

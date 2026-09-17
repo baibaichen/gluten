@@ -18,6 +18,7 @@ package org.apache.spark.sql.catalyst.expressions
 
 import org.apache.gluten.backendsapi.BackendsApiManager
 import org.apache.gluten.columnarbatch.ColumnarBatches
+import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.velox.vector.VeloxInputBatch
 
 import org.apache.spark.{SparkContext, SparkEnv}
@@ -27,6 +28,8 @@ import org.apache.spark.sql.catalyst.util.GenericArrayData
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
+
+import org.scalatest.exceptions.TestFailedException
 
 class GlutenNativeExpressionAdapterSuite extends NativeExpressionTestsTrait {
   override protected def shouldRun(testName: String): Boolean = true
@@ -105,6 +108,38 @@ class GlutenNativeExpressionAdapterSuite extends NativeExpressionTestsTrait {
     }
     checkEvaluation(ref, nested, InternalRow(nested))
     checkEvaluation(ref, null, InternalRow(null))
+  }
+
+  test("standalone borrowed comparisons preserve strict Spark numeric and map semantics") {
+    val arrayType = ArrayType(DoubleType)
+    val actual = new GenericArrayData(Array[Any](1.0d, null))
+    val ref = BoundReference(0, arrayType, nullable = true)
+    checkEvaluation(ref, actual, InternalRow(actual))
+    intercept[TestFailedException] {
+      checkEvaluation(ref, new GenericArrayData(Array[Any](1.000001d, null)), InternalRow(actual))
+    }
+    checkEvaluation(Literal(0.0d), -0.0d)
+    checkEvaluation(Literal(Double.NaN), Double.NaN)
+    val mapType = MapType(IntegerType, IntegerType)
+    val map = create_map(1 -> null, 2 -> 7)
+    checkEvaluation(BoundReference(0, mapType, true), map, InternalRow(map))
+    intercept[TestFailedException] {
+      checkEvaluation(
+        BoundReference(0, mapType, true),
+        create_map(2 -> 7, 1 -> null),
+        InternalRow(map))
+    }
+  }
+
+  test("standalone support checks respect disabled native feature configuration") {
+    val key = GlutenConfig.GLUTEN_ENABLED.key
+    val expression = Literal.create(java.time.LocalDateTime.of(1970, 1, 1, 0, 0), TimestampNTZType)
+    withSQLConf(key -> "false") {
+      assert(nativeExpressionFallbackReason(expression, Seq.empty).isDefined)
+      checkEvaluation(expression, 0L)
+      assert(SQLConf.get.getConfString(key) == "false")
+    }
+    assertNoSparkContext()
   }
 
   test("native row adapter rejects invalid and conflicting bindings before reading input") {

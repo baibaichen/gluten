@@ -26,9 +26,9 @@ import org.apache.gluten.vectorized.VeloxExpressionEvaluatorJniWrapper
 import org.apache.gluten.velox.vector.VeloxInputBatch
 
 import org.apache.spark.SparkFunSuite
-import org.apache.spark.sql.catalyst.CatalystTypeConverters
+import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
 import org.apache.spark.sql.catalyst.analysis.ResolveTimeZone
-import org.apache.spark.sql.catalyst.util.DateTimeUtils
+import org.apache.spark.sql.catalyst.util.{ArrayData, DateTimeUtils}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.vectorized.ColumnarBatch
@@ -43,6 +43,41 @@ trait NativeExpressionEvalHelper extends ExpressionEvalHelper {
   self: SparkFunSuite =>
 
   implicit protected def backendClass: Class[_ <: SubstraitBackend]
+
+  override protected def checkResult(
+      result: Any,
+      expected: Any,
+      dataType: DataType,
+      nullable: Boolean): Boolean = {
+    (result, expected) match {
+      case (actual: InternalRow, wanted: InternalRow) =>
+        val schema = UserDefinedType.sqlType(dataType).asInstanceOf[StructType]
+        assert(actual.numFields == schema.length && wanted.numFields == schema.length)
+        schema.zipWithIndex.forall {
+          case (field, index) =>
+            checkResult(
+              if (actual.isNullAt(index)) null else actual.get(index, field.dataType),
+              if (wanted.isNullAt(index)) null else wanted.get(index, field.dataType),
+              field.dataType,
+              field.nullable
+            )
+        }
+      case (actual: ArrayData, wanted: ArrayData) =>
+        val ArrayType(elementType, containsNull) =
+          UserDefinedType.sqlType(dataType).asInstanceOf[ArrayType]
+        actual.numElements() == wanted.numElements() &&
+        (0 until actual.numElements()).forall {
+          index =>
+            checkResult(
+              if (actual.isNullAt(index)) null else actual.get(index, elementType),
+              if (wanted.isNullAt(index)) null else wanted.get(index, elementType),
+              elementType,
+              containsNull
+            )
+        }
+      case _ => super.checkResult(result, expected, dataType, nullable)
+    }
+  }
 
   /** One output expression; backend, evaluator, inputs and outputs share a TaskResources scope. */
   protected def prepareNativeExpression(
@@ -184,9 +219,8 @@ trait NativeExpressionEvalHelper extends ExpressionEvalHelper {
       try {
         catalystValues.indices.foreach {
           rowIndex =>
-            // ColumnarArray.get does not check nulls. Spark's result checker expects
-            // null-safe Catalyst values, including arrays nested inside maps and structs.
-            val actual = view.getRow(rowIndex).copy().get(0, resultType)
+            val row = view.getRow(rowIndex)
+            val actual = if (row.isNullAt(0)) null else row.get(0, resultType)
             val expectedValue = catalystValues(rowIndex)
             try {
               assert(

@@ -78,6 +78,9 @@ trait SparkShims {
 
   def runtimeReplaceableExpressionMappings: Seq[Sig]
 
+  def rewriteWithExpression(plan: LogicalPlan): LogicalPlan =
+    throw new UnsupportedOperationException("Expression benchmarks require Spark 4 or later")
+
   def filesGroupedToBuckets(
       selectedPartitions: Array[PartitionDirectory]): Map[Int, Array[PartitionedFile]]
 

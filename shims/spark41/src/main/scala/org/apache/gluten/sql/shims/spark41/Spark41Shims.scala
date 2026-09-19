@@ -26,6 +26,7 @@ import org.apache.spark.sql.{AnalysisException, SparkSession}
 import org.apache.spark.sql.catalyst.{ExtendedAnalysisException, InternalRow}
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate._
+import org.apache.spark.sql.catalyst.optimizer.RewriteWithExpression
 import org.apache.spark.sql.catalyst.plans.{JoinType, LeftSingle}
 import org.apache.spark.sql.catalyst.plans.QueryPlan
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
@@ -59,6 +60,16 @@ class Spark41Shims extends SparkShims {
 
   override def isKeyGroupedPartitioning(partitioning: Partitioning): Boolean =
     partitioning.isInstanceOf[KeyGroupedPartitioning]
+    
+  override def rewriteWithExpression(plan: LogicalPlan): LogicalPlan = {
+    val rewritten = RewriteWithExpression(plan)
+    rewritten.foreach(_.expressions.foreach(_.foreach {
+      case expression @ (_: With | _: CommonExpressionRef) =>
+        throw new IllegalArgumentException(s"Unprepared expression: $expression")
+      case _ =>
+    }))
+    rewritten
+  }
 
   override def getLocalTableScanStream(plan: LocalTableScanExec): Option[SparkDataStream] =
     plan.stream

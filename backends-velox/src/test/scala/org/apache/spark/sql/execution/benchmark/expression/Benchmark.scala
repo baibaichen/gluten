@@ -16,6 +16,7 @@
  */
 package org.apache.spark.sql.execution.benchmark.expression
 
+import org.apache.gluten.expression.ExpressionUtils
 import org.apache.gluten.sql.shims.SparkShimLoader
 
 import org.apache.spark.benchmark
@@ -141,7 +142,7 @@ final private[benchmark] class Benchmark(
   }
 
   private[expression] def prepareAnalyzed(schema: StructType, native: Boolean): Project = checked {
-    val relation = LocalRelation(SparkShimLoader.getSparkShims.attributesFromStruct(schema))
+    val relation = LocalRelation(ExpressionUtils.attributesFromStruct(schema))
     val parsed = spark.sessionState.sqlParser.parseExpression(scenario.sql)
     require(!parsed.exists(_.isInstanceOf[SubqueryExpression]), "Subqueries are not scalar inputs")
     val analyzed = spark.sessionState.executePlan(

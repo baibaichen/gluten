@@ -34,28 +34,32 @@ import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.apache.spark.task.TaskResources
 
 import io.substrait.proto.{ExpressionReference, ExtendedExpression, Type}
+import org.scalatest.Assertions.cancel
 
 import scala.collection.JavaConverters._
 
-trait NativeExpressionEvalHelper extends ExpressionEvalHelper {
-  self: SparkFunSuite =>
-
-  protected def prepareNativeExpression(
-      expressions: Seq[Expression],
-      inputAttributes: Seq[Attribute]): PreparedNativeExpression = {
+/** Compile inside the caller's live TaskResources scope, which also owns cleanup. */
+final private[spark] class NativeExpressionEvaluator(
+    expressions: Seq[Expression],
+    inputAttributes: Seq[Attribute]) extends AutoCloseable {
+  private var backendName: String = _
+  private var jni: VeloxExpressionEvaluatorJniWrapper = _
+  private val numInputColumns = inputAttributes.size
+  private val handle = {
     require(expressions.size == 1, "Native preparation supports exactly one output expression")
     require(
       TaskResources.inSparkTask(),
       "Native expression evaluation requires a TaskResources.runUnsafe scope")
     val expression = expressions.head
+    val attributes = inputAttributes
     require(expression.resolved, s"Unresolved native expression: $expression")
     expression.foreach {
       case ref: BoundReference =>
         require(
-          ref.ordinal >= 0 && ref.ordinal < inputAttributes.size,
-          s"Input ordinal ${ref.ordinal} is outside ${inputAttributes.size} columns")
+          ref.ordinal >= 0 && ref.ordinal < attributes.size,
+          s"Input ordinal ${ref.ordinal} is outside ${attributes.size} columns")
         require(
-          ref.dataType == inputAttributes(ref.ordinal).dataType,
+          ref.dataType == attributes(ref.ordinal).dataType,
           s"Input type mismatch for ordinal ${ref.ordinal}")
       case _ =>
     }
@@ -63,20 +67,20 @@ trait NativeExpressionEvalHelper extends ExpressionEvalHelper {
     val context = new SubstraitContext
     val expressionNode =
       try {
-        SubstraitUtil.toSubstraitExpression(expression, inputAttributes, context)
+        SubstraitUtil.toSubstraitExpression(expression, attributes, context)
       } catch {
         case unsupported: GlutenNotSupportException => cancel(unsupported.getMessage, unsupported)
       }
     val inputType = TypeBuilder.makeStruct(
       false,
-      ConverterUtils.collectAttributeTypeNodes(inputAttributes.asJava))
+      ConverterUtils.collectAttributeTypeNodes(attributes.asJava))
     if (
       !BackendsApiManager.getValidatorApiInstance
         .doNativeValidateExpression(context, expressionNode, inputType)
     ) {
       cancel(s"Native validation does not support: ${expression.sql}")
     }
-    val schema = SubstraitUtil.toNameStruct(inputAttributes.asJava).toBuilder
+    val schema = SubstraitUtil.toNameStruct(attributes.asJava).toBuilder
     schema.getStructBuilder.setNullability(Type.Nullability.NULLABILITY_REQUIRED)
     val extensions = context.registeredFunction.asScala.map {
       case (name, id) => ExtensionBuilder.makeFunctionMapping(name, id).toProtobuf
@@ -92,52 +96,51 @@ trait NativeExpressionEvalHelper extends ExpressionEvalHelper {
           .addOutputNames("result"))
       .build()
       .toByteArray
-    val backendName = BackendsApiManager.getBackendName
+    backendName = BackendsApiManager.getBackendName
     val runtime = Runtimes.contextInstance(backendName, "NativeExpressionEvalHelper")
-    val jni = VeloxExpressionEvaluatorJniWrapper.create(runtime)
-    val prepared =
-      new PreparedNativeExpression(jni, jni.compile(serialized), backendName, inputAttributes.size)
-    TaskResources.addRecycler("Native expression evaluator", 100) {
-      prepared.close()
-    }
-    prepared
+    jni = VeloxExpressionEvaluatorJniWrapper.create(runtime)
+    jni.compile(serialized)
   }
+  private var closed = false
+  TaskResources.addRecycler("Native expression evaluator", 100) {
+    close()
+  }
+
+  def evaluate(input: ColumnarBatch): ColumnarBatch = {
+    require(!closed, "Native expression evaluator is closed")
+    require(input.numCols() == numInputColumns, "Input columns and attributes must match")
+    ColumnarBatches.checkOffloaded(input)
+    val outputHandle = jni.evaluate(handle, ColumnarBatches.getNativeHandle(backendName, input))
+    try {
+      ColumnarBatches.create(outputHandle)
+    } catch {
+      case t: Throwable =>
+        ColumnarBatchJniWrapper.close(outputHandle)
+        throw t
+    }
+  }
+
+  override def close(): Unit = {
+    if (!closed) {
+      jni.close(handle)
+      closed = true
+    }
+  }
+}
+
+trait NativeExpressionEvalHelper extends ExpressionEvalHelper {
+  self: SparkFunSuite =>
+
+  protected def prepareNativeExpression(
+      expressions: Seq[Expression],
+      inputAttributes: Seq[Attribute]): NativeExpressionEvaluator =
+    new NativeExpressionEvaluator(expressions, inputAttributes)
 
   protected def evaluateWithNative(
       expression: Expression,
       input: ColumnarBatch,
       inputAttributes: Seq[Attribute]): ColumnarBatch = {
     Arm.withResource(prepareNativeExpression(Seq(expression), inputAttributes))(_.evaluate(input))
-  }
-
-  final protected class PreparedNativeExpression(
-      jni: VeloxExpressionEvaluatorJniWrapper,
-      handle: Long,
-      backendName: String,
-      numInputColumns: Int)
-    extends AutoCloseable {
-    private var closed = false
-
-    def evaluate(input: ColumnarBatch): ColumnarBatch = {
-      require(!closed, "Native expression evaluator is closed")
-      require(input.numCols() == numInputColumns, "Input columns and attributes must match")
-      ColumnarBatches.checkOffloaded(input)
-      val outputHandle = jni.evaluate(handle, ColumnarBatches.getNativeHandle(backendName, input))
-      try {
-        ColumnarBatches.create(outputHandle)
-      } catch {
-        case t: Throwable =>
-          ColumnarBatchJniWrapper.close(outputHandle)
-          throw t
-      }
-    }
-
-    override def close(): Unit = {
-      if (!closed) {
-        jni.close(handle)
-        closed = true
-      }
-    }
   }
 
   /** Loads a separate batch handle because loading consumes the native handle it receives. */

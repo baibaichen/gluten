@@ -58,9 +58,8 @@ mkdir -p "$TARGET"
 
 # Install this reactor's dependencies rather than using older local SNAPSHOT jars.
 ./build/mvn -P"$PROFILES" -pl backends-velox -am install -DskipTests
-./build/mvn -P"$PROFILES" -pl backends-velox dependency:build-classpath \
-  -DincludeScope=test -Dmdep.outputFile="$CLASSPATH_FILE"
-./build/mvn -N -P"$PROFILES" help:evaluate -q \
+./build/mvn -P"$PROFILES" -pl backends-velox dependency:build-classpath help:evaluate \
+  -DincludeScope=test -Dmdep.outputFile="$CLASSPATH_FILE" \
   -Dexpression=extraJavaTestArgs -Doutput="$JVM_ARGS_FILE"
 test -s "$CLASSPATH_FILE"
 test -s "$JVM_ARGS_FILE"

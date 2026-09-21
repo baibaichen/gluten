@@ -16,6 +16,8 @@
  */
 package org.apache.spark.sql.execution.benchmark.expression
 
+import org.apache.spark.sql.internal.SQLConf
+
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.{DeserializationFeature, JsonNode, ObjectMapper}
 
@@ -29,55 +31,90 @@ import scala.collection.mutable
 import scala.concurrent.duration._
 import scala.util.control.NonFatal
 
-final private[benchmark] case class ExpressionBenchmarkRunOptions(
-    functions: Seq[String],
-    cases: Seq[String],
-    list: Boolean,
-    rows: Int,
-    batchSize: Int,
-    seed: Long,
-    keyCardinality: Option[Long],
-    asyncProfiler: Option[Path],
-    profileEvent: String,
-    profileOutput: Path,
-    warmup: FiniteDuration,
-    minTime: FiniteDuration) {
-  def minNumIters: Int = 2
-
-  def selected(catalog: Seq[ExpressionBenchmarkCatalog.CaseDef])
-      : Seq[ExpressionBenchmarkCatalog.CaseDef] = {
-    val groups = if (cases.nonEmpty) cases.map {
-      pattern =>
-        require(pattern.indexOf('/') > 0, s"Expected function/case pattern: $pattern")
-        val regex = pattern.map {
-          case '*' => "[^/]*"
-          case '?' => "[^/]"
-          case c => Pattern.quote(c.toString)
-        }.mkString.r
-        val matches = catalog.filter(c => regex.pattern.matcher(c.id).matches())
-        require(matches.nonEmpty, s"No cases match: $pattern")
-        matches
-    }
-    else functions.map {
-      function =>
-        val matches = catalog.filter(_.id.startsWith(function + "/"))
-        require(matches.nonEmpty, s"Unknown function: $function")
-        matches
-    }
-    groups.flatten.distinct
-  }
-
-  def listing(catalog: Seq[ExpressionBenchmarkCatalog.CaseDef]): String = {
-    require(list, "Not a list request")
-    if (functions.isEmpty) {
-      catalog.map(_.id.takeWhile(_ != '/')).distinct.mkString("\n")
-    } else selected(catalog).map {
-      c => s"${c.id}\n  inputs=${c.inputs.mkString(", ")}\n  sql=${c.sql}\n  ${c.description}"
-    }.mkString("\n")
-  }
+final private[benchmark] case class InputOptions(
+    rows: Int = 4000000,
+    batchSize: Int = 10240,
+    seed: Long = 20260912L,
+    keyCardinality: Option[Long] = None) {
+  require(rows > 0, "Row count must be positive")
+  require(batchSize > 0, "Batch size must be positive")
+  require(keyCardinality.forall(_ > 0), "Key cardinality must be positive")
 }
 
-private[benchmark] object ExpressionBenchmarkRunOptions {
+final private[benchmark] case class ProfilerOptions(
+    home: Path,
+    event: String = "cpu",
+    output: Path = Paths.get("target/expression-benchmark-profiles")) {
+  require(Set("cpu", "alloc")(event), s"Unknown profile event: $event")
+}
+
+final private[benchmark] case class RunOptions(
+    warmup: FiniteDuration,
+    minTime: FiniteDuration,
+    minNumIters: Int = 2,
+    input: Option[InputOptions] = None,
+    profiler: Option[ProfilerOptions] = None) {
+  require(warmup >= Duration.Zero, "Warmup must not be negative")
+  require(minTime >= Duration.Zero, "Measurement time must not be negative")
+  require(minNumIters >= 2, "At least two measured iterations are required")
+
+  def resolvedInput: InputOptions = input.getOrElse(InputOptions())
+  def batchSize: Int = resolvedInput.batchSize
+}
+
+private[benchmark] object RunOptions {
+  def withBatchSize(batchSize: Int): RunOptions =
+    RunOptions(
+      Duration.Zero,
+      Duration.Zero,
+      input = Some(InputOptions(batchSize = batchSize)))
+
+  val sqlConf: Seq[(String, String)] = Seq(
+    SQLConf.SESSION_LOCAL_TIMEZONE.key -> "UTC",
+    SQLConf.CASE_SENSITIVE.key -> "false",
+    SQLConf.ANSI_ENABLED.key -> "true",
+    SQLConf.CODEGEN_FACTORY_MODE.key -> "CODEGEN_ONLY",
+    "spark.sql.alwaysInlineCommonExpr" -> "false"
+  )
+
+  final private[benchmark] case class Parsed(
+      functions: Seq[String],
+      cases: Seq[String],
+      list: Boolean,
+      runtime: RunOptions) {
+    def selected(catalog: Seq[Catalog.CaseDef])
+        : Seq[Catalog.CaseDef] = {
+      val groups = if (cases.nonEmpty) cases.map {
+        pattern =>
+          require(pattern.indexOf('/') > 0, s"Expected function/case pattern: $pattern")
+          val regex = pattern.map {
+            case '*' => "[^/]*"
+            case '?' => "[^/]"
+            case c => Pattern.quote(c.toString)
+          }.mkString.r
+          val matches = catalog.filter(c => regex.pattern.matcher(c.id).matches())
+          require(matches.nonEmpty, s"No cases match: $pattern")
+          matches
+      }
+      else functions.map {
+        function =>
+          val matches = catalog.filter(_.id.startsWith(function + "/"))
+          require(matches.nonEmpty, s"Unknown function: $function")
+          matches
+      }
+      groups.flatten.distinct
+    }
+
+    def listing(catalog: Seq[Catalog.CaseDef]): String = {
+      require(list, "Not a list request")
+      if (functions.isEmpty) {
+        catalog.map(_.id.takeWhile(_ != '/')).distinct.mkString("\n")
+      } else selected(catalog).map {
+        c => s"${c.id}\n  inputs=${c.inputs.mkString(", ")}\n  sql=${c.sql}\n  ${c.description}"
+      }.mkString("\n")
+    }
+  }
+
   val usage: String = "Usage: dev/run-expression-bench.sh functionsCSV [options] | " +
     "--cases function/case,glob [options] | --config file [options] | --list [functionsCSV]"
   private val names = Map(
@@ -147,7 +184,7 @@ private[benchmark] object ExpressionBenchmarkRunOptions {
     values
   }
 
-  def parse(args: Array[String], cwd: Path = callerDirectory): ExpressionBenchmarkRunOptions = {
+  private[benchmark] def parse(args: Array[String], cwd: Path = callerDirectory): Parsed = {
     require(args.nonEmpty, usage)
     val cli = mutable.LinkedHashMap.empty[String, JsonNode]
     var list = false
@@ -224,23 +261,33 @@ private[benchmark] object ExpressionBenchmarkRunOptions {
       val base = if (cli.contains(key)) cwd else configPath.map(_.getParent).getOrElse(cwd)
       resolve(string(key, default), base)
     }
-    val options = ExpressionBenchmarkRunOptions(
+    val inputDefaults = InputOptions()
+    val input = inputDefaults.copy(
+      rows = integer("rows", inputDefaults.rows),
+      batchSize = integer("batchSize", inputDefaults.batchSize),
+      seed = values.get("seed").map(_.longValue()).getOrElse(inputDefaults.seed),
+      keyCardinality = values.get("keyCardinality").map(_.longValue())
+    )
+    val profiler = values.get("asyncProfiler").map {
+      _ =>
+        val defaults = ProfilerOptions(home = path("asyncProfiler", ""))
+        defaults.copy(
+          event = string("profileEvent", defaults.event),
+          output = path("profileOutput", defaults.output.toString))
+    }
+    val options = Parsed(
       functions = selector("functions"),
       cases = selector("cases"),
       list = list,
-      rows = integer("rows", 4000000),
-      batchSize = integer("batchSize", 10240),
-      seed = values.get("seed").map(_.longValue()).getOrElse(20260912L),
-      keyCardinality = values.get("keyCardinality").map(_.longValue()),
-      asyncProfiler = values.get("asyncProfiler").map(_ => path("asyncProfiler", "")),
-      profileEvent = string("profileEvent", "cpu"),
-      profileOutput = path("profileOutput", "target/expression-benchmark-profiles"),
-      warmup = integer("warmupSeconds", 10).seconds,
-      minTime = integer("measurementSeconds", 60).seconds
+      runtime = RunOptions(
+        warmup = integer("warmupSeconds", 10).seconds,
+        minTime = integer("measurementSeconds", 60).seconds,
+        input = Some(input),
+        profiler = profiler)
     )
     require(list || options.functions.nonEmpty || options.cases.nonEmpty, usage)
     require(
-      options.asyncProfiler.nonEmpty ||
+      profiler.nonEmpty ||
         !Seq("profileEvent", "profileOutput").exists(values.contains),
       "Profile event/output requires --async-profiler"
     )

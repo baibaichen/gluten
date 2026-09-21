@@ -35,7 +35,7 @@ import scala.util.control.NonFatal
 import scala.util.parsing.combinator.JavaTokenParsers
 
 /** Classpath-backed test data, deliberately independent of selection and benchmark execution. */
-private[benchmark] object ExpressionBenchmarkCatalog {
+private[benchmark] object Catalog {
   final case class SourceLocation(file: String, line: Int, column: Int) {
     override def toString: String = s"$file:$line:$column"
   }
@@ -229,7 +229,7 @@ private[benchmark] object ExpressionBenchmarkCatalog {
           })
         fail(physical, caseId, new IllegalArgumentException(s"Invalid inputs: ${error.msg}"))
     }
-    checked(location, caseId)(ExpressionBenchmarkData.validate(bindings))
+    checked(location, caseId)(Data.validate(bindings))
     bindings
   }
 

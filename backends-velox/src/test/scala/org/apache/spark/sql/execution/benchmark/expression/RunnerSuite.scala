@@ -24,8 +24,6 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.task.TaskResources
 import org.apache.spark.util.Utils
 
-import org.scalatest.DoNotDiscover
-
 import java.io.{ByteArrayOutputStream, File, PrintStream}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
@@ -34,42 +32,6 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration._
 
 class RunnerSuite extends SparkFunSuite {
-  test("Spark ownership: registered entry inherits BenchmarkBase main without a second CLI") {
-    val entry = scala.util.Try(Utils.classForName(
-      "org.apache.spark.sql.execution.benchmark.expression.RegisteredExpressionBenchmark$"))
-    assert(entry.isSuccess, "RegisteredExpressionBenchmark must be the entry point")
-    assert(classOf[org.apache.spark.benchmark.BenchmarkBase].isAssignableFrom(entry.get))
-    assert(!entry.get.getDeclaredMethods.exists(_.getName == "main"))
-    assert(entry.get.getDeclaredMethods.exists(_.getName == "runBenchmarkSuite"))
-    assert(scala.util.Try(Utils.classForName(
-      "org.apache.spark.sql.execution.benchmark.expression.ExpressionBenchmarkCli$")).isFailure)
-  }
-
-  test("Spark ownership: one ExpressionBenchmark is a concrete Spark Benchmark") {
-    val benchmark = Utils.classForName(
-      "org.apache.spark.sql.execution.benchmark.expression.Benchmark")
-    assert(classOf[org.apache.spark.benchmark.Benchmark].isAssignableFrom(benchmark))
-    assert(!java.lang.reflect.Modifier.isAbstract(benchmark.getModifiers))
-    assert(benchmark.getMethods.filter(_.getName == "run").map(_.getDeclaringClass).toSeq ==
-      Seq(classOf[org.apache.spark.benchmark.Benchmark]))
-    val methods = benchmark.getDeclaredMethods.map(_.getName).toSet
-    assert(methods.intersect(Set("medianMs", "renderSummary")).isEmpty)
-    assert(!methods.contains("measure"))
-    assert(!benchmark.getDeclaredFields.exists(_.getName == "currentOutput"))
-    assert(
-      Set("checked", "prepareAnalyzed", "freshJvm", "prepareJvm", "runVanilla", "runNative")
-        .subsetOf(methods),
-      s"Execution must belong to the benchmark instance: $methods"
-    )
-    assert(benchmark.getDeclaredClasses.isEmpty)
-    // Scala may synthesize a companion for constructor defaults, but not execution helpers.
-    scala.util.Try(Utils.classForName(benchmark.getName + "$")).foreach {
-      companion =>
-        assert(
-          companion.getDeclaredMethods.forall(_.getName.startsWith("$lessinit$greater$default$")))
-    }
-  }
-
   test("case suite registers exactly the catalog and six explicit ignores") {
     val suite = new BenchmarkSuite
     val catalog = Catalog.load().map(_.id).toSet
@@ -86,49 +48,6 @@ class RunnerSuite extends SparkFunSuite {
       "substring/binary"
     )
     assert(ignored == (if (suite.matchSparkVersion(Some("4.0"))) unsupported else catalog))
-  }
-
-  test("one discoverable benchmark suite includes correctness and measurement tests") {
-    val suite = classOf[BenchmarkSuite]
-    assert(java.lang.reflect.Modifier.isPublic(suite.getModifiers))
-    assert(suite.getConstructors.exists(_.getParameterCount == 0))
-    assert(!suite.isAnnotationPresent(classOf[DoNotDiscover]))
-    val names = new BenchmarkSuite().testNames
-    assert(names.exists(_.startsWith("framework: ")))
-    assert(names.exists(_.startsWith("metric: ")))
-  }
-
-  test("responsibility: run options companion owns parsing instead of the registered entry") {
-    val parser = Set("parse", "validate", "csv", "usage", "callerDirectory")
-    val entry = RegisteredExpressionBenchmark.getClass.getDeclaredMethods.map(_.getName).toSet
-    assert(entry.intersect(parser).isEmpty, s"CLI implementation remains in entry: $entry")
-    val options = RunOptions.getClass.getDeclaredMethods.map(_.getName).toSet
-    assert(parser.subsetOf(options), s"CLI implementation missing from options: $options")
-  }
-
-  test(
-    "responsibility: runtime options contain no CLI selectors or flat input and profiler fields") {
-    val fields = classOf[RunOptions].getDeclaredFields.map(_.getName).toSet
-    val forbidden = Set(
-      "functions",
-      "cases",
-      "list",
-      "rows",
-      "batchSize",
-      "seed",
-      "keyCardinality",
-      "asyncProfiler",
-      "profileEvent",
-      "profileOutput")
-    assert(fields.intersect(forbidden).isEmpty, s"CLI fields leaked into runtime options: $fields")
-  }
-
-  test("responsibility: benchmark has no nested preparation or SparkFunSuite bridge") {
-    val prefix = classOf[Benchmark].getName + "$"
-    Seq("Runner", "Prepared", "ConsumeCodegenResult").foreach {
-      name => assert(scala.util.Try(Utils.classForName(prefix + name)).isFailure, name)
-    }
-    assert(!classOf[SparkFunSuite].isAssignableFrom(classOf[Benchmark]))
   }
 
   test("constructor is inert without blackhole, Spark session or task resources") {

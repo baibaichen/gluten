@@ -519,15 +519,21 @@ class BenchmarkSuite
   testWithMinSparkVersion(
     "metric: preparation does not evaluate non-string results before the callback",
     "4.0") {
-    val scenario = metricCase("deferred-error", "Evaluation belongs to the action", "input % 0")
-    val data = Plan(new StructType().add("input", LongType), (_, _, _, _) => InternalRow(1L))
+    val scenario = metricCase(
+      "deferred-error",
+      "Evaluation belongs to the action",
+      "cast(raise_error('deferred metric failure') as int)")
+    val data =
+      Plan(new StructType().add("input", IntegerType), (_, _, _, _) => InternalRow(Int.MinValue))
     var entered = false
     withPreparedMetric(scenario, Context(10), 4, data) {
       prepared =>
         entered = true
-        intercept[ArithmeticException](prepared.runVanilla())
-        val error = intercept[org.apache.gluten.exception.GlutenException](prepared.runNative())
-        assert(error.getMessage.contains("Division by zero"))
+        val jvmError = intercept[org.apache.spark.SparkRuntimeException](prepared.runVanilla())
+        assert(jvmError.getMessage.contains("deferred metric failure"))
+        val nativeError =
+          intercept[org.apache.gluten.exception.GlutenException](prepared.runNative())
+        assert(nativeError.getMessage.contains("deferred metric failure"))
     }
     assert(entered)
   }
@@ -547,7 +553,7 @@ class BenchmarkSuite
     val root = Files.createTempDirectory("expression-shared-profiler")
     val commands = ArrayBuffer.empty[String]
     val profiler =
-      org.mockito.Mockito.spy(Profiler(ProfilerOptions(root, output = root)))
+      org.mockito.Mockito.spy(new Profiler(ProfilerOptions(root, output = root)))
     org.mockito.Mockito.doReturn(
       (command: String) => {
         commands += command
@@ -577,15 +583,13 @@ class BenchmarkSuite
   // Exercise the real registration callback without requiring native expression preparation.
   private def registerProfile(
       benchmark: Benchmark,
-      engine: String = "vanilla",
-      numIters: Int = 0)(action: => Unit): SparkBenchmark.Case = {
+      engine: String = "vanilla")(action: => Unit): SparkBenchmark.Case = {
     val register = classOf[Benchmark].getDeclaredMethod(
       "register",
       classOf[String],
-      java.lang.Integer.TYPE,
       classOf[Function0[_]])
     register.setAccessible(true)
-    register.invoke(benchmark, engine, Int.box(numIters), () => action)
+    register.invoke(benchmark, engine, () => action)
     benchmark.benchmarks.last
   }
 

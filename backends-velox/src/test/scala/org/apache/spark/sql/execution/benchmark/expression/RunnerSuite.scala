@@ -73,7 +73,7 @@ class RunnerSuite extends SparkFunSuite {
               scenario,
               Data.Context(0),
               runtime,
-              profiler = runtime.profiler.map(Profiler.apply)))
+              profiler = runtime.profiler.map(new Profiler(_))))
             assert(constructed.isSuccess, s"Constructor performed preparation: $constructed")
             assert(constructed.get.benchmarks.isEmpty)
             assert(!Files.exists(profile))
@@ -117,7 +117,7 @@ class RunnerSuite extends SparkFunSuite {
     val options = RunOptions(
       Duration.Zero,
       Duration.Zero,
-      input = Some(InputOptions(rows = 7, batchSize = 3, seed = -7L)))
+      input = InputOptions(rows = 7, batchSize = 3, seed = -7L))
     val bytes = new ByteArrayOutputStream
     val out = new PrintStream(bytes)
     val oldOut = System.out
@@ -268,7 +268,10 @@ class RunnerSuite extends SparkFunSuite {
       process = builder.start()
       assert(process.waitFor(90, TimeUnit.SECONDS), "File-output benchmark timed out")
       assert(process.exitValue() == 0, new String(Files.readAllBytes(stderr), UTF_8))
-      val resultFile = directory.resolve("benchmarks/RegisteredExpressionBenchmark-results.txt")
+      val version = Utils.javaVersion.split("\\D+")(0).toInt
+      val jdkSuffix = if (version > 17) s"-jdk$version" else ""
+      val resultFile = directory.resolve(
+        s"benchmarks/RegisteredExpressionBenchmark$jdkSuffix-results.txt")
       assert(Files.isRegularFile(resultFile))
       val fileOutput = new String(Files.readAllBytes(resultFile), UTF_8)
       assert(fileOutput.contains("trim/standard-string") && fileOutput.contains("Best Time(ms)"))

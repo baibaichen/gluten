@@ -52,14 +52,13 @@ final private[benchmark] case class RunOptions(
     warmup: FiniteDuration,
     minTime: FiniteDuration,
     minNumIters: Int = 2,
-    input: Option[InputOptions] = None,
+    input: InputOptions = InputOptions(),
     profiler: Option[ProfilerOptions] = None) {
   require(warmup >= Duration.Zero, "Warmup must not be negative")
   require(minTime >= Duration.Zero, "Measurement time must not be negative")
   require(minNumIters >= 2, "At least two measured iterations are required")
 
-  def resolvedInput: InputOptions = input.getOrElse(InputOptions())
-  def batchSize: Int = resolvedInput.batchSize
+  def batchSize: Int = input.batchSize
 }
 
 private[benchmark] object RunOptions {
@@ -67,12 +66,12 @@ private[benchmark] object RunOptions {
     RunOptions(
       Duration.Zero,
       Duration.Zero,
-      input = Some(InputOptions(batchSize = batchSize)))
+      input = InputOptions(batchSize = batchSize))
 
   val sqlConf: Seq[(String, String)] = Seq(
     SQLConf.SESSION_LOCAL_TIMEZONE.key -> "UTC",
     SQLConf.CASE_SENSITIVE.key -> "false",
-    SQLConf.ANSI_ENABLED.key -> "true",
+    SQLConf.ANSI_ENABLED.key -> "false",
     SQLConf.CODEGEN_FACTORY_MODE.key -> "CODEGEN_ONLY",
     "spark.sql.alwaysInlineCommonExpr" -> "false"
   )
@@ -282,7 +281,7 @@ private[benchmark] object RunOptions {
       runtime = RunOptions(
         warmup = integer("warmupSeconds", 10).seconds,
         minTime = integer("measurementSeconds", 60).seconds,
-        input = Some(input),
+        input = input,
         profiler = profiler)
     )
     require(list || options.functions.nonEmpty || options.cases.nonEmpty, usage)

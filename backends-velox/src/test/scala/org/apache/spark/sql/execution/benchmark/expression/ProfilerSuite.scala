@@ -33,7 +33,7 @@ class ProfilerSuite extends SparkFunSuite {
     val root = Files.createTempDirectory("profiler space,comma ")
     val commands = ArrayBuffer.empty[String]
     try {
-      val profiler = org.mockito.Mockito.spy(Profiler(
+      val profiler = org.mockito.Mockito.spy(new Profiler(
         ProfilerOptions(root, event, root.resolve("not-created"))))
       org.mockito.Mockito.doReturn(
         (command: String) => {

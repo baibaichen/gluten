@@ -17,7 +17,7 @@
 package org.apache.spark.sql.catalyst.expressions
 
 import org.apache.gluten.backendsapi.BackendsApiManager
-import org.apache.gluten.columnarbatch.{ColumnarBatches, ColumnarBatchJniWrapper}
+import org.apache.gluten.columnarbatch.ColumnarBatches
 import org.apache.gluten.exception.GlutenNotSupportException
 import org.apache.gluten.expression.ConverterUtils
 import org.apache.gluten.memory.arrow.alloc.ArrowBufferAllocators
@@ -42,10 +42,8 @@ import scala.collection.JavaConverters._
 final private[spark] class NativeExpressionEvaluator(
     expressions: Seq[Expression],
     inputAttributes: Seq[Attribute]) extends AutoCloseable {
-  private var backendName: String = _
-  private var jni: VeloxExpressionEvaluatorJniWrapper = _
   private val numInputColumns = inputAttributes.size
-  private val handle = {
+  private val (backendName, jni, handle) = {
     require(expressions.size == 1, "Native preparation supports exactly one output expression")
     require(
       TaskResources.inSparkTask(),
@@ -96,10 +94,10 @@ final private[spark] class NativeExpressionEvaluator(
           .addOutputNames("result"))
       .build()
       .toByteArray
-    backendName = BackendsApiManager.getBackendName
-    val runtime = Runtimes.contextInstance(backendName, "NativeExpressionEvalHelper")
-    jni = VeloxExpressionEvaluatorJniWrapper.create(runtime)
-    jni.compile(serialized)
+    val backend = BackendsApiManager.getBackendName
+    val runtime = Runtimes.contextInstance(backend, "NativeExpressionEvalHelper")
+    val evaluator = VeloxExpressionEvaluatorJniWrapper.create(runtime)
+    (backend, evaluator, evaluator.compile(serialized))
   }
   private var closed = false
   TaskResources.addRecycler("Native expression evaluator", 100) {
@@ -110,14 +108,8 @@ final private[spark] class NativeExpressionEvaluator(
     require(!closed, "Native expression evaluator is closed")
     require(input.numCols() == numInputColumns, "Input columns and attributes must match")
     ColumnarBatches.checkOffloaded(input)
-    val outputHandle = jni.evaluate(handle, ColumnarBatches.getNativeHandle(backendName, input))
-    try {
-      ColumnarBatches.create(outputHandle)
-    } catch {
-      case t: Throwable =>
-        ColumnarBatchJniWrapper.close(outputHandle)
-        throw t
-    }
+    ColumnarBatches.create(
+      jni.evaluate(handle, ColumnarBatches.getNativeHandle(backendName, input)))
   }
 
   override def close(): Unit = {

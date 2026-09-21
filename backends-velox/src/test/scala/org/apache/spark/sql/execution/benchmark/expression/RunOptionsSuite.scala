@@ -18,6 +18,7 @@ package org.apache.spark.sql.execution.benchmark.expression
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.util.Utils
 
 import java.io.{ByteArrayOutputStream, IOException, PrintStream}
@@ -34,6 +35,10 @@ class RunOptionsSuite extends SparkFunSuite {
   private val catalog = Catalog.load()
   private def parse(args: String*): RunOptions.Parsed =
     RunOptions.parse(args.toArray)
+
+  test("benchmark SQL configuration disables unsupported ANSI mode") {
+    assert(RunOptions.sqlConf.toMap.get(SQLConf.ANSI_ENABLED.key).contains("false"))
+  }
 
   test("empty run and CLI listing need neither Spark nor compiler blackholes nor profiling") {
     val active = SparkSession.getActiveSession
@@ -98,16 +103,15 @@ class RunOptionsSuite extends SparkFunSuite {
     } finally RegisteredExpressionBenchmark.output = None
   }
 
-  test("runtime input defaults resolve equally and cardinality follows overridden rows") {
+  test("runtime input defaults and cardinality follow overridden rows") {
     val options = RunOptions(Duration.Zero, Duration.Zero)
-    assert(options.resolvedInput == options.copy(input = Some(InputOptions())).resolvedInput)
-    assert(options.resolvedInput == InputOptions(4000000, 10240, 20260912L, None))
+    assert(options.input == InputOptions(4000000, 10240, 20260912L, None))
     val batched = RunOptions.withBatchSize(3)
     assert(batched.batchSize == 3)
-    assert(batched.input.contains(InputOptions(batchSize = 3)))
+    assert(batched.input == InputOptions(batchSize = 3))
     assert(batched.warmup == Duration.Zero && batched.minTime == Duration.Zero)
-    val partial = options.copy(input = Some(InputOptions(rows = 17, seed = Long.MinValue)))
-    val input = partial.resolvedInput
+    val partial = options.copy(input = InputOptions(rows = 17, seed = Long.MinValue))
+    val input = partial.input
     assert(input.batchSize == 10240 && input.keyCardinality.isEmpty && input.seed == Long.MinValue)
     val context = Data.Context(input.rows, input.keyCardinality, input.seed)
     assert(context.rows == 17 && context.keys == 17 && context.seed == Long.MinValue)
@@ -143,7 +147,7 @@ class RunOptionsSuite extends SparkFunSuite {
     assert(profiler.copy(event = "alloc").event == "alloc")
     intercept[IllegalArgumentException](profiler.copy(event = "unknown"))
     assert(parse("trim").runtime.profiler.isEmpty)
-    assert(parse("trim").runtime.input.contains(InputOptions()))
+    assert(parse("trim").runtime.input == InputOptions())
   }
 
   test("list is pure and lists functions and full case definitions") {
@@ -152,7 +156,7 @@ class RunOptionsSuite extends SparkFunSuite {
     val subset = parse("--list", "rtrim,ltrim,trim").selected(catalog)
     assert(subset.count(_.id.startsWith("rtrim/")) == 42)
     assert(subset.count(_.id.startsWith("ltrim/")) == 42)
-    assert(subset.count(_.id.startsWith("trim/")) == 1)
+    assert(subset.count(_.id.startsWith("trim/")) == 5)
     val text = parse("--list", "trim").listing(catalog)
     assert(text.contains("trim/standard") && text.contains("trim(") && text.contains("inputs="))
   }
@@ -223,7 +227,7 @@ class RunOptionsSuite extends SparkFunSuite {
 
   test("defaults and input sizes are strict without forcing iteration counts") {
     val options = parse("trim")
-    val input = options.runtime.resolvedInput
+    val input = options.runtime.input
     assert(input.rows == 4000000 && input.batchSize == 10240)
     assert(input.seed == 20260912L && input.keyCardinality.isEmpty)
     assert(options.runtime.warmup.toSeconds == 10 && options.runtime.minTime.toSeconds == 60)
@@ -237,7 +241,7 @@ class RunOptionsSuite extends SparkFunSuite {
     assert(parse(
       "trim",
       "--seed",
-      Long.MinValue.toString).runtime.resolvedInput.seed == Long.MinValue)
+      Long.MinValue.toString).runtime.input.seed == Long.MinValue)
     assertThrows[IllegalArgumentException](parse("trim", "--key-cardinality", "0"))
     assertThrows[IllegalArgumentException](parse("trim", "--seed", "9223372036854775808"))
   }
@@ -444,9 +448,9 @@ class RunOptionsSuite extends SparkFunSuite {
           s""""keyCardinality":${Long.MaxValue},"rows":2}""")
       val options = parse("--config", file.toString, "substring", "--rows", "3")
       assert(options.cases.isEmpty && options.functions == Seq("substring"))
-      val input = options.runtime.resolvedInput
+      val input = options.runtime.input
       assert(input.seed == Long.MinValue && input.keyCardinality.contains(Long.MaxValue))
-      assert(options.runtime.resolvedInput.rows == 3)
+      assert(options.runtime.input.rows == 3)
       Seq("--rows", "--seed").foreach {
         flag =>
           Seq("+1", " 1", "1e2").foreach {
@@ -455,8 +459,8 @@ class RunOptionsSuite extends SparkFunSuite {
           assertThrows[IllegalArgumentException](parse("trim", flag, "1", flag, "2"))
           assertThrows[IllegalArgumentException](parse("trim", flag))
       }
-      assert(parse("trim", "--rows", "001").runtime.resolvedInput.rows == 1)
-      assert(parse("trim", "--seed", "-0").runtime.resolvedInput.seed == 0)
+      assert(parse("trim", "--rows", "001").runtime.input.rows == 1)
+      assert(parse("trim", "--seed", "-0").runtime.input.seed == 0)
     } finally Files.delete(file)
   }
 
@@ -487,7 +491,7 @@ class RunOptionsSuite extends SparkFunSuite {
         cwd
       )
       assert(overrideJson.selected(catalog).map(_.id) == Seq("rtrim/l13-half-even"))
-      assert(overrideJson.runtime.resolvedInput.rows == 17)
+      assert(overrideJson.runtime.input.rows == 17)
       assert(overrideJson.runtime.profiler.get.home == cwd.resolve("cli-ap"))
       assert(overrideJson.runtime.profiler.get.output == cwd.resolve("cli-out"))
     } finally Utils.deleteRecursively(cwd.toFile)

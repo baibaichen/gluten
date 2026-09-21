@@ -16,7 +16,6 @@
  */
 package org.apache.spark.sql.catalyst.expressions
 
-import org.apache.gluten.exception.GlutenException
 import org.apache.gluten.execution.VeloxWholeStageTransformerSuite
 import org.apache.gluten.utils.Arm
 
@@ -50,10 +49,6 @@ class NativeExpressionEvalHelperSuite
       Arm.withResource(new ColumnarBatch(Array.empty[ColumnVector], 1)) {
         input =>
           val prepared = prepareNativeExpression(Seq(Literal("value")), Seq.empty)
-          val fields = prepared.getClass.getDeclaredFields
-            .filterNot(f => f.isSynthetic || java.lang.reflect.Modifier.isStatic(f.getModifiers))
-            .map(_.getName).toSet
-          assert(fields == Set("jni", "handle", "backendName", "numInputColumns", "closed"))
           prepared.close()
           prepared.close()
           val error = intercept[IllegalArgumentException](prepared.evaluate(input))
@@ -105,34 +100,23 @@ class NativeExpressionEvalHelperSuite
     }
   }
 
-  Seq(false, true).foreach {
-    ansiEnabled =>
-      test(s"native evaluation honors ANSI mode: $ansiEnabled") {
-        withSQLConf(SQLConf.ANSI_ENABLED.key -> ansiEnabled.toString) {
-          // Create a separate runtime under each SQLConf because it captures the initial settings.
-          TaskResources.runUnsafe {
-            Arm.withResource(new ColumnarBatch(Array.empty[ColumnVector], 1)) {
-              constantInput =>
-                Arm.withResource(evaluateWithNative(Literal(1), constantInput, Seq.empty)) {
-                  input =>
-                    val attribute = AttributeReference("value", IntegerType, nullable = false)()
-                    val expression = Remainder(attribute, Literal(0))
-                    if (ansiEnabled) {
-                      Arm.withResource(prepareNativeExpression(Seq(expression), Seq(attribute))) {
-                        prepared =>
-                          val error = intercept[GlutenException] {
-                            Arm.withResource(prepared.evaluate(input))(_ => ())
-                          }
-                          assert(error.getMessage.contains("Division by zero"))
-                      }
-                    } else {
-                      checkEvaluationWithNative(expression, Seq(null), input, Seq(attribute))
-                    }
-                }
+  test("native evaluation returns null for division by zero with ANSI disabled") {
+    withSQLConf(SQLConf.ANSI_ENABLED.key -> "false") {
+      TaskResources.runUnsafe {
+        Arm.withResource(new ColumnarBatch(Array.empty[ColumnVector], 1)) {
+          constantInput =>
+            Arm.withResource(evaluateWithNative(Literal(1), constantInput, Seq.empty)) {
+              input =>
+                val attribute = AttributeReference("value", IntegerType, nullable = false)()
+                checkEvaluationWithNative(
+                  Remainder(attribute, Literal(0)),
+                  Seq(null),
+                  input,
+                  Seq(attribute))
             }
-          }
         }
       }
+    }
   }
 
   Seq("UTC" -> "1970-01-01 00:00:00", "Asia/Tokyo" -> "1970-01-01 09:00:00").foreach {

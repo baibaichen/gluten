@@ -51,10 +51,10 @@ object RegisteredExpressionBenchmark extends BenchmarkBase {
       cases: Seq[Catalog.CaseDef],
       options: RunOptions): Unit = {
     if (cases.isEmpty) return
-    val input = options.resolvedInput
+    val input = options.input
     val context = Data.Context(input.rows, input.keyCardinality, input.seed)
     BenchmarkBlackhole.requireEnabled(true)
-    val profiler = options.profiler.map(Profiler.apply)
+    val profiler = options.profiler.map(new Profiler(_))
     try Utils.tryWithSafeFinally {
         val conf = MockVeloxBackend.mockPluginContext().conf()
           .setMaster("local[1]").setAppName("ExpressionBenchmark")

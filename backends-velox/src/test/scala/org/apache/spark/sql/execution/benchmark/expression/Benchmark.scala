@@ -79,16 +79,13 @@ final private[benchmark] class Benchmark(
     register("native")(runNative())
   }
 
-  private def register(engine: String, numIters: Int = 0)(action: => Unit): Unit = profiler match {
-    case None => super.addCase(engine, numIters)(_ => action)
+  private def register(engine: String)(action: => Unit): Unit = profiler match {
+    case None => super.addCase(engine)(_ => action)
     case Some(controller) =>
       val path = controller.profileRoot.resolve(scenario.id).resolve(engine)
         .resolve("profile.collapsed")
-      // Match Spark's registered Case bounds, not arbitrary external measure overrides.
-      val minIters = if (numIters != 0) numIters else options.minNumIters
-      val minNanos = if (numIters != 0) 0L else options.minTime.toNanos
       var elapsed = 0L
-      super.addTimerCase(engine, numIters) {
+      super.addTimerCase(engine) {
         timer =>
           if (timer.iteration <= 0) {
             Files.createDirectories(path.getParent)
@@ -104,8 +101,9 @@ final private[benchmark] class Benchmark(
               timer.startTiming()
               Utils.tryWithSafeFinally(action)(timer.stopTiming())
               if (measured) {
-                if (minNanos > 0) elapsed += timer.totalTime()
-                stopAfter = timer.iteration + 1 >= minIters && elapsed >= minNanos
+                if (options.minTime.length > 0) elapsed += timer.totalTime()
+                stopAfter = timer.iteration + 1 >= options.minNumIters &&
+                  elapsed >= options.minTime.toNanos
               }
             } {
               if (measured && stopAfter) {

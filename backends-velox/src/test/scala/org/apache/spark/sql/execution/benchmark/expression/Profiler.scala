@@ -22,7 +22,7 @@ import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files, Path, StandardOpenOption}
 
 /** One run's controller for sequential engine sessions of the process-wide profiler. */
-case class Profiler(options: ProfilerOptions) {
+class Profiler(val options: ProfilerOptions) {
   lazy val profileRoot: Path = {
     Files.createDirectories(options.output)
     Files.createTempDirectory(options.output, "profile-")

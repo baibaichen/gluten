@@ -102,13 +102,9 @@ private[benchmark] object Data {
     StructField("timestampString", StringType, nullable = false)
   ).map(f => s"standard.${f.name}" -> f).toMap
   private val patterns = Set("none", "first", "cluster", "half-even", "last", "penultimate", "all")
-  private val special = Set(
-    "rtrimPattern",
-    "ltrimPattern",
-    "rtrimBoundary",
-    "ltrimBoundary",
-    "rtrimCustom",
-    "ltrimCustom")
+  private val trimGenerators = Set("rtrimPattern", "ltrimPattern", "trimPattern")
+  private val special =
+    trimGenerators ++ Set("rtrimBoundary", "ltrimBoundary", "rtrimCustom", "ltrimCustom")
   private val strings = Set("standard.string", "standard.stringArray")
 
   private def argument(binding: Binding, name: String): Option[Argument] =
@@ -151,7 +147,7 @@ private[benchmark] object Data {
         val args = scala.collection.mutable.HashSet.empty[String]
         val allowed = if (strings.contains(binding.generator)) {
           Set("length")
-        } else if (binding.generator == "rtrimPattern" || binding.generator == "ltrimPattern") {
+        } else if (trimGenerators.contains(binding.generator)) {
           Set("length", "pattern", "nullPercent", "utf8")
         } else {
           Set.empty[String]
@@ -163,7 +159,7 @@ private[benchmark] object Data {
         }
         if (strings.contains(binding.generator)) {
           require(integer(binding, "length", Some(10)) >= 0, "length must not be negative")
-        } else if (binding.generator == "rtrimPattern" || binding.generator == "ltrimPattern") {
+        } else if (trimGenerators.contains(binding.generator)) {
           require(integer(binding, "length") >= 2, "Trim length must be at least two bytes")
           pattern(binding)
           val nulls = integer(binding, "nullPercent", Some(0))
@@ -185,14 +181,26 @@ private[benchmark] object Data {
               (context, rowId, _, _) => InternalRow(value(context, rowId)))
           case None =>
             val input: (Context, Long, Int, Int) => InternalRow = binding.generator match {
-              case "rtrimPattern" | "ltrimPattern" =>
+              case "rtrimPattern" | "ltrimPattern" | "trimPattern" =>
                 val size = integer(binding, "length")
                 val selected = pattern(binding)
                 val nulls = integer(binding, "nullPercent", Some(0))
                 val unicode = utf8(binding)
-                val leading = binding.generator == "ltrimPattern"
+                val leadingSpaces =
+                  if (binding.generator == "ltrimPattern") 2
+                  else if (binding.generator == "trimPattern") 1
+                  else 0
                 (c, i, local, count) =>
-                  trimPattern(c.seed, i, local, count, size, selected, nulls, unicode, leading)
+                  trimPattern(
+                    c.seed,
+                    i,
+                    local,
+                    count,
+                    size,
+                    selected,
+                    nulls,
+                    unicode,
+                    leadingSpaces)
               case "rtrimBoundary" | "ltrimBoundary" => (c, i, _, _) => trimBoundary(c.seed, i)
               case "rtrimCustom" | "ltrimCustom" => (c, i, _, _) => trimCustom(c.seed, i)
             }
@@ -261,7 +269,7 @@ private[benchmark] object Data {
       pattern: String,
       nullPercent: Int,
       utf8: Boolean,
-      leading: Boolean): InternalRow = {
+      leadingSpaces: Int): InternalRow = {
     // Penultimate retains the entire original row, including its identity and body bytes.
     val sourceLocal =
       if (pattern == "penultimate" && count > 1 && local == count - 2) count - 1
@@ -282,13 +290,10 @@ private[benchmark] object Data {
       }
       val spaces = if (trim) 2 else 0
       val body = length - spaces
-      val offset = if (leading) spaces else 0
+      val offset = if (trim) leadingSpaces else 0
       val bytes = new Array[Byte](length)
-      if (trim) {
-        val start = if (leading) 0 else body
-        bytes(start) = ' '.toByte
-        bytes(start + 1) = ' '.toByte
-      }
+      java.util.Arrays.fill(bytes, 0, offset, ' '.toByte)
+      java.util.Arrays.fill(bytes, offset + body, length, ' '.toByte)
       val rowIdentity = (global ^ seed) & 0xffffffffL
       val prefix = math.min(8, body)
       var position = 0

@@ -491,7 +491,7 @@ class CatalogSuite extends SparkFunSuite {
 
   test("trim grids use actual full partial and singleton batch positions at every width") {
     for {
-      direction <- Seq("rtrim", "ltrim")
+      direction <- Seq("rtrim", "ltrim", "trim")
       width <- widths
       pattern <- patterns
       (count, batch) <- Seq((1, 1), (8, 3), (17, 8), (33, 17), (16640, 10240))
@@ -519,10 +519,14 @@ class CatalogSuite extends SparkFunSuite {
             case "all" => true
           }
           assert(value.getBytes(UTF_8).length == width)
-          assert((if (direction == "rtrim") value.endsWith("  ")
-                  else value.startsWith("  ")) == selected)
-          val body = if (direction == "rtrim") value.stripSuffix("  ")
-          else value.stripPrefix("  ")
+          assert(
+            (if (direction == "rtrim") value.endsWith("  ")
+             else if (direction == "ltrim") value.startsWith("  ")
+             else value.startsWith(" ") && value.endsWith(" ")) == selected)
+          val body =
+            if (direction == "rtrim") value.stripSuffix("  ")
+            else if (direction == "ltrim") value.stripPrefix("  ")
+            else value.stripPrefix(" ").stripSuffix(" ")
           assert(body.take(8) == f"${(i - local + source).toLong ^ seed}%08x")
       }
     }
@@ -530,7 +534,7 @@ class CatalogSuite extends SparkFunSuite {
 
   test("trim patterns fill short bodies and retain direction-specific spaces") {
     for (width <- 2 to 9; pattern <- Seq("none", "all"); unicode <- Seq(false, true)) {
-      val values = Seq("rtrim", "ltrim").map {
+      val values = Seq("rtrim", "ltrim", "trim").map {
         direction =>
           val input = s"""input = ${direction}Pattern(length = $width, """ +
             s"""pattern = "$pattern", utf8 = $unicode)"""
@@ -546,6 +550,14 @@ class CatalogSuite extends SparkFunSuite {
             assert(right.endsWith("  ") && left.startsWith("  "))
             assert(right.dropRight(2) == left.drop(2))
           } else assert(right == left)
+      }
+      values.head.zip(values(2)).foreach {
+        case (right, both) =>
+          assert(both.getBytes(UTF_8).length == width && !both.contains(0.toChar))
+          if (pattern == "all") {
+            assert(both.startsWith(" ") && both.endsWith(" "))
+            assert(right.dropRight(2) == both.drop(1).dropRight(1))
+          } else assert(right == both)
       }
     }
   }
@@ -601,13 +613,30 @@ class CatalogSuite extends SparkFunSuite {
     }
   }
 
-  test("resources contain exactly 51 canonical functions and 141 unique cases") {
+  test("two-sided trim preserves NULL sampling and UTF8 body bytes") {
+    val right = rows(trimPlan("rtrim/l64-null50"), 200, 17)
+    val both = rows(trimPlan("trim/l64-null50"), 200, 17)
+    assert(both.count(_.isNullAt(0)) == 100)
+    right.zip(both).foreach {
+      case (r, b) =>
+        assert(r.isNullAt(0) == b.isNullAt(0))
+        if (!r.isNullAt(0)) {
+          assert(r.getUTF8String(0).toString.trim == b.getUTF8String(0).toString.trim)
+        }
+    }
+    val utf = rows(trimPlan("trim/l64-utf8-half-even"), 2, 2)
+      .map(_.getUTF8String(0).toString)
+    assert(utf == Seq(" " + "01352830" + "丰" * 18 + " ", "01352831" + "丱" * 18 + "pg"))
+    assert(utf.forall(_.getBytes(UTF_8).length == 64))
+  }
+
+  test("resources contain exactly 51 canonical functions and 145 unique cases") {
     val cases = load()
-    assert(cases.size == 141 && cases.map(_.id).distinct.size == 141)
+    assert(cases.size == 145 && cases.map(_.id).distinct.size == 145)
     assert(cases.map(_.id.takeWhile(_ != '/')).distinct.size == 51)
     assert(cases.count(_.id.startsWith("rtrim/")) == 42)
     assert(cases.count(_.id.startsWith("ltrim/")) == 42)
-    assert(cases.count(_.id.startsWith("trim/")) == 1)
+    assert(cases.count(_.id.startsWith("trim/")) == 5)
     val directory =
       Paths.get(getClass.getClassLoader.getResource("expression-benchmark/cases").toURI)
     val index =
@@ -619,7 +648,7 @@ class CatalogSuite extends SparkFunSuite {
     val byId = cases.map(c => c.id -> c).toMap
     cases.filter(
       c =>
-        (c.id.startsWith("rtrim/") || c.id.startsWith("ltrim/")) &&
+        (c.id.startsWith("rtrim/") || c.id.startsWith("ltrim/") || c.id.startsWith("trim/")) &&
           !c.id.endsWith("/standard-string")).foreach {
       c => assert(c.inputs == parseInputs(trimInputs(c.id), SourceLocation("catalog", 1, 1), c.id))
     }

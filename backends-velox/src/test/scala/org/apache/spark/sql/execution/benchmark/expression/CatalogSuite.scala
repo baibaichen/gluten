@@ -52,8 +52,8 @@ class CatalogSuite extends SparkFunSuite {
   }
 
   test("Markdown retains Unicode JSON escapes literal backslashes and escaped table pipes") {
-    val sql = """concat(input, '\\d+', 'a\|b', '\\\|', '中文')"""
-    val description = "中文说明"
+    val sql = """concat(input, '\\d+', 'a\|b', '\\\|', '\u4e2d\u6587')"""
+    val description = "\u4e2d\u6587\u8bf4\u660e"
     val result = parseMarkdown(
       "trim",
       "inline.md",
@@ -61,7 +61,7 @@ class CatalogSuite extends SparkFunSuite {
         sql = s"```$sql```",
         description = description)).head
     assert(result.description == description)
-    assert(result.sql == """concat(input, '\\d+', 'a|b', '\\|', '中文')""")
+    assert(result.sql == """concat(input, '\\d+', 'a|b', '\\|', '\u4e2d\u6587')""")
     val binding = parseInputs(
       """input = rtrimPattern(length = 10, pattern = "none")""",
       SourceLocation("inline.md", 5, 13),
@@ -79,7 +79,7 @@ class CatalogSuite extends SparkFunSuite {
         assert(parseMarkdown(name, s"$name.md", markdown).head.id == s"$name/$name")
         assert(parseIndex(s"$name.md\n", "index.txt") == Seq(s"$name.md"))
     }
-    Seq("TRIM", "trim/variant", "../trim", "trim.variant", "中文").foreach {
+    Seq("TRIM", "trim/variant", "../trim", "trim.variant", "\u4e2d\u6587").foreach {
       function =>
         val error = intercept[IllegalArgumentException] {
           parseMarkdown(function, "inline.md", table())
@@ -91,7 +91,7 @@ class CatalogSuite extends SparkFunSuite {
 
   test("Markdown accepts plain explanation paragraphs before and after the case table") {
     val markdown = "Before the table.\nAnother plain line.\n\n" + table() +
-      "\n表后普通说明。\n"
+      "\n\u8868\u540e\u666e\u901a\u8bf4\u660e\u3002\n"
     val cases = parseMarkdown("trim", "inline.md", markdown)
     assert(cases.size == 1 && cases.head.id == "trim/example")
     assert(cases.head.sourceLocation.line == 8)
@@ -158,7 +158,7 @@ class CatalogSuite extends SparkFunSuite {
       """input = rtrimPattern(length = 10, pattern = "a\|b")?""",
       """input = rtrimPattern(length = 10, pattern = "a\|b\|c")?""",
       """input = rtrimPattern(length = 10, pattern = "a\\\|b\\\\\|c")?""",
-      """input = rtrimPattern(length = 10, pattern = "中文𠮷\|a\|b")?"""
+      """input = rtrimPattern(length = 10, pattern = "\u4e2d\u6587\ud842\udfb7\|a\|b")?"""
     )
     fixtures.zipWithIndex.foreach {
       case (input, index) =>
@@ -584,10 +584,10 @@ class CatalogSuite extends SparkFunSuite {
         assert(missing.size == 100 && missing.count(_ % 2 == 0) == 50)
         val utf = rows(trimPlan(s"$direction/l64-utf8-half-even"), 2, 2)
           .map(_.getUTF8String(0).toString)
-        val body = "01352830" + "丰" * 18
+        val body = "01352830" + "\u4e30" * 18
         assert(utf == Seq(
           if (direction == "rtrim") body + "  " else "  " + body,
-          "01352831" + "丱" * 18 + "pg"))
+          "01352831" + "\u4e31" * 18 + "pg"))
         Seq((1, 1), (2, 2), (17, 8), (16640, 10240)).foreach {
           case (count, batch) =>
             val last = rows(trimPlan(s"$direction/l256-last"), count, batch)
@@ -626,7 +626,7 @@ class CatalogSuite extends SparkFunSuite {
     }
     val utf = rows(trimPlan("trim/l64-utf8-half-even"), 2, 2)
       .map(_.getUTF8String(0).toString)
-    assert(utf == Seq(" " + "01352830" + "丰" * 18 + " ", "01352831" + "丱" * 18 + "pg"))
+    assert(utf == Seq(" " + "01352830" + "\u4e30" * 18 + " ", "01352831" + "\u4e31" * 18 + "pg"))
     assert(utf.forall(_.getBytes(UTF_8).length == 64))
   }
 

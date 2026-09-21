@@ -27,7 +27,8 @@ public final class BenchmarkBlackhole {
 
   private BenchmarkBlackhole() {}
 
-  public static void requireEnabled() {
+  public static void requireEnabled(boolean required) {
+    if (!required) return;
     String vmName = System.getProperty("java.vm.name");
     if (!vmName.contains("OpenJDK") && !vmName.contains("HotSpot")) {
       throw new IllegalStateException("This benchmark requires a supported HotSpot JVM");
@@ -55,6 +56,9 @@ public final class BenchmarkBlackhole {
   public static void consume(boolean isNull, double value) {}
 
   public static void consume(boolean isNull, byte[] value) {}
+
+  // ArrayData, MapData, InternalRow and Decimal; strings use the representation overload below.
+  public static void consume(boolean isNull, Object value) {}
 
   public static void consume(boolean isNull, Object base, long offset, int size) {}
 }

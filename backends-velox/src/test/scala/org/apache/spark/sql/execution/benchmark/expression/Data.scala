@@ -16,9 +16,15 @@
  */
 package org.apache.spark.sql.execution.benchmark.expression
 
+import org.apache.gluten.columnarbatch.ColumnarBatches
+import org.apache.gluten.execution.RowToVeloxColumnarExec
+
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.{UnsafeProjection, UnsafeRow}
 import org.apache.spark.sql.catalyst.util.GenericArrayData
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.vectorized.ColumnarBatch
+import org.apache.spark.task.TaskResources
 import org.apache.spark.unsafe.types.UTF8String
 
 import org.apache.commons.lang3.StringUtils
@@ -29,8 +35,8 @@ import java.util.Locale
 /**
  * Compile only the requested projections; no calibration rows or sketch fixtures are initialized.
  */
-private[benchmark] object ExpressionBenchmarkData {
-  import ExpressionBenchmarkCatalog._
+private[benchmark] object Data {
+  import Catalog._
 
   final case class Context(
       rows: Long,
@@ -42,6 +48,35 @@ private[benchmark] object ExpressionBenchmarkData {
   }
 
   final case class Plan(inputSchema: StructType, row: (Context, Long, Int, Int) => InternalRow)
+
+  final case class Inputs(rows: Array[UnsafeRow], batches: Seq[ColumnarBatch])
+
+  def materialize(plan: Plan, context: Context, batchSize: Int): Inputs = {
+    require(batchSize > 0, "Batch size must be positive")
+    require(context.rows <= Int.MaxValue, "Input rows exceed in-memory array capacity")
+    val encoder = UnsafeProjection.create(plan.inputSchema)
+    encoder.initialize(0)
+    val rows = Array.tabulate(context.rows.toInt) {
+      rowId =>
+        val local = rowId % batchSize
+        val count = math.min(batchSize.toLong, context.rows - (rowId - local)).toInt
+        val row = plan.row(context, rowId.toLong, local, count)
+        require(row.numFields == plan.inputSchema.length, "Input row and schema disagree")
+        encoder(row).copy()
+    }
+    val batches = RowToVeloxColumnarExec.toColumnarBatchIterator(
+      rows.iterator,
+      plan.inputSchema,
+      batchSize,
+      Long.MaxValue).zipWithIndex.map {
+      case (batch, index) =>
+        // The iterator recycles its previous payload when advanced.
+        ColumnarBatches.retain(batch)
+        TaskResources.addRecycler(s"ExpressionBenchmark input $index", 100)(batch.close())
+        batch
+    }.toVector
+    Inputs(rows, batches)
+  }
 
   private val standardFields: Map[String, StructField] = Seq(
     StructField("long", LongType, nullable = true),

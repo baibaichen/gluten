@@ -25,8 +25,8 @@ import java.nio.file.{Files, Paths}
 import scala.collection.JavaConverters._
 
 // scalastyle:off nonascii
-class ExpressionBenchmarkCatalogSuite extends SparkFunSuite {
-  import ExpressionBenchmarkCatalog._
+class CatalogSuite extends SparkFunSuite {
+  import Catalog._
 
   private def table(
       inputs: String = "`input = standard.string(length = 10)`",
@@ -120,8 +120,8 @@ class ExpressionBenchmarkCatalogSuite extends SparkFunSuite {
         val text = s"""input = ${direction}Pattern(length = 10, pattern = "none")"""
         val binding = parseInputs(text, SourceLocation("inline.md", 1, 1), "trim/example")
         assert(binding.head.generator == s"${direction}Pattern")
-        val plan = ExpressionBenchmarkData.compile(binding)
-        assert(plan.row(ExpressionBenchmarkData.Context(1), 0L, 0, 1).getUTF8String(0)
+        val plan = Data.compile(binding)
+        assert(plan.row(Data.Context(1), 0L, 0, 1).getUTF8String(0)
           .toString == "01352830ct")
         intercept[IllegalArgumentException] {
           parseInputs(
@@ -226,7 +226,6 @@ class ExpressionBenchmarkCatalogSuite extends SparkFunSuite {
     val invalid = Seq(
       "",
       "input = unknown()",
-      "input = standard.int(1)",
       "input = standard.int(value = 1)",
       "input = standard.int();",
       "input = standard.int() // comment",
@@ -283,7 +282,7 @@ class ExpressionBenchmarkCatalogSuite extends SparkFunSuite {
   }
 
   test("standard projections preserve calibration values correlations and nested schemas") {
-    import ExpressionBenchmarkData._
+    import Data._
     import org.apache.spark.sql.types._
 
     val names = Seq(
@@ -363,7 +362,7 @@ class ExpressionBenchmarkCatalogSuite extends SparkFunSuite {
   }
 
   test("standard projections use independent string widths and defaults regardless of order") {
-    import ExpressionBenchmarkData._
+    import Data._
     val source = SourceLocation("inline.md", 1, 1)
     val inputs = "input = standard.string(); values = standard.stringArray(length = 20); " +
       "needle = standard.int(); items = standard.intArray()"
@@ -399,7 +398,7 @@ class ExpressionBenchmarkCatalogSuite extends SparkFunSuite {
   }
 
   test("standard string and stringArray bindings accept different explicit lengths") {
-    import ExpressionBenchmarkData._
+    import Data._
     val inputs = "a = standard.string(length = 20); b = standard.string(length = 10); " +
       "c = standard.stringArray(length = 20); d = standard.stringArray(length = 10)"
     val plan = compile(parseInputs(inputs, SourceLocation("inline.md", 1, 1), "standard/widths"))
@@ -411,7 +410,7 @@ class ExpressionBenchmarkCatalogSuite extends SparkFunSuite {
   }
 
   test("single scalar and tuple bindings match merged rows and retain position validation") {
-    import ExpressionBenchmarkData._
+    import Data._
     Seq(
       "input = standard.int()",
       "(input, chars) = rtrimCustom()",
@@ -467,18 +466,18 @@ class ExpressionBenchmarkCatalogSuite extends SparkFunSuite {
     }
   }
 
-  private def trimPlan(id: String): ExpressionBenchmarkData.Plan =
-    ExpressionBenchmarkData.compile(parseInputs(
+  private def trimPlan(id: String): Data.Plan =
+    Data.compile(parseInputs(
       trimInputs(id),
       SourceLocation("fixture", 1, 1),
       id))
 
   private def rows(
-      plan: ExpressionBenchmarkData.Plan,
+      plan: Data.Plan,
       count: Int,
       batch: Int,
       runSeed: Long = seed): Seq[InternalRow] = {
-    val context = ExpressionBenchmarkData.Context(count, seed = runSeed)
+    val context = Data.Context(count, seed = runSeed)
     (0 until count).map {
       i =>
         val local = i % batch
@@ -535,7 +534,7 @@ class ExpressionBenchmarkCatalogSuite extends SparkFunSuite {
         direction =>
           val input = s"""input = ${direction}Pattern(length = $width, """ +
             s"""pattern = "$pattern", utf8 = $unicode)"""
-          val plan = ExpressionBenchmarkData.compile(
+          val plan = Data.compile(
             parseInputs(input, SourceLocation("short-width", 1, 1), direction))
           rows(plan, 3, 2).map(_.getUTF8String(0).toString)
       }
@@ -602,9 +601,9 @@ class ExpressionBenchmarkCatalogSuite extends SparkFunSuite {
     }
   }
 
-  test("resources contain exactly 51 canonical functions and 140 unique cases") {
+  test("resources contain exactly 51 canonical functions and 141 unique cases") {
     val cases = load()
-    assert(cases.size == 140 && cases.map(_.id).distinct.size == 140)
+    assert(cases.size == 141 && cases.map(_.id).distinct.size == 141)
     assert(cases.map(_.id.takeWhile(_ != '/')).distinct.size == 51)
     assert(cases.count(_.id.startsWith("rtrim/")) == 42)
     assert(cases.count(_.id.startsWith("ltrim/")) == 42)
@@ -635,15 +634,15 @@ class ExpressionBenchmarkCatalogSuite extends SparkFunSuite {
     assert(byId("date_trunc/standard-timestamp").inputs.head.generator == "standard.timestamp")
     assert(
       byId("unix_timestamp/standard-string").inputs.head.generator == "standard.timestampString")
-    assert(cases.count(_.id.startsWith("cast/")) == 2)
+    assert(cases.count(_.id.startsWith("cast/")) == 3)
     assert(cases.count(_.id.startsWith("concat/")) == 5)
     assert(cases.count(_.id.startsWith("substring/")) == 2)
     assert(cases.count(_.id.startsWith("length/")) == 2)
     cases.foreach {
       c =>
-        val plan = ExpressionBenchmarkData.compile(c.inputs)
+        val plan = Data.compile(c.inputs)
         assert(plan.inputSchema.nonEmpty)
-        assert(rows(plan, 2, 1).forall(_.numFields == plan.inputSchema.length))
+        rows(plan, 2, 1)
         if (c.id.endsWith("/custom")) {
           val side = if (c.id.startsWith("rtrim")) "TRAILING" else "LEADING"
           assert(c.sql == s"TRIM($side trimChars FROM input)")

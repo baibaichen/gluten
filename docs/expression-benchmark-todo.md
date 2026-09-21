@@ -21,5 +21,5 @@
 相关实现：
 
 - 首轮第 3、8 项：`backends-velox/src/test/scala/org/apache/spark/sql/catalyst/expressions/NativeExpressionEvalHelper.scala`。
-- 首轮第 6 项、追加第 1、2 项：`backends-velox/src/test/scala/org/apache/spark/sql/execution/benchmark/expression/ExpressionBenchmark.scala`。
-- 追加第 4 项：`backends-velox/src/test/scala/org/apache/spark/sql/execution/benchmark/expression/ExpressionBenchmarkProfiler.scala`。
+- 首轮第 6 项、追加第 1、2 项：`../backends-velox/src/test/scala/org/apache/spark/sql/execution/benchmark/expression/Benchmark.scala`。
+- 追加第 4 项：`../backends-velox/src/test/scala/org/apache/spark/sql/execution/benchmark/expression/Profiler.scala`。

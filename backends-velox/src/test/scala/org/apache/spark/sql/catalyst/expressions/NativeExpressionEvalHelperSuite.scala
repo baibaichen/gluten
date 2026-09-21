@@ -50,6 +50,10 @@ class NativeExpressionEvalHelperSuite
       Arm.withResource(new ColumnarBatch(Array.empty[ColumnVector], 1)) {
         input =>
           val prepared = prepareNativeExpression(Seq(Literal("value")), Seq.empty)
+          val fields = prepared.getClass.getDeclaredFields
+            .filterNot(f => f.isSynthetic || java.lang.reflect.Modifier.isStatic(f.getModifiers))
+            .map(_.getName).toSet
+          assert(fields == Set("jni", "handle", "backendName", "numInputColumns", "closed"))
           prepared.close()
           prepared.close()
           val error = intercept[IllegalArgumentException](prepared.evaluate(input))

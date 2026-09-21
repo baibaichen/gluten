@@ -51,12 +51,12 @@ private[benchmark] object Data {
 
   final case class Inputs(rows: Array[UnsafeRow], batches: Seq[ColumnarBatch])
 
-  def materialize(plan: Plan, context: Context, batchSize: Int): Inputs = {
+  def materializeRows(plan: Plan, context: Context, batchSize: Int): Array[UnsafeRow] = {
     require(batchSize > 0, "Batch size must be positive")
     require(context.rows <= Int.MaxValue, "Input rows exceed in-memory array capacity")
     val encoder = UnsafeProjection.create(plan.inputSchema)
     encoder.initialize(0)
-    val rows = Array.tabulate(context.rows.toInt) {
+    Array.tabulate(context.rows.toInt) {
       rowId =>
         val local = rowId % batchSize
         val count = math.min(batchSize.toLong, context.rows - (rowId - local)).toInt
@@ -64,6 +64,10 @@ private[benchmark] object Data {
         require(row.numFields == plan.inputSchema.length, "Input row and schema disagree")
         encoder(row).copy()
     }
+  }
+
+  def materialize(plan: Plan, context: Context, batchSize: Int): Inputs = {
+    val rows = materializeRows(plan, context, batchSize)
     val batches = RowToVeloxColumnarExec.toColumnarBatchIterator(
       rows.iterator,
       plan.inputSchema,

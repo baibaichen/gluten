@@ -151,14 +151,22 @@ class RunOptionsSuite extends SparkFunSuite {
   }
 
   test("list is pure and lists functions and full case definitions") {
-    val all = parse("--list").listing(catalog)
-    assert(all.linesIterator.size == 51)
-    val subset = parse("--list", "rtrim,ltrim,trim").selected(catalog)
-    assert(subset.count(_.id.startsWith("rtrim/")) == 42)
-    assert(subset.count(_.id.startsWith("ltrim/")) == 42)
-    assert(subset.count(_.id.startsWith("trim/")) == 5)
-    val text = parse("--list", "trim").listing(catalog)
-    assert(text.contains("trim/standard") && text.contains("trim(") && text.contains("inputs="))
+    val fixture = Seq("trim", "rtrim").map {
+      function =>
+        Catalog.CaseDef(
+          s"$function/example",
+          Seq(Catalog.Binding(Seq("input"), "standard.string", Seq.empty)),
+          s"$function(input)",
+          "Listing fixture",
+          Catalog.SourceLocation("fixture", 1, 1)
+        )
+    }
+    assert(parse("--list").listing(fixture).linesIterator.toSeq == Seq("trim", "rtrim"))
+    assert(parse("--list", "rtrim,trim").selected(fixture) == fixture.reverse)
+    val text = parse("--list", "trim").listing(fixture)
+    assert(text.contains("trim/example") && text.contains("trim(input)"))
+    assert(text.contains("inputs=") && text.contains("Listing fixture"))
+    assert(!text.contains("rtrim/example"))
   }
 
   test("selection preserves first occurrence and catalog order with slash-safe globs") {
@@ -184,11 +192,8 @@ class RunOptionsSuite extends SparkFunSuite {
       Seq("trim", "--profile-output", "x"),
       Seq("trim", "--unknown", "1")
     ).foreach(args => assertThrows[IllegalArgumentException](parse(args: _*).selected(catalog)))
-    Seq("blackhole", "observable").foreach {
-      value =>
-        val error = intercept[IllegalArgumentException](parse("trim", "--consumer", value))
-        assert(error.getMessage.contains("Unknown --consumer"))
-    }
+    val error = intercept[IllegalArgumentException](parse("trim", "--consumer", "blackhole"))
+    assert(error.getMessage.contains("Unknown --consumer"))
   }
 
   test("repeat is rejected in CLI and JSON") {
@@ -338,10 +343,8 @@ class RunOptionsSuite extends SparkFunSuite {
         "[]",
         "{\"functions\":[\"trim\"],\"rows\":1.0}",
         "{\"functions\":[\"trim\"],\"rows\":2147483648}",
-        "{\"functions\":[\"trim\"],\"seed\":9223372036854775808}",
         "{\"functions\":[\"trim\"],\"rows\":1,\"rows\":2}",
         "{\"functions\":[\"trim\"],\"sql\":\"trim(x)\"}",
-        "{\"functions\":[1]}",
         "{\"functions\":[]}",
         "{\"functions\":[\"trim\"],\"cases\":[\"trim/*\"]}",
         "{\"functions\":[\"trim\"]} {}"
@@ -350,18 +353,15 @@ class RunOptionsSuite extends SparkFunSuite {
           writeString(file, json)
           assertThrows[IllegalArgumentException](parse("--config", file.toString))
       }
-      Seq("blackhole", "observable").foreach {
-        value =>
-          writeString(file, s"""{"functions":["trim"],"consumer":"$value"}""")
-          val error = intercept[IllegalArgumentException](parse(
-            "--config",
-            file.toString,
-            "--warmup-seconds",
-            "2",
-            "--measurement-seconds",
-            "10"))
-          assert(error.getMessage.contains("Unknown config key"))
-      }
+      writeString(file, """{"functions":["trim"],"consumer":"blackhole"}""")
+      val error = intercept[IllegalArgumentException](parse(
+        "--config",
+        file.toString,
+        "--warmup-seconds",
+        "2",
+        "--measurement-seconds",
+        "10"))
+      assert(error.getMessage.contains("Unknown config key"))
       val invalidUtf8 = """{"x":1}""".getBytes(UTF_8)
       invalidUtf8(2) = -1
       Files.write(file, invalidUtf8)

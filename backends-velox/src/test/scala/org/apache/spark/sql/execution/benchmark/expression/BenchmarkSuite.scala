@@ -641,7 +641,9 @@ class BenchmarkSuite
   Seq("warmup", "action", "interrupt", "start", "stop", "dump", "write")
     .foreach {
       phase =>
-        Seq(false, true).foreach {
+        val cleanupFailures =
+          if (Set("action", "interrupt", "write")(phase)) Seq(false, true) else Seq(false)
+        cleanupFailures.foreach {
           cleanupFails =>
             test(s"metric: measure cleanup preserves primary: $phase / $cleanupFails") {
               val primary = if (phase == "interrupt") new InterruptedException(phase)

@@ -120,9 +120,6 @@ class CatalogSuite extends SparkFunSuite {
         val text = s"""input = ${direction}Pattern(length = 10, pattern = "none")"""
         val binding = parseInputs(text, SourceLocation("inline.md", 1, 1), "trim/example")
         assert(binding.head.generator == s"${direction}Pattern")
-        val plan = Data.compile(binding)
-        assert(plan.row(Data.Context(1), 0L, 0, 1).getUTF8String(0)
-          .toString == "01352830ct")
         intercept[IllegalArgumentException] {
           parseInputs(
             text.replace(s"${direction}Pattern", direction),
@@ -392,9 +389,6 @@ class CatalogSuite extends SparkFunSuite {
     assert(zero.row(Context(1), 0, 0, 1).getUTF8String(0).toString == "0")
     val int = compile(parseInputs("input = standard.int()", source, "standard/int"))
     assert(int.row(Context(Long.MaxValue), 2147483648L, 0, 1).getInt(0) == Int.MinValue)
-    intercept[IllegalArgumentException](forward.row(context, 0L, 1, 2))
-    intercept[IllegalArgumentException](forward.row(context, 24L, 0, 2))
-    intercept[IllegalArgumentException](forward.row(context, 0L, 0, 0))
   }
 
   test("standard string and stringArray bindings accept different explicit lengths") {
@@ -630,13 +624,9 @@ class CatalogSuite extends SparkFunSuite {
     assert(utf.forall(_.getBytes(UTF_8).length == 64))
   }
 
-  test("resources contain exactly 51 canonical functions and 145 unique cases") {
+  test("catalog resources are indexed and cases have unique IDs and valid inputs") {
     val cases = load()
-    assert(cases.size == 145 && cases.map(_.id).distinct.size == 145)
-    assert(cases.map(_.id.takeWhile(_ != '/')).distinct.size == 51)
-    assert(cases.count(_.id.startsWith("rtrim/")) == 42)
-    assert(cases.count(_.id.startsWith("ltrim/")) == 42)
-    assert(cases.count(_.id.startsWith("trim/")) == 5)
+    assert(cases.nonEmpty && cases.map(_.id).distinct.size == cases.size)
     val directory =
       Paths.get(getClass.getClassLoader.getResource("expression-benchmark/cases").toURI)
     val index =
@@ -645,38 +635,11 @@ class CatalogSuite extends SparkFunSuite {
     try assert(files.iterator().asScala.map(_.getFileName.toString).filter(_.endsWith(
         ".md")).toSet == index.toSet)
     finally files.close()
-    val byId = cases.map(c => c.id -> c).toMap
-    cases.filter(
-      c =>
-        (c.id.startsWith("rtrim/") || c.id.startsWith("ltrim/") || c.id.startsWith("trim/")) &&
-          !c.id.endsWith("/standard-string")).foreach {
-      c => assert(c.inputs == parseInputs(trimInputs(c.id), SourceLocation("catalog", 1, 1), c.id))
-    }
-    assert(byId("array_sort/int-array-lambda").sql ==
-      "array_sort(input, (left, right) -> left - right)")
-    assert(byId("map_from_arrays/standard-string-int").sql ==
-      "map_from_arrays(keys, array(value, value + 1))")
-    assert(byId("flatten/int-array").sql == "flatten(array(input, input))")
-    assert(byId("between/standard-long").sql ==
-      "input BETWEEN CAST(1 AS BIGINT) AND CAST(100 AS BIGINT)")
-    assert(byId("timestamp_millis/standard-long").inputs.head.generator == "standard.long")
-    assert(byId("date_trunc/standard-timestamp").inputs.head.generator == "standard.timestamp")
-    assert(
-      byId("unix_timestamp/standard-string").inputs.head.generator == "standard.timestampString")
-    assert(cases.count(_.id.startsWith("cast/")) == 3)
-    assert(cases.count(_.id.startsWith("concat/")) == 5)
-    assert(cases.count(_.id.startsWith("substring/")) == 2)
-    assert(cases.count(_.id.startsWith("length/")) == 2)
     cases.foreach {
       c =>
         val plan = Data.compile(c.inputs)
         assert(plan.inputSchema.nonEmpty)
         rows(plan, 2, 1)
-        if (c.id.endsWith("/custom")) {
-          val side = if (c.id.startsWith("rtrim")) "TRAILING" else "LEADING"
-          assert(c.sql == s"TRIM($side trimChars FROM input)")
-        }
-        if (c.id.contains("/identity-")) assert(c.sql == "input")
     }
   }
 

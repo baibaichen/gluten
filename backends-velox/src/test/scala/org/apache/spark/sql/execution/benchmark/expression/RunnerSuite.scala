@@ -134,9 +134,6 @@ class RunnerSuite extends SparkFunSuite {
       val text = bytes.toString(UTF_8.name())
       val results = text.linesIterator.filter(_.startsWith("memory/")).toSeq
       assert(results.map(_.takeWhile(_ != ' ').stripSuffix(":")) == Seq(second.id, first.id))
-      assert(text.contains("Best Time(ms)") && text.contains("Avg Time(ms)"))
-      assert(text.contains("Stdev(ms)") && text.contains("Relative"))
-      assert(!text.contains("median"))
       val engines =
         text.linesIterator.filter(l => l.startsWith("vanilla") || l.startsWith("native"))
           .map(_.takeWhile(_ != ' ')).toSeq

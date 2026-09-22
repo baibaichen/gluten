@@ -17,7 +17,6 @@
 package org.apache.spark.sql.execution.benchmark.expression
 
 import org.apache.spark.SparkFunSuite
-import org.apache.spark.util.Utils
 
 import java.io.{ByteArrayOutputStream, IOException}
 import java.nio.charset.StandardCharsets.UTF_8
@@ -161,39 +160,40 @@ class RunOptionsSuite extends SparkFunSuite {
   }
 
   test("duration overrides validate each source and replace whole timing groups") {
-    val cwd = Files.createTempDirectory("duration-cwd")
-    val dir = Files.createDirectory(cwd.resolve("config"))
-    val file = dir.resolve("run.json")
-    def fromFile(args: String*): RunOptions =
-      RunOptions.parse(Array("--config", "config/run.json") ++ args, cwd).runtime
-    def write(fields: String): Unit =
-      writeString(file, s"""{"functions":["trim"],$fields}""")
-    try {
-      write(""""warmupSeconds":2,"measurementSeconds":10""")
-      val unchanged = fromFile("--rows", "17")
-      assert(unchanged.warmup.toSeconds == 2 && unchanged.minTime.toSeconds == 10)
-      val replaced = fromFile("--warmup-seconds", "3", "--measurement-seconds", "11")
-      assert(replaced.warmup.toSeconds == 3 && replaced.minTime.toSeconds == 11)
-      assertThrows[IllegalArgumentException](fromFile("--warmup-seconds", "3"))
-      assertThrows[IllegalArgumentException](fromFile("--measurement-seconds", "11"))
-      Seq(
-        """"warmupSeconds":2""",
-        """"measurementSeconds":10""",
-        """"warmupSeconds":0,"measurementSeconds":10""",
-        """"warmupSeconds":2,"measurementSeconds":2147483648""",
-        """"warmupSeconds":2.0,"measurementSeconds":10""",
-        """"warmupSeconds":"2","measurementSeconds":10"""
-      ).foreach {
-        fields =>
-          write(fields)
-          assertThrows[IllegalArgumentException](fromFile())
-          assertThrows[IllegalArgumentException](fromFile(
-            "--warmup-seconds",
-            "2",
-            "--measurement-seconds",
-            "10"))
-      }
-    } finally Utils.deleteRecursively(cwd.toFile)
+    withTempDir {
+      directory =>
+        val cwd = directory.toPath
+        val dir = Files.createDirectory(cwd.resolve("config"))
+        val file = dir.resolve("run.json")
+        def fromFile(args: String*): RunOptions =
+          RunOptions.parse(Array("--config", "config/run.json") ++ args, cwd).runtime
+        def write(fields: String): Unit =
+          writeString(file, s"""{"functions":["trim"],$fields}""")
+        write(""""warmupSeconds":2,"measurementSeconds":10""")
+        val unchanged = fromFile("--rows", "17")
+        assert(unchanged.warmup.toSeconds == 2 && unchanged.minTime.toSeconds == 10)
+        val replaced = fromFile("--warmup-seconds", "3", "--measurement-seconds", "11")
+        assert(replaced.warmup.toSeconds == 3 && replaced.minTime.toSeconds == 11)
+        assertThrows[IllegalArgumentException](fromFile("--warmup-seconds", "3"))
+        assertThrows[IllegalArgumentException](fromFile("--measurement-seconds", "11"))
+        Seq(
+          """"warmupSeconds":2""",
+          """"measurementSeconds":10""",
+          """"warmupSeconds":0,"measurementSeconds":10""",
+          """"warmupSeconds":2,"measurementSeconds":2147483648""",
+          """"warmupSeconds":2.0,"measurementSeconds":10""",
+          """"warmupSeconds":"2","measurementSeconds":10"""
+        ).foreach {
+          fields =>
+            write(fields)
+            assertThrows[IllegalArgumentException](fromFile())
+            assertThrows[IllegalArgumentException](fromFile(
+              "--warmup-seconds",
+              "2",
+              "--measurement-seconds",
+              "10"))
+        }
+    }
   }
 
   test("strict JSON types keys UTF8 integers and trailing tokens") {
@@ -311,35 +311,36 @@ class RunOptionsSuite extends SparkFunSuite {
   }
 
   test("CLI scalars and whole selectors override JSON and paths keep their own origin") {
-    val cwd = Files.createTempDirectory("expression-cwd")
-    val dir = Files.createDirectory(cwd.resolve("config"))
-    val config = dir.resolve("run.json")
-    try {
-      writeString(
-        config,
-        """{"functions":["trim"],"rows":19,""" +
-          """"asyncProfiler":"ap","profileOutput":"out"}""")
-      val fromJson = RunOptions.parse(Array("--config", "config/run.json"), cwd)
-      assert(fromJson.runtime.profiler.get.home == dir.resolve("ap"))
-      assert(fromJson.runtime.profiler.get.output == dir.resolve("out"))
-      val overrideJson = RunOptions.parse(
-        Array(
-          "--config",
-          "config/run.json",
-          "--cases",
-          "rtrim/l13-half-even",
-          "--rows",
-          "17",
-          "--async-profiler",
-          "cli-ap",
-          "--profile-output",
-          "cli-out"),
-        cwd
-      )
-      assert(overrideJson.selected(catalog).map(_.id) == Seq("rtrim/l13-half-even"))
-      assert(overrideJson.runtime.input.rows == 17)
-      assert(overrideJson.runtime.profiler.get.home == cwd.resolve("cli-ap"))
-      assert(overrideJson.runtime.profiler.get.output == cwd.resolve("cli-out"))
-    } finally Utils.deleteRecursively(cwd.toFile)
+    withTempDir {
+      directory =>
+        val cwd = directory.toPath
+        val dir = Files.createDirectory(cwd.resolve("config"))
+        val config = dir.resolve("run.json")
+        writeString(
+          config,
+          """{"functions":["trim"],"rows":19,""" +
+            """"asyncProfiler":"ap","profileOutput":"out"}""")
+        val fromJson = RunOptions.parse(Array("--config", "config/run.json"), cwd)
+        assert(fromJson.runtime.profiler.get.home == dir.resolve("ap"))
+        assert(fromJson.runtime.profiler.get.output == dir.resolve("out"))
+        val overrideJson = RunOptions.parse(
+          Array(
+            "--config",
+            "config/run.json",
+            "--cases",
+            "rtrim/l13-half-even",
+            "--rows",
+            "17",
+            "--async-profiler",
+            "cli-ap",
+            "--profile-output",
+            "cli-out"),
+          cwd
+        )
+        assert(overrideJson.selected(catalog).map(_.id) == Seq("rtrim/l13-half-even"))
+        assert(overrideJson.runtime.input.rows == 17)
+        assert(overrideJson.runtime.profiler.get.home == cwd.resolve("cli-ap"))
+        assert(overrideJson.runtime.profiler.get.output == cwd.resolve("cli-out"))
+    }
   }
 }

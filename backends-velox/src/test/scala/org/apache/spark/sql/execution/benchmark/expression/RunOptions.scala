@@ -83,7 +83,7 @@ private[benchmark] object RunOptions {
       runtime: RunOptions) {
     def selected(catalog: Seq[Catalog.CaseDef])
         : Seq[Catalog.CaseDef] = {
-      val groups = if (cases.nonEmpty) cases.map {
+      val groups = if (cases.nonEmpty) cases.distinct.map {
         pattern =>
           require(pattern.indexOf('/') > 0, s"Expected function/case pattern: $pattern")
           val regex = pattern.map {
@@ -95,7 +95,7 @@ private[benchmark] object RunOptions {
           require(matches.nonEmpty, s"No cases match: $pattern")
           matches
       }
-      else functions.map {
+      else functions.distinct.map {
         function =>
           val matches = catalog.filter(_.id.startsWith(function + "/"))
           require(matches.nonEmpty, s"Unknown function: $function")

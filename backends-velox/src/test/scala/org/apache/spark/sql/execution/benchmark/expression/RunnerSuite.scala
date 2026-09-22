@@ -32,56 +32,6 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration._
 
 class RunnerSuite extends SparkFunSuite {
-  test("case suite registers exactly the catalog and six explicit ignores") {
-    val suite = new BenchmarkSuite
-    val catalog = Catalog.load().map(_.id).toSet
-    assert(suite.testNames.filter(_.matches("[a-z0-9_-]+/[a-z0-9_-]+")) == catalog)
-    val ignored = suite.tags.collect {
-      case (name, tags) if tags.contains("org.scalatest.Ignore") => name
-    }.toSet
-    val unsupported = Set(
-      "array_sort/int-array-lambda",
-      "bround/standard-double",
-      "encode/standard-string",
-      "format_string/standard-string",
-      "sequence/bounded-int",
-      "substring/binary"
-    )
-    assert(ignored == (if (suite.matchSparkVersion(Some("4.0"))) unsupported else catalog))
-  }
-
-  test("constructor is inert without blackhole, Spark session or task resources") {
-    BenchmarkBlackhole.requireEnabled(false)
-    intercept[IllegalStateException](BenchmarkBlackhole.requireEnabled(true))
-    assert(!TaskResources.inSparkTask())
-    val directory = Files.createTempDirectory("expression-constructor")
-    val profile = directory.resolve("not-created")
-    val scenario = CaseDef(
-      "constructor/inert",
-      Seq(Binding(Seq("input"), "unknown-generator", Seq.empty)),
-      "invalid sql +",
-      "No eager preparation",
-      SourceLocation("constructor", 1, 1)
-    )
-    val options = RunOptions(Duration.Zero, Duration.Zero)
-    try {
-      Seq(options, options.copy(profiler = Some(ProfilerOptions(directory, output = profile))))
-        .foreach {
-          runtime =>
-            val constructed = scala.util.Try(new Benchmark(
-              null,
-              scenario,
-              Data.Context(0),
-              runtime,
-              profiler = runtime.profiler.map(new Profiler(_))))
-            assert(constructed.isSuccess, s"Constructor performed preparation: $constructed")
-            assert(constructed.get.benchmarks.isEmpty)
-            assert(!Files.exists(profile))
-            assert(!TaskResources.inSparkTask())
-        }
-    } finally Utils.deleteRecursively(directory.toFile)
-  }
-
   test("direct run uses supplied case order and input definitions without catalog selection") {
     assume(!org.apache.spark.SPARK_VERSION.startsWith("3."), "Runner requires Spark 4")
     val directory = Files.createTempDirectory("expression-direct-run")

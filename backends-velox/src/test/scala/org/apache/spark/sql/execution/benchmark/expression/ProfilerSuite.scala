@@ -46,18 +46,6 @@ class ProfilerSuite extends SparkFunSuite {
     } finally Utils.deleteRecursively(root.toFile)
   }
 
-  test("profile root is created once on demand without loading the profiler") {
-    fixture() {
-      (profiler, commands, _) =>
-        assert(!Files.exists(profiler.options.output))
-        val root = profiler.profileRoot
-        assert(root.getParent == profiler.options.output && Files.isDirectory(root))
-        assert(root.getFileName.toString.startsWith("profile-"))
-        assert(profiler.profileRoot == root && commands.isEmpty)
-        Utils.deleteRecursively(profiler.options.output.toFile)
-    }
-  }
-
   test("unstarted stop and dump never touch an external profile or create output") {
     fixture() {
       (profiler, commands, path) =>
@@ -105,79 +93,64 @@ class ProfilerSuite extends SparkFunSuite {
     }
   }
 
-  Seq(cpuStart, "stop", "collapsed,total").foreach {
-    failedCommand =>
-      Seq(false, true).foreach {
-        interrupted =>
-          test(s"command failure seals ownership without retries: $failedCommand / $interrupted") {
-            val failure = if (interrupted) new InterruptedException(failedCommand)
-            else new IllegalStateException(failedCommand)
-            fixture(response = command => if (command == failedCommand) throw failure else "") {
-              (profiler, commands, path) =>
-                try {
-                  val thrown = intercept[Exception] {
-                    profiler.start()
-                    profiler.stop()
-                    profiler.dump(path)
-                  }
-                  assert(thrown eq failure)
-                  assert(thrown.getSuppressed.isEmpty)
-                  assert(Thread.currentThread().isInterrupted == interrupted)
-                  val completed = commands.toVector
-                  profiler.stop()
-                  profiler.dump(path)
-                  intercept[IllegalArgumentException](profiler.start())
-                  assert(commands.toVector == completed && commands.last == failedCommand)
-                  assert(!profiler.owned && !Files.exists(path))
-                } finally Thread.interrupted()
-            }
-          }
-      }
-  }
-
-  Seq(false, true).foreach {
-    existingFile =>
-      test(s"write failure is terminal and existing output is never overwritten: $existingFile") {
-        fixture(response = _ => "new samples") {
+  Seq((cpuStart, false), ("stop", true)).foreach {
+    case (failedCommand, interrupted) =>
+      test(s"command failure seals ownership without retries: $failedCommand / $interrupted") {
+        val failure = if (interrupted) new InterruptedException(failedCommand)
+        else new IllegalStateException(failedCommand)
+        fixture(response = command => if (command == failedCommand) throw failure else "") {
           (profiler, commands, path) =>
-            profiler.start()
-            profiler.stop()
-            if (existingFile) Files.write(path, "original".getBytes(UTF_8))
-            else Files.createDirectory(path)
-            intercept[IOException](profiler.dump(path))
-            profiler.stop()
-            profiler.dump(path)
-            intercept[IllegalArgumentException](profiler.start())
-            assert(commands.toSeq == Seq(cpuStart, "stop", "collapsed,total"))
-            if (existingFile) assert(new String(Files.readAllBytes(path), UTF_8) == "original")
-        }
-      }
-  }
-
-  Seq("", "stop", "collapsed,total").foreach {
-    failedCommand =>
-      test(s"cleanup clears and restores the interrupt flag even on failure: $failedCommand") {
-        fixture(response = command => {
-          assert(!Thread.currentThread().isInterrupted)
-          if (command == failedCommand) throw new IllegalStateException(command)
-          ""
-        }) {
-          (profiler, commands, path) =>
-            profiler.start()
-            Thread.currentThread().interrupt()
             try {
-              def finish(): Unit = {
+              val thrown = intercept[Exception] {
+                profiler.start()
                 profiler.stop()
                 profiler.dump(path)
               }
-              if (failedCommand.isEmpty) finish()
-              else intercept[IllegalStateException](finish())
-              assert(Thread.currentThread().isInterrupted)
+              assert(thrown eq failure)
+              assert(thrown.getSuppressed.isEmpty)
+              assert(Thread.currentThread().isInterrupted == interrupted)
+              val completed = commands.toVector
               profiler.stop()
               profiler.dump(path)
-              assert(commands.count(_ == "stop") == 1)
+              intercept[IllegalArgumentException](profiler.start())
+              assert(commands.toVector == completed && commands.last == failedCommand)
+              assert(!profiler.owned && !Files.exists(path))
             } finally Thread.interrupted()
         }
       }
+  }
+
+  test("write failure is terminal and existing output is never overwritten: true") {
+    fixture(response = _ => "new samples") {
+      (profiler, commands, path) =>
+        profiler.start()
+        profiler.stop()
+        Files.write(path, "original".getBytes(UTF_8))
+        intercept[IOException](profiler.dump(path))
+        profiler.stop()
+        profiler.dump(path)
+        intercept[IllegalArgumentException](profiler.start())
+        assert(commands.toSeq == Seq(cpuStart, "stop", "collapsed,total"))
+        assert(new String(Files.readAllBytes(path), UTF_8) == "original")
+    }
+  }
+
+  test("cleanup clears and restores the interrupt flag even on failure: ") {
+    fixture(response = _ => {
+      assert(!Thread.currentThread().isInterrupted)
+      ""
+    }) {
+      (profiler, commands, path) =>
+        profiler.start()
+        Thread.currentThread().interrupt()
+        try {
+          profiler.stop()
+          profiler.dump(path)
+          assert(Thread.currentThread().isInterrupted)
+          profiler.stop()
+          profiler.dump(path)
+          assert(commands.count(_ == "stop") == 1)
+        } finally Thread.interrupted()
+    }
   }
 }

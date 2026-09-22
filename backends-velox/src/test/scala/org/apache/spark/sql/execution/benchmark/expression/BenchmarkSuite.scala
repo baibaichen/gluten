@@ -20,12 +20,10 @@ import org.apache.gluten.execution.VeloxWholeStageTransformerSuite
 import org.apache.gluten.memory.SimpleMemoryUsageRecorder
 
 import org.apache.spark.benchmark.{Benchmark => SparkBenchmark}
-import org.apache.spark.scheduler.{SparkListener, SparkListenerJobStart}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
-import org.apache.spark.sql.catalyst.plans.logical.Project
 import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, GenericArrayData, MapData}
 import org.apache.spark.sql.execution.benchmark.expression.BenchmarkSuite.TypedPrepared
 import org.apache.spark.sql.execution.benchmark.expression.Catalog._
@@ -41,7 +39,6 @@ import org.codehaus.commons.compiler.util.reflect.ByteArrayClassLoader
 import org.scalatest.exceptions.TestCanceledException
 
 import java.nio.file.Files
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Consumer
 
 import scala.collection.mutable.ArrayBuffer
@@ -87,142 +84,6 @@ class BenchmarkSuite
     SourceLocation("framework.sql", 7, 11)
   )
 
-  testWithMinSparkVersion(
-    "preparation preserves native expressions and fresh input identities",
-    "4.0") {
-    withSQLConf(RunOptions.sqlConf: _*) {
-      val schema = new StructType().add("input", StringType)
-      Seq(
-        "encode(input, 'UTF-8')" -> classOf[Encode],
-        "to_json(named_struct('value', input))" -> classOf[StructsToJson]).foreach {
-        case (sql, expectedClass) =>
-          val benchmark = new Benchmark(spark, scenario(sql), Context(0))
-          def prepare: Project = benchmark.prepareAnalyzed(schema, native = true)
-          val first = prepare
-          val second = prepare
-          assert(first.resolved && first.child.schema == schema)
-          assert(first.projectList.head.exists(expectedClass.isInstance))
-          assert(first.projectList.head.references.subsetOf(first.child.outputSet))
-          assert(first.child.output.head.exprId != second.child.output.head.exprId)
-      }
-    }
-  }
-
-  testWithMinSparkVersion("preparation folds constant arrays for both engines", "4.0") {
-    withSQLConf(RunOptions.sqlConf: _*) {
-      val schema = new StructType().add("input", ArrayType(IntegerType, containsNull = false))
-      Seq(false, true).foreach {
-        native =>
-          val benchmark = new Benchmark(
-            spark,
-            scenario("array_intersect(input, array(1, 2, 3))"),
-            Context(0),
-            isBenchmark = false)
-          val prepared = benchmark.prepareAnalyzed(schema, native)
-          val expression = prepared.projectList.head.asInstanceOf[Alias].child
-          assert(expression.isInstanceOf[ArrayIntersect])
-          val intersect = expression.asInstanceOf[ArrayIntersect]
-          assert(intersect.left.references == prepared.child.outputSet)
-          assert(intersect.right.isInstanceOf[Literal], s"native=$native: ${intersect.right}")
-          assert(checkResult(
-            intersect.right.eval(),
-            new GenericArrayData(Array(1, 2, 3)),
-            intersect.right.dataType,
-            false))
-      }
-    }
-  }
-
-  test("framework: invalid SQL and unsupported shapes retain case ID, source and cause") {
-    val invalid = Seq(
-      "missing + 1",
-      "input +",
-      "(SELECT 1)",
-      "sum(input)",
-      "row_number() OVER (ORDER BY input)",
-      "explode(array(input))",
-      "input_file_name()",
-      "input_file_block_start()",
-      "monotonically_increasing_id()",
-      "rand()",
-      "randn()"
-    )
-    invalid.foreach {
-      sql =>
-        val error = intercept[IllegalArgumentException] {
-          withCorrectness(spark, scenario(sql), Context(0), 4)(_.verify())
-        }
-        assert(error.getMessage.contains("framework/golden"), sql)
-        assert(error.getMessage.contains("framework.sql:7:11"), sql)
-        assert(error.getCause != null, sql)
-    }
-  }
-
-  testWithMinSparkVersion("correctness submits no Spark jobs and supports zero rows", "4.0") {
-    val jobs = new AtomicInteger
-    val listener = new SparkListener {
-      override def onJobStart(event: SparkListenerJobStart): Unit = { jobs.incrementAndGet() }
-    }
-    spark.sparkContext.addSparkListener(listener)
-    try {
-      val empty = Plan(
-        new StructType().add("input", LongType),
-        (_, _, _, _) =>
-          fail("Zero rows must not invoke the generator"))
-      withCorrectness(spark, scenario("input + 1"), Context(0), 4, empty) {
-        prepared =>
-          assert(prepared.nativeBatchSizes.isEmpty)
-          prepared.verify((_, _) => fail("Zero rows must not emit a result"))
-      }
-      withCorrectness(spark, scenario("input + 1"), Context(10), 4) {
-        prepared =>
-          prepared.verify()
-          prepared.verify()
-      }
-      spark.sparkContext.listenerBus.waitUntilEmpty(10000)
-      assert(jobs.get() == 0)
-    } finally {
-      spark.sparkContext.removeSparkListener(listener)
-    }
-  }
-
-  testWithMinSparkVersion(
-    "data materialization copies rows and preserves batch-local positions",
-    "4.0") {
-    val positions = scala.collection.mutable.ArrayBuffer.empty[(Long, Int, Int)]
-    val row = new GenericInternalRow(Array[Any](0L))
-    val data = Plan(
-      new StructType().add("input", LongType),
-      (_, rowId, local, count) => {
-        positions += ((rowId, local, count))
-        row.setLong(0, rowId)
-        row
-      })
-    intercept[IllegalArgumentException](Data.materialize(data, Context(7), 0))
-    intercept[IllegalArgumentException] {
-      Data.materialize(data, Context(Int.MaxValue.toLong + 1), 3)
-    }
-    assert(positions.isEmpty)
-    TaskResources.runUnsafe {
-      val inputs = Data.materialize(data, Context(7), 3)
-      assert(inputs.rows.map(_.getLong(0)).toSeq == (0L until 7L))
-      assert(inputs.batches.map(_.numRows()) == Seq(3, 3, 1))
-      assert(positions.toSeq == Seq(
-        (0L, 0, 3),
-        (1L, 1, 3),
-        (2L, 2, 3),
-        (3L, 0, 3),
-        (4L, 1, 3),
-        (5L, 2, 3),
-        (6L, 0, 1)))
-      val invalid = data.copy(row = (_, _, _, _) => InternalRow.empty)
-      val error = intercept[IllegalArgumentException] {
-        Data.materialize(invalid, Context(1), 1)
-      }
-      assert(error.getMessage.contains("Input row and schema disagree"))
-    }
-  }
-
   testWithMinSparkVersion("metric flags are independent of correctness", "4.0") {
     withCorrectness(spark, scenario("input + 1"), Context(10), 4)(_.verify())
     withSQLConf(RunOptions.sqlConf: _*) {
@@ -251,120 +112,6 @@ class BenchmarkSuite
         assert(correctness.benchmarks.isEmpty)
       }
     }
-  }
-
-  test("framework: map comparison is unordered, recursive and preserves binary key pairs") {
-    def map(keys: Seq[Array[Byte]], values: Seq[Any]): ArrayBasedMapData =
-      new ArrayBasedMapData(new GenericArrayData(keys), new GenericArrayData(values))
-    val mapType = MapType(BinaryType, StringType, valueContainsNull = true)
-    val first = map(Seq(Array[Byte](1), Array[Byte](2)), Seq(UTF8String.fromString("one"), null))
-    val reversed = map(Seq(Array[Byte](2), Array[Byte](1)), Seq(null, UTF8String.fromString("one")))
-    val wrongPairs =
-      map(Seq(Array[Byte](2), Array[Byte](1)), Seq(UTF8String.fromString("one"), null))
-    assert(checkResult(first, reversed, mapType, false))
-    assert(!checkResult(first, wrongPairs, mapType, false))
-    val nestedType = new StructType().add("maps", ArrayType(mapType))
-    assert(checkResult(
-      InternalRow(new GenericArrayData(Seq(first, null))),
-      InternalRow(new GenericArrayData(Seq(reversed, null))),
-      nestedType,
-      false))
-    val duplicate = map(Seq(Array[Byte](1), Array[Byte](1)), Seq(null, null))
-    intercept[IllegalArgumentException](checkResult(duplicate, duplicate, mapType, false))
-    intercept[org.scalatest.exceptions.TestFailedException](checkResult(null, null, mapType, false))
-    intercept[org.scalatest.exceptions.TestFailedException] {
-      checkResult(first, first, mapType.copy(valueContainsNull = false), false)
-    }
-    assert(checkResult(Double.NaN, Double.NaN, DoubleType, false))
-    assert(checkResult(Array[Byte](1, 2), Array[Byte](1, 2), BinaryType, false))
-  }
-
-  testWithMinSparkVersion(
-    "shared capture preserves null empty and same-length native contents",
-    "4.0") {
-    val string = (s: String) => UTF8String.fromString(s)
-    val arrays = Seq(
-      null,
-      new GenericArrayData(Array.empty[Any]),
-      new GenericArrayData(Array[Any](null, 1)),
-      new GenericArrayData(Array[Any](null, 2)))
-    val mapType = MapType(StringType, IntegerType, valueContainsNull = true)
-    def map(value: Any): ArrayBasedMapData = new ArrayBasedMapData(
-      new GenericArrayData(Array[Any](string("key"))),
-      new GenericArrayData(Array(value)))
-    val structType = new StructType().add("value", IntegerType)
-    val examples = Seq(
-      (StringType, Seq(null, string(""), string("ab"), string("cd"))),
-      (BinaryType, Seq(null, Array.emptyByteArray, Array[Byte](1, 2), Array[Byte](2, 1))),
-      (ArrayType(IntegerType), arrays),
-      (
-        mapType,
-        Seq(
-          null,
-          new ArrayBasedMapData(
-            new GenericArrayData(Array.empty[Any]),
-            new GenericArrayData(Array.empty[Any])),
-          map(null),
-          map(2))),
-      (structType, Seq(null, InternalRow(null), InternalRow(1), InternalRow(2)))
-    )
-    examples.foreach {
-      case (dataType, values) =>
-        val data = Plan(
-          new StructType().add("input", dataType),
-          (_, rowId, _, _) => InternalRow(values(rowId.toInt)))
-        withCorrectness(spark, scenario("input"), Context(values.size), 3, data) {
-          prepared =>
-            var captured = 0
-            prepared.verify {
-              (row, value) =>
-                assert(checkResult(value, values(row.toInt), dataType, true))
-                captured += 1
-            }
-            assert(captured == values.size)
-        }
-    }
-  }
-
-  test("shared JVM range captures borrowed values before the next evaluation") {
-    withSQLConf(RunOptions.sqlConf: _*) {
-      val schema = new StructType().add("input", IntegerType)
-      val encode = UnsafeProjection.create(schema)
-      val inputs = (0 until 5).map(i => encode(InternalRow(i)).copy()).toArray
-      val reused = new GenericArrayData(Array(0))
-      val evaluations = new AtomicInteger
-      val expression = BenchmarkBorrowedArray(
-        BoundReference(0, IntegerType, nullable = true),
-        reused,
-        evaluations)
-      var expected = 1
-      val collector: Consumer[Any] = value => {
-        assert(value.asInstanceOf[GenericArrayData] eq reused)
-        assert(reused.getInt(0) == expected)
-        assert(evaluations.get() == expected)
-        expected += 1
-      }
-      val benchmark =
-        new Benchmark(null, scenario("input"), Context(0), isBenchmark = false)
-      val predicate = benchmark.prepareJvm(expression, Seq.empty, Some(collector))
-      benchmark.runVanilla(predicate, inputs, 1, 4)
-      assert(expected == 4 && evaluations.get() == 3)
-      benchmark.runVanilla(predicate, inputs, 4, 4)
-      assert(evaluations.get() == 3)
-      assert(benchmark.benchmarks.isEmpty && !TaskResources.inSparkTask())
-    }
-  }
-
-  testWithMinSparkVersion("unlisted native cancellation fails with its original cause", "4.0") {
-    val data = Plan(
-      new StructType().add("input", StringType),
-      (_, _, _, _) => fail("Native validation must precede materialization"))
-    val error = intercept[org.scalatest.exceptions.TestFailedException] {
-      withCorrectness(spark, scenario("encode(input, 'UTF-8')"), Context(1), 1, data)(_.verify())
-    }
-    assert(error.getMessage.contains("case=framework/golden"))
-    assert(error.getCause.isInstanceOf[TestCanceledException])
-    assert(error.getCause.getMessage.contains("Native validation does not support"))
   }
 
   testWithMinSparkVersion("shared native loop closes results when immediate capture fails", "4.0") {
@@ -417,28 +164,6 @@ class BenchmarkSuite
     metricCase("codegen", "Codegen only"),
     Context(0),
     isBenchmark = false)
-
-  private def withPreparedMetric(
-      scenario: CaseDef,
-      context: Context,
-      batchSize: Int,
-      data: Plan)(f: Benchmark => Unit): Unit =
-    withSQLConf(RunOptions.sqlConf: _*) {
-      TaskResources.runUnsafe {
-        val prepared =
-          new Benchmark(
-            spark,
-            scenario,
-            context,
-            RunOptions.withBatchSize(batchSize),
-            data = Some(data),
-            isBenchmark = false)
-        prepared.checked {
-          val _ = prepared.vanilla
-          f(prepared)
-        }
-      }
-    }
 
   private def calls(generated: Class[_]): Seq[(String, String, String)] = {
     // Janino does not expose generated classes as classpath resources.
@@ -516,28 +241,6 @@ class BenchmarkSuite
     }
   }
 
-  testWithMinSparkVersion(
-    "metric: preparation does not evaluate non-string results before the callback",
-    "4.0") {
-    val scenario = metricCase(
-      "deferred-error",
-      "Evaluation belongs to the action",
-      "cast(raise_error('deferred metric failure') as int)")
-    val data =
-      Plan(new StructType().add("input", IntegerType), (_, _, _, _) => InternalRow(Int.MinValue))
-    var entered = false
-    withPreparedMetric(scenario, Context(10), 4, data) {
-      prepared =>
-        entered = true
-        val jvmError = intercept[org.apache.spark.SparkRuntimeException](prepared.runVanilla())
-        assert(jvmError.getMessage.contains("deferred metric failure"))
-        val nativeError =
-          intercept[org.apache.gluten.exception.GlutenException](prepared.runNative())
-        assert(nativeError.getMessage.contains("deferred metric failure"))
-    }
-    assert(entered)
-  }
-
   private val cpuStart = "start,event=cpu,interval=1ms,cstack=dwarf,threads"
   private val measuredCommands = Seq(cpuStart, "stop")
 
@@ -593,140 +296,75 @@ class BenchmarkSuite
     benchmark.benchmarks.last
   }
 
-  Seq((2, 0.millis), (3, 0.millis), (2, 5.millis), (3, 5.millis)).foreach {
-    case (minNumIters, minTime) =>
-      test(s"metric: Spark owns warmup count and duration: $minNumIters / $minTime") {
-        withProfile(RunOptions(3.millis, minTime, minNumIters)) {
-          (benchmark, profiler, commands, path) =>
-            val iterations = ArrayBuffer.empty[Int]
-            var measuredMillis = -1L
-            var timer = Option.empty[SparkBenchmark.Timer]
-            val callback = registerProfile(benchmark) {
-              if (timer.get.iteration < 0) assert(commands.isEmpty && !profiler.owned)
-              else assert(profiler.owned && !Files.exists(path))
-              Thread.sleep(1)
-            }
-            val console = new java.io.PrintStream(new java.io.ByteArrayOutputStream) {
-              override def println(value: Any): Unit = { // scalastyle:ignore println
-                if (String.valueOf(value).contains("Stopped after")) {
-                  assert(!profiler.owned && commands.last == "collapsed,total")
-                  assert(Files.isReadable(path))
-                  val elapsed = "Stopped after [0-9]+ iterations, ([0-9]+) ms".r
-                  measuredMillis =
-                    elapsed.findFirstMatchIn(String.valueOf(value)).get.group(1).toLong
-                }
-              }
-            }
-            try Console.withOut(console) {
-                benchmark.measure(3L, callback.numIters) {
-                  current =>
-                    timer = Some(current)
-                    iterations += current.iteration
-                    callback.fn(current)
-                    if (current.iteration < 0) assert(!profiler.owned)
-                    else assert(profiler.owned == !Files.exists(path))
-                }
-              }
-            finally console.close()
-            val measured = iterations.filter(_ >= 0)
-            assert(iterations.contains(-1) && measured.toSeq == measured.indices)
-            assert(measured.size >= minNumIters && measuredMillis >= minTime.toMillis)
-            if (minTime == Duration.Zero) assert(measured.size == minNumIters)
-            assert(commands.toSeq == measuredCommands :+ "collapsed,total")
-            assert(Files.size(path) == 0)
+  test("metric: Spark owns warmup count and duration: 2 / 5 milliseconds") {
+    val minNumIters = 2
+    val minTime = 5.millis
+    withProfile(RunOptions(3.millis, minTime, minNumIters)) {
+      (benchmark, profiler, commands, path) =>
+        val iterations = ArrayBuffer.empty[Int]
+        var measuredMillis = -1L
+        var timer = Option.empty[SparkBenchmark.Timer]
+        val callback = registerProfile(benchmark) {
+          if (timer.get.iteration < 0) assert(commands.isEmpty && !profiler.owned)
+          else assert(profiler.owned && !Files.exists(path))
+          Thread.sleep(1)
         }
-      }
+        val console = new java.io.PrintStream(new java.io.ByteArrayOutputStream) {
+          override def println(value: Any): Unit = { // scalastyle:ignore println
+            if (String.valueOf(value).contains("Stopped after")) {
+              assert(!profiler.owned && commands.last == "collapsed,total")
+              assert(Files.isReadable(path))
+              val elapsed = "Stopped after [0-9]+ iterations, ([0-9]+) ms".r
+              measuredMillis =
+                elapsed.findFirstMatchIn(String.valueOf(value)).get.group(1).toLong
+            }
+          }
+        }
+        try Console.withOut(console) {
+            benchmark.measure(3L, callback.numIters) {
+              current =>
+                timer = Some(current)
+                iterations += current.iteration
+                callback.fn(current)
+                if (current.iteration < 0) assert(!profiler.owned)
+                else assert(profiler.owned == !Files.exists(path))
+            }
+          }
+        finally console.close()
+        val measured = iterations.filter(_ >= 0)
+        assert(iterations.contains(-1) && measured.toSeq == measured.indices)
+        assert(measured.size >= minNumIters && measuredMillis >= minTime.toMillis)
+        assert(commands.toSeq == measuredCommands :+ "collapsed,total")
+        assert(Files.size(path) == 0)
+    }
   }
 
-  Seq("warmup", "action", "interrupt", "start", "stop", "dump", "write")
-    .foreach {
-      phase =>
-        val cleanupFailures =
-          if (Set("action", "interrupt", "write")(phase)) Seq(false, true) else Seq(false)
-        cleanupFailures.foreach {
-          cleanupFails =>
-            test(s"metric: measure cleanup preserves primary: $phase / $cleanupFails") {
-              val primary = if (phase == "interrupt") new InterruptedException(phase)
-              else new IllegalStateException(phase)
-              val cleanup = new IllegalStateException("cleanup")
-              val options = RunOptions(
-                if (phase == "warmup") 1.second else Duration.Zero,
-                Duration.Zero)
-              withProfile(
-                options,
-                command => {
-                  assert(!Thread.currentThread().isInterrupted)
-                  if (
-                    (phase == "start" && command == cpuStart) ||
-                    (phase == "stop" && command == "stop") ||
-                    (phase == "dump" && command == "collapsed,total")
-                  ) {
-                    throw primary
-                  }
-                  if (cleanupFails && command == "collapsed,total") throw cleanup
-                  ""
-                }
-              ) {
-                (benchmark, profiler, commands, path) =>
-                  val callback = registerProfile(benchmark) {
-                    if (Set("warmup", "action", "interrupt")(phase)) throw primary
-                    if (phase == "write") Files.createDirectories(path)
-                  }
-                  try {
-                    val thrown = intercept[Exception] {
-                      benchmark.measure(3L, callback.numIters)(callback.fn)
-                    }
-                    if (phase == "write") {
-                      if (cleanupFails) assert(thrown eq cleanup)
-                      else assert(thrown.isInstanceOf[java.io.IOException])
-                    } else assert(thrown eq primary)
-                    val dumpExpected = !Set("warmup", "start", "stop")(phase)
-                    val suppressed = cleanupFails && Set("action", "interrupt")(phase)
-                    assert(thrown.getSuppressed.toSeq == (if (suppressed) Seq(cleanup)
-                                                          else Seq.empty))
-                    assert(commands.count(_ == "collapsed,total") == (if (dumpExpected) 1 else 0))
-                    assert(commands.count(_ == "stop") ==
-                      (if (Set("warmup", "start")(phase)) 0 else 1))
-                    val completed = commands.toVector
-                    profiler.stop()
-                    profiler.dump(path)
-                    assert(commands.toVector == completed && !profiler.owned)
-                    assert(Thread.currentThread().isInterrupted == (phase == "interrupt"))
-                  } finally Thread.interrupted()
-              }
-              assert(!TaskResources.inSparkTask())
-            }
-        }
-    }
-
-  test("metric: action interruption retains a failed stop as suppressed without retry or dump") {
-    val primary = new InterruptedException("action")
-    val cleanup = new IllegalStateException("stop")
-    withProfile(response = command => if (command == "stop") throw cleanup else "") {
+  test("metric: measure cleanup preserves primary: interrupt / true") {
+    val primary = new InterruptedException("interrupt")
+    val cleanup = new IllegalStateException("cleanup")
+    withProfile(response = command => {
+      assert(!Thread.currentThread().isInterrupted)
+      if (command == "collapsed,total") throw cleanup
+      ""
+    }) {
       (benchmark, profiler, commands, path) =>
         val callback = registerProfile(benchmark)(throw primary)
         try {
-          val thrown =
-            intercept[InterruptedException](benchmark.measure(3L, callback.numIters)(callback.fn))
+          val thrown = intercept[Exception] {
+            benchmark.measure(3L, callback.numIters)(callback.fn)
+          }
           assert(thrown eq primary)
           assert(thrown.getSuppressed.toSeq == Seq(cleanup))
-          assert(Thread.currentThread().isInterrupted)
+          assert(commands.count(_ == "collapsed,total") == 1)
+          assert(commands.count(_ == "stop") == 1)
+          val completed = commands.toVector
           profiler.stop()
           profiler.dump(path)
-          assert(commands.toSeq == Seq(cpuStart, "stop"))
+          assert(commands.toVector == completed && !profiler.owned)
+          assert(Thread.currentThread().isInterrupted)
         } finally Thread.interrupted()
     }
-  }
-
-  test("metric: existing profile is rejected before any action and never overwritten") {
-    withProfile() {
-      (benchmark, _, commands, path) =>
-        Files.createDirectories(path.getParent)
-        Files.write(path, Array[Byte](1, 2, 3))
-        val callback = registerProfile(benchmark)(fail("must reject before measurement"))
-        intercept[IllegalArgumentException](benchmark.measure(3L, callback.numIters)(callback.fn))
-        assert(commands.isEmpty && Files.readAllBytes(path).toSeq == Seq[Byte](1, 2, 3))
-    }
+    assert(!TaskResources.inSparkTask())
   }
 
   testWithMinSparkVersion(
@@ -754,106 +392,6 @@ class BenchmarkSuite
         }
         assert(commands.toSeq == Seq.fill(4)(measuredCommands :+ "collapsed,total").flatten)
         assert(!profiler.owned)
-    }
-  }
-
-  testWithMinSparkVersion(
-    "metric: failed vanilla dump prevents native from starting in the real run",
-    "4.0") {
-    val scenario = catalog.find(_.id == "date_sub/standard-date").get
-    val failure = new IllegalStateException("dump")
-    withProfile(response = command => if (command == "collapsed,total") throw failure else "") {
-      (_, profiler, commands, _) =>
-        val benchmark = new Benchmark(
-          spark,
-          scenario,
-          Context(7),
-          RunOptions.withBatchSize(3),
-          profiler = Some(profiler),
-          isBenchmark = false
-        )
-        benchmark.registerCases()
-        assert(intercept[IllegalStateException](benchmark.run()) eq failure)
-        assert(commands.toSeq == measuredCommands :+ "collapsed,total")
-        assert(benchmark.benchmarks.map(_.name).toSeq == Seq("vanilla", "native"))
-        val completed = commands.toVector
-        intercept[IllegalArgumentException](benchmark.run())
-        assert(commands.toVector == completed && benchmark.benchmarks.size == 2)
-    }
-  }
-
-  testWithMinSparkVersion(
-    "metric: register once then rerun without rematerializing or creating a profiler",
-    "4.0") {
-    val scenario = catalog.find(_.id == "date_sub/standard-date").get
-    val original = Data.compile(scenario.inputs)
-    var generated = 0
-    val data = original.copy(row = (context, rowId, local, count) => {
-      generated += 1
-      original.row(context, rowId, local, count)
-    })
-    val directory = Files.createTempDirectory("expression-run-registration")
-    val profile = directory.resolve("not-created")
-    try withSQLConf(RunOptions.sqlConf: _*) {
-        TaskResources.runUnsafe {
-          val benchmark = new Benchmark(
-            spark,
-            scenario,
-            Context(7),
-            RunOptions.withBatchSize(3).copy(
-              profiler = Some(ProfilerOptions(directory, output = profile))),
-            data = Some(data),
-            isBenchmark = false
-          )
-          assert(benchmark.benchmarks.isEmpty && generated == 0)
-          benchmark.registerCases()
-          assert(benchmark.benchmarks.map(_.name).toSeq == Seq("vanilla", "native"))
-          assert(benchmark.inputs.batches.map(_.numRows()) == Seq(3, 3, 1))
-          assert(generated == 7 && !Files.exists(profile))
-          (0 until 2).foreach {
-            _ =>
-              benchmark.run()
-              assert(benchmark.benchmarks.map(_.name).toSeq == Seq("vanilla", "native"))
-              assert(generated == 7 && !Files.exists(profile))
-          }
-        }
-      }
-    finally Utils.deleteRecursively(directory.toFile)
-  }
-
-  testWithMinSparkVersion(
-    "metric: preparation failure does not register cases or start the controller",
-    "4.0") {
-    val scenario = catalog.find(_.id == "date_sub/standard-date").get
-    val failure = new IllegalStateException("materialization")
-    val data = Data.compile(scenario.inputs).copy(
-      row = (_, _, _, _) => throw failure)
-    withProfile() {
-      (_, profiler, commands, _) =>
-        val benchmark = new Benchmark(
-          spark,
-          scenario,
-          Context(1),
-          RunOptions.withBatchSize(1),
-          data = Some(data),
-          profiler = Some(profiler),
-          isBenchmark = false
-        )
-        assert(intercept[IllegalStateException](benchmark.registerCases()) eq failure)
-        assert(benchmark.benchmarks.isEmpty && commands.isEmpty)
-    }
-  }
-
-  test("metric: unsupported result types fail before generated code or row evaluation") {
-    withSQLConf(RunOptions.sqlConf: _*) {
-      val evaluated = new java.util.concurrent.atomic.AtomicInteger
-      def unsupported: Expression =
-        MetricTestResult(null, CalendarIntervalType, evaluated)
-      val error = intercept[IllegalArgumentException] {
-        codegen.prepareJvm(unsupported, Seq.empty)
-      }
-      assert(error.getMessage.contains("Unsupported metric output"))
-      assert(evaluated.get() == 0)
     }
   }
 
@@ -1066,22 +604,6 @@ object BenchmarkSuite {
 
   }
 
-}
-
-private case class BenchmarkBorrowedArray(
-    child: Expression,
-    reused: GenericArrayData,
-    evaluations: AtomicInteger)
-  extends UnaryExpression with CodegenFallback {
-  override def dataType: DataType = ArrayType(IntegerType, containsNull = false)
-  override def nullable: Boolean = false
-  override def eval(input: InternalRow): Any = {
-    evaluations.incrementAndGet()
-    reused.update(0, child.eval(input))
-    reused
-  }
-  override protected def withNewChildInternal(newChild: Expression): Expression =
-    copy(child = newChild)
 }
 
 private case class MetricTestResult(

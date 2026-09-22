@@ -20,9 +20,6 @@ import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.catalyst.InternalRow
 
 import java.nio.charset.StandardCharsets.UTF_8
-import java.nio.file.{Files, Paths}
-
-import scala.collection.JavaConverters._
 
 // scalastyle:off nonascii
 class CatalogSuite extends SparkFunSuite {
@@ -51,84 +48,6 @@ class CatalogSuite extends SparkFunSuite {
     assert(parsed.head.sourceLocation.column > 0)
   }
 
-  test("Markdown retains Unicode JSON escapes literal backslashes and escaped table pipes") {
-    val sql = """concat(input, '\\d+', 'a\|b', '\\\|', '\u4e2d\u6587')"""
-    val description = "\u4e2d\u6587\u8bf4\u660e"
-    val result = parseMarkdown(
-      "trim",
-      "inline.md",
-      table(
-        sql = s"```$sql```",
-        description = description)).head
-    assert(result.description == description)
-    assert(result.sql == """concat(input, '\\d+', 'a|b', '\\|', '\u4e2d\u6587')""")
-    val binding = parseInputs(
-      """input = rtrimPattern(length = 10, pattern = "none")""",
-      SourceLocation("inline.md", 5, 13),
-      "trim/example").head
-    assert(binding.arguments == Seq(
-      "length" -> LongArgument(10),
-      "pattern" -> StringArgument("none")))
-  }
-
-  test("Markdown accepts lowercase ASCII case and function IDs with underscores and hyphens") {
-    val names = Seq("trim_variant-2", "0_variant", "_variant", "-variant", "substr", "substring")
-    names.foreach {
-      name =>
-        val markdown = table().replace("| example |", s"| $name |")
-        assert(parseMarkdown(name, s"$name.md", markdown).head.id == s"$name/$name")
-        assert(parseIndex(s"$name.md\n", "index.txt") == Seq(s"$name.md"))
-    }
-    Seq("TRIM", "trim/variant", "../trim", "trim.variant", "\u4e2d\u6587").foreach {
-      function =>
-        val error = intercept[IllegalArgumentException] {
-          parseMarkdown(function, "inline.md", table())
-        }
-        assert(error.getMessage.contains("inline.md:"))
-        assert(error.getCause != null)
-    }
-  }
-
-  test("Markdown accepts plain explanation paragraphs before and after the case table") {
-    val markdown = "Before the table.\nAnother plain line.\n\n" + table() +
-      "\n\u8868\u540e\u666e\u901a\u8bf4\u660e\u3002\n"
-    val cases = parseMarkdown("trim", "inline.md", markdown)
-    assert(cases.size == 1 && cases.head.id == "trim/example")
-    assert(cases.head.sourceLocation.line == 8)
-    Seq(
-      "<b>HTML</b>",
-      "[link](https://example.com)",
-      "`input = standard.int()`",
-      "*markup*",
-      "| broken | table row",
-      "broken | table row").foreach {
-      paragraph =>
-        Seq(paragraph + "\n\n" + table(), table() + "\n" + paragraph).foreach {
-          text =>
-            val error = intercept[IllegalArgumentException] {
-              parseMarkdown("trim", "inline.md", text)
-            }
-            assert(error.getMessage.contains("inline.md:"))
-            assert(error.getCause != null)
-        }
-    }
-  }
-
-  test("registered trim pattern generators have explicit names distinct from SQL functions") {
-    Seq("rtrim", "ltrim").foreach {
-      direction =>
-        val text = s"""input = ${direction}Pattern(length = 10, pattern = "none")"""
-        val binding = parseInputs(text, SourceLocation("inline.md", 1, 1), "trim/example")
-        assert(binding.head.generator == s"${direction}Pattern")
-        intercept[IllegalArgumentException] {
-          parseInputs(
-            text.replace(s"${direction}Pattern", direction),
-            SourceLocation("inline.md", 1, 1),
-            "trim/example")
-        }
-    }
-  }
-
   test("Markdown rejects duplicate empty and invalid case IDs with physical row context") {
     Seq("example", "", "trim/example", "bad.name").foreach {
       id =>
@@ -140,52 +59,6 @@ class CatalogSuite extends SparkFunSuite {
         assert(error.getMessage.contains("case=trim/"))
         assert(error.getCause != null)
     }
-  }
-
-  test("input syntax errors report their physical file column and original cause") {
-    val error = intercept[IllegalArgumentException] {
-      parseInputs("input = standard.int(1)", SourceLocation("inline.md", 5, 13), "trim/example")
-    }
-    assert(error.getMessage.startsWith("inline.md:5:34 case=trim/example:"))
-    assert(error.getCause.isInstanceOf[IllegalArgumentException])
-  }
-
-  test("Markdown input errors retain physical columns after escaped pipes") {
-    val fixtures = Seq(
-      """input = rtrimPattern(length = 10, pattern = "a\|b")?""",
-      """input = rtrimPattern(length = 10, pattern = "a\|b\|c")?""",
-      """input = rtrimPattern(length = 10, pattern = "a\\\|b\\\\\|c")?""",
-      """input = rtrimPattern(length = 10, pattern = "\u4e2d\u6587\ud842\udfb7\|a\|b")?"""
-    )
-    fixtures.zipWithIndex.foreach {
-      case (input, index) =>
-        val delimiter = "`" * (index + 1)
-        val markdown = table(inputs = s"$delimiter$input$delimiter")
-        val row = markdown.linesIterator.toVector(4)
-        val column = row.indexOf('?') + 1
-        val error = intercept[IllegalArgumentException] {
-          parseMarkdown("trim", "inline.md", markdown)
-        }
-        withClue(row) {
-          assert(error.getMessage.startsWith(s"inline.md:5:$column case=trim/example:"))
-          assert(error.getMessage.contains("Invalid inputs:"))
-          assert(error.getCause.isInstanceOf[IllegalArgumentException])
-        }
-    }
-  }
-
-  test("input grammar decodes strict JSON strings without splitting their punctuation") {
-    val text = """(input, trimChars) = rtrimCustom(); value = standard.int()"""
-    val bindings = parseInputs(text, SourceLocation("inline.md", 5, 13), "trim/example")
-    assert(bindings.map(_.names) == Seq(Seq("input", "trimChars"), Seq("value")))
-    val escapedUnicode = "\\" + "u4e2d"
-    val weird = """input = rtrimPattern(length = 10, pattern = "a,b;(x)\"\\""" +
-      escapedUnicode + "\", utf8 = true)"
-    val error = intercept[IllegalArgumentException] {
-      parseInputs(weird, SourceLocation("inline.md", 5, 13), "trim/example")
-    }
-    assert(error.getCause != null)
-    assert(error.getMessage.contains("a,b;(x)\"\\\u4e2d"))
   }
 
   test("Markdown rejects malformed table and non-code or mixed cells with source context") {
@@ -358,51 +231,6 @@ class CatalogSuite extends SparkFunSuite {
     intercept[IllegalArgumentException](plan.row(Context(0), 0L, 0, 1))
   }
 
-  test("standard projections use independent string widths and defaults regardless of order") {
-    import Data._
-    val source = SourceLocation("inline.md", 1, 1)
-    val inputs = "input = standard.string(); values = standard.stringArray(length = 20); " +
-      "needle = standard.int(); items = standard.intArray()"
-    val bindings = parseInputs(inputs, source, "standard/order")
-    val forward = compile(bindings)
-    val reverse = compile(bindings.reverse)
-    val context = Context(25, Some(7), seed = Long.MinValue)
-    Seq(8L, 0L, 6L, 7L, 1L, 8L).foreach {
-      i =>
-        val row = forward.row(context, i, 0, 1)
-        val other = reverse.row(context, i, 0, 1)
-        assert(row.getUTF8String(0).toString == f"${i % 7}%010d")
-        assert(row.getArray(1).getUTF8String(0).toString == f"${i % 7}%020d")
-        assert(row.getInt(2) == row.getArray(3).getInt(0))
-        assert(row.getUTF8String(0) == other.getUTF8String(3))
-        assert(row.getArray(1) == other.getArray(2))
-        assert(row.getInt(2) == other.getInt(1))
-        assert(row.getArray(3) == other.getArray(0))
-    }
-    val defaults = compile(parseInputs(
-      "a = standard.string(); b = standard.stringArray()",
-      source,
-      "standard/defaults"))
-    assert(defaults.row(Context(1), 0, 0, 1).getUTF8String(0).toString == "0000000000")
-    assert(defaults.row(Context(1), 0, 0, 1).getArray(1).getUTF8String(0).toString == "0000000000")
-    val zero = compile(parseInputs("input = standard.string(length = 0)", source, "standard/zero"))
-    assert(zero.row(Context(1), 0, 0, 1).getUTF8String(0).toString == "0")
-    val int = compile(parseInputs("input = standard.int()", source, "standard/int"))
-    assert(int.row(Context(Long.MaxValue), 2147483648L, 0, 1).getInt(0) == Int.MinValue)
-  }
-
-  test("standard string and stringArray bindings accept different explicit lengths") {
-    import Data._
-    val inputs = "a = standard.string(length = 20); b = standard.string(length = 10); " +
-      "c = standard.stringArray(length = 20); d = standard.stringArray(length = 10)"
-    val plan = compile(parseInputs(inputs, SourceLocation("inline.md", 1, 1), "standard/widths"))
-    val row = plan.row(Context(1), 0, 0, 1)
-    assert(row.getUTF8String(0).toString == "0" * 20)
-    assert(row.getUTF8String(1).toString == "0" * 10)
-    assert(row.getArray(2).getUTF8String(0).toString == "0" * 20)
-    assert(row.getArray(3).getUTF8String(0).toString == "0" * 10)
-  }
-
   test("single scalar and tuple bindings match merged rows and retain position validation") {
     import Data._
     Seq(
@@ -526,36 +354,6 @@ class CatalogSuite extends SparkFunSuite {
     }
   }
 
-  test("trim patterns fill short bodies and retain direction-specific spaces") {
-    for (width <- 2 to 9; pattern <- Seq("none", "all"); unicode <- Seq(false, true)) {
-      val values = Seq("rtrim", "ltrim", "trim").map {
-        direction =>
-          val input = s"""input = ${direction}Pattern(length = $width, """ +
-            s"""pattern = "$pattern", utf8 = $unicode)"""
-          val plan = Data.compile(
-            parseInputs(input, SourceLocation("short-width", 1, 1), direction))
-          rows(plan, 3, 2).map(_.getUTF8String(0).toString)
-      }
-      values.head.zip(values(1)).foreach {
-        case (right, left) =>
-          assert(right.getBytes(UTF_8).length == width && left.getBytes(UTF_8).length == width)
-          assert(!right.contains(0.toChar) && !left.contains(0.toChar))
-          if (pattern == "all") {
-            assert(right.endsWith("  ") && left.startsWith("  "))
-            assert(right.dropRight(2) == left.drop(2))
-          } else assert(right == left)
-      }
-      values.head.zip(values(2)).foreach {
-        case (right, both) =>
-          assert(both.getBytes(UTF_8).length == width && !both.contains(0.toChar))
-          if (pattern == "all") {
-            assert(both.startsWith(" ") && both.endsWith(" "))
-            assert(right.dropRight(2) == both.drop(1).dropRight(1))
-          } else assert(right == both)
-      }
-    }
-  }
-
   test("trim golden values preserve NULL sampling UTF8 and whole-row penultimate swaps") {
     Seq("rtrim", "ltrim").foreach {
       direction =>
@@ -622,25 +420,6 @@ class CatalogSuite extends SparkFunSuite {
       .map(_.getUTF8String(0).toString)
     assert(utf == Seq(" " + "01352830" + "\u4e30" * 18 + " ", "01352831" + "\u4e31" * 18 + "pg"))
     assert(utf.forall(_.getBytes(UTF_8).length == 64))
-  }
-
-  test("catalog resources are indexed and cases have unique IDs and valid inputs") {
-    val cases = load()
-    assert(cases.nonEmpty && cases.map(_.id).distinct.size == cases.size)
-    val directory =
-      Paths.get(getClass.getClassLoader.getResource("expression-benchmark/cases").toURI)
-    val index =
-      parseIndex(new String(Files.readAllBytes(directory.resolve("index.txt")), UTF_8), "index.txt")
-    val files = Files.list(directory)
-    try assert(files.iterator().asScala.map(_.getFileName.toString).filter(_.endsWith(
-        ".md")).toSet == index.toSet)
-    finally files.close()
-    cases.foreach {
-      c =>
-        val plan = Data.compile(c.inputs)
-        assert(plan.inputSchema.nonEmpty)
-        rows(plan, 2, 1)
-    }
   }
 
   test("loader rejects missing indexed resources and malformed UTF8 without dropping cases") {

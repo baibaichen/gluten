@@ -40,7 +40,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install dependencies
         run: |
-          dnf install -y java-1.8.0-openjdk-devel sudo patch git perl ccache curl python3
+          dnf install -y --disablerepo='*source*' --disablerepo='*debuginfo*' \
+            java-1.8.0-openjdk-devel sudo patch git perl ccache curl python3
           echo "JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk" >> "$GITHUB_ENV"
       - name: Build
         run: ./dev/package.sh --spark_version=3.5

@@ -252,8 +252,8 @@ function install_velox_deps {
 
 function install_s3 {
   install_aws_deps
-  local MINIO_OS="linux"
-  install_minio ${MINIO_OS}
+  local SILO_OS="linux"
+  install_silo ${SILO_OS}
 }
 
 function install_gcs {

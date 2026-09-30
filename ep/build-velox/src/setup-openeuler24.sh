@@ -36,13 +36,13 @@ NPROC=$(getconf _NPROCESSORS_ONLN)
 export CFLAGS=$(get_cxx_flags $CPU_TARGET)  # Used by LZO.
 export CXXFLAGS=$CFLAGS  # Used by boost.
 export CPPFLAGS=$CFLAGS  # Used by LZO.
+export INSTALL_PREFIX=${INSTALL_PREFIX:-"/usr/local"}
 EXTRA_PKG_CXXFLAGS=" -isystem ${INSTALL_PREFIX}/include"
 CMAKE_BUILD_TYPE="${BUILD_TYPE:-Release}"
 VELOX_BUILD_SHARED=${VELOX_BUILD_SHARED:-"OFF"} #Build folly and gflags shared for use in libvelox.so.
 BUILD_DUCKDB="${BUILD_DUCKDB:-true}"
 BUILD_GEOS="${BUILD_GEOS:-true}"
 VERSION=$(cat /etc/os-release | grep VERSION_ID)
-export INSTALL_PREFIX=${INSTALL_PREFIX:-"/usr/local"}
 DEPENDENCY_DIR=${DEPENDENCY_DIR:-$(pwd)/deps-download}
 
 FB_OS_VERSION="v2026.09.07.00"

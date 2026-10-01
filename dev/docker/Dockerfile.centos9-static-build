@@ -42,8 +42,7 @@ RUN set -ex; \
     fi; \
     source /opt/rh/gcc-toolset-12/enable; \
     cd /opt/gluten; \
-    bash -c 'source ./dev/vcpkg/env.sh --build_tests=ON --enable_s3=ON --enable_gcs=ON \
-                                    --enable_hdfs=ON --enable_abfs=ON'; \
+    bash ./dev/vcpkg/populate-static-image-cache.sh; \
     ./build/mvn dependency:go-offline -Pbackends-velox -Piceberg -Pdelta -Pspark-3.5 -DskipTests; \
     rm -rf /opt/gluten; \
     rm -rf /root/.cache/ccache;

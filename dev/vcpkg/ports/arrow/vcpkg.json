@@ -14,8 +14,6 @@
     "openssl",
     "re2",
     "snappy",
-    "thrift",
-    "utf8proc",
     {
       "name": "vcpkg-cmake",
       "host": true
@@ -39,7 +37,10 @@
       "description": "Acero support"
     },
     "compute": {
-      "description": "Build all computational kernel functions"
+      "description": "Build all computational kernel functions",
+      "dependencies": [
+        "utf8proc"
+      ]
     },
     "csv": {
       "description": "CSV support"
@@ -115,7 +116,8 @@
     "parquet": {
       "description": "Parquet support",
       "dependencies": [
-        "rapidjson"
+        "rapidjson",
+        "thrift"
       ]
     },
     "s3": {

@@ -32,7 +32,9 @@ export VCPKG_TRIPLET_INSTALL_DIR=${SCRIPT_ROOT}/vcpkg_installed/${VCPKG_TRIPLET}
 unset PKG_CONFIG_PATH
 export PKG_CONFIG_LIBDIR=${VCPKG_TRIPLET_INSTALL_DIR}/lib/pkgconfig:${VCPKG_TRIPLET_INSTALL_DIR}/share/pkgconfig
 
-${SCRIPT_ROOT}/init.sh "$@"
+if [ "${1:-}" != "--skip-install" ]; then
+    ${SCRIPT_ROOT}/init.sh "$@"
+fi
 
 if [ "${GLUTEN_VCPKG_ENABLED:-}" != "${VCPKG_ROOT}" ]; then
     EXPORT_TOOLS_PATH="${VCPKG_TRIPLET_INSTALL_DIR}/tools/protobuf"

@@ -341,6 +341,7 @@ if(BUILD_TESTS)
   import_library(
     facebook::velox::vector_test_lib
     ${VELOX_BUILD_PATH}/velox/vector/tests/utils/libvelox_vector_test_lib.a)
+  target_link_libraries(facebook::velox::vector_test_lib INTERFACE GTest::gtest)
   import_library(
     facebook::velox::dwio_common_test
     ${VELOX_BUILD_PATH}/velox/dwio/common/tests/utils/libvelox_dwio_common_test_utils.a
@@ -444,31 +445,9 @@ endif()
 target_link_libraries(velox PUBLIC Folly::folly)
 
 # Link thrift libraries - check vcpkg first, then fall back to system libraries
-# Use the active vcpkg triplet when available, then fall back to architecture.
-if(VCPKG_TARGET_TRIPLET)
-  set(VCPKG_TRIPLET_DIR "${VCPKG_TARGET_TRIPLET}")
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
-  set(VCPKG_TRIPLET_DIR "x64-linux-avx")
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64)|(arm64)")
-  set(VCPKG_TRIPLET_DIR "arm64-linux-neon")
-else()
-  message(
-    WARNING
-      "Unknown processor type for vcpkg: ${CMAKE_SYSTEM_PROCESSOR}, defaulting to x64-linux-avx"
-  )
-  set(VCPKG_TRIPLET_DIR "x64-linux-avx")
-endif()
-
-if(DEFINED VCPKG_INSTALLED_DIR
-   AND EXISTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TRIPLET_DIR}/lib/libthriftcpp2.a")
-  message(
-    STATUS
-      "Using vcpkg thrift libraries from ${VCPKG_INSTALLED_DIR}/${VCPKG_TRIPLET_DIR}"
-  )
-  target_link_libraries(
-    velox
-    PUBLIC ${VCPKG_INSTALLED_DIR}/${VCPKG_TRIPLET_DIR}/lib/libthriftcpp2.a
-           ${VCPKG_INSTALLED_DIR}/${VCPKG_TRIPLET_DIR}/lib/libthriftprotocol.a)
+if(ENABLE_GLUTEN_VCPKG)
+  find_package(FBThrift CONFIG REQUIRED)
+  target_link_libraries(velox PUBLIC FBThrift::thriftcpp2)
 else()
   set(THRIFT_LIBRARY_DIRS)
   if(CMAKE_INSTALL_PREFIX)

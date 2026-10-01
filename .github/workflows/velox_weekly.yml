@@ -212,7 +212,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install dependencies
         run: |
-          dnf update -y && dnf install -y java-1.8.0-openjdk-devel sudo patch git perl ccache curl python3
+          dnf install -y --disablerepo='update*' --disablerepo='*source*' --disablerepo='*debuginfo*' \
+            java-1.8.0-openjdk-devel sudo patch git perl ccache curl python3
           echo "JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk" >> $GITHUB_ENV
       - name: Install Stash restore dependencies # the stash action needs gh and jq, absent from this container
         run: |
@@ -270,7 +271,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install dependencies
         run: |
-          dnf update -y && dnf install -y java-1.8.0-openjdk-devel sudo patch git perl curl python3
+          dnf install -y --disablerepo='update*' --disablerepo='*source*' --disablerepo='*debuginfo*' \
+            java-1.8.0-openjdk-devel sudo patch git perl curl python3
           echo "JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk" >> $GITHUB_ENV
       - name: Install Stash restore dependencies # the stash action needs gh and jq, absent from this container
         run: |

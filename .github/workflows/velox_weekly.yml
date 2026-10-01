@@ -32,20 +32,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  weekly-build-on-openeuler:
-    if: ${{ startsWith(github.repository, 'apache/') }}
-    runs-on: ubuntu-24.04-arm
-    container: openeuler/openeuler:24.03
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install dependencies
-        run: |
-          dnf install -y --disablerepo='update*' --disablerepo='*source*' --disablerepo='*debuginfo*' \
-            java-1.8.0-openjdk-devel sudo patch git perl ccache curl python3
-          echo "JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk" >> "$GITHUB_ENV"
-      - name: Build
-        run: ./dev/package.sh --spark_version=3.5
-
   weekly-build-on-macos:
     if: ${{ startsWith(github.repository, 'apache/') }}
     runs-on: macos-15

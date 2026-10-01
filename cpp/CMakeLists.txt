@@ -221,11 +221,6 @@ find_package(Threads REQUIRED)
 find_package(JNI REQUIRED)
 
 find_package(glog REQUIRED)
-if(ENABLE_GLUTEN_VCPKG
-   AND TARGET glog::glog
-   AND NOT TARGET google::glog)
-  add_library(google::glog ALIAS glog::glog)
-endif()
 
 if(BUILD_TESTS)
   set(GLUTEN_GTEST_MIN_VERSION "1.13.0")
@@ -253,7 +248,7 @@ function(ADD_TEST_CASE TEST_NAME)
   endif()
 
   add_executable(${TEST_NAME} ${SOURCES})
-  target_link_libraries(${TEST_NAME} gluten google::glog GTest::gtest
+  target_link_libraries(${TEST_NAME} gluten glog::glog GTest::gtest
                         GTest::gtest_main Threads::Threads)
   target_include_directories(${TEST_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/core)
 

@@ -19,7 +19,7 @@ target_include_directories(
   velox_benchmark_common PUBLIC ${CMAKE_SOURCE_DIR}/velox
                                 ${CMAKE_SOURCE_DIR}/core)
 target_link_libraries(velox_benchmark_common PUBLIC velox benchmark::benchmark
-                                                    google::glog)
+                                                    glog::glog)
 if(BUILD_TESTS)
   target_link_libraries(velox_benchmark_common PRIVATE GTest::gtest)
 endif()

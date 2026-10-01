@@ -255,7 +255,7 @@ target_link_libraries(gluten PUBLIC Arrow::arrow)
 if(NOT ENABLE_GLUTEN_VCPKG)
   target_link_libraries(gluten PUBLIC Arrow::arrow_bundled_dependencies)
 endif()
-target_link_libraries(gluten PRIVATE google::glog)
+target_link_libraries(gluten PRIVATE glog::glog)
 
 install(TARGETS gluten DESTINATION ${CMAKE_INSTALL_LIBDIR})
 

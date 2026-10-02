@@ -17,7 +17,6 @@
 package org.apache.spark.sql.execution.benchmark.expression
 
 import org.apache.gluten.expression.ExpressionUtils
-import org.apache.gluten.sql.shims.SparkShimLoader
 
 import org.apache.spark.benchmark
 import org.apache.spark.sql.SparkSession
@@ -141,6 +140,21 @@ final private[benchmark] class Benchmark(
     }
   }
 
+  private lazy val rewriteWithRule = spark.sessionState.optimizer.defaultBatches.iterator
+    .flatMap(_.rules)
+    .find(_.ruleName == "org.apache.spark.sql.catalyst.optimizer.RewriteWithExpression")
+
+  private def rewriteWithExpression(plan: LogicalPlan): LogicalPlan = {
+    val rewritten = rewriteWithRule.fold(plan)(_.apply(plan))
+    rewritten.foreach(_.expressions.foreach(_.foreach {
+      case expression
+          if expression.nodeName == "With" || expression.nodeName == "CommonExpressionRef" =>
+        throw new IllegalArgumentException(s"Unprepared expression: $expression")
+      case _ =>
+    }))
+    rewritten
+  }
+
   private[expression] def prepareAnalyzed(schema: StructType, native: Boolean): Project = checked {
     val relation = LocalRelation(ExpressionUtils.attributesFromStruct(schema))
     val parsed = spark.sessionState.sqlParser.parseExpression(scenario.sql)
@@ -164,7 +178,7 @@ final private[benchmark] class Benchmark(
     }
     val replaced = if (native) project.mapExpressions(nativeReplacement)
     else ReplaceExpressions.apply(project)
-    val rewritten = SparkShimLoader.getSparkShims.rewriteWithExpression(replaced)
+    val rewritten = rewriteWithExpression(replaced)
     val prepared = singleProject(ConstantFolding(rewritten), relation.output)
     prepared.projectList.foreach(_.foreach {
       case expression: ArraySize =>

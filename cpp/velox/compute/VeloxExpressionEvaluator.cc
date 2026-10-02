@@ -20,6 +20,7 @@
 #include "substrait/SubstraitToVeloxExpr.h"
 #include "substrait/extended_expression.pb.h"
 #include "utils/Exception.h"
+#include "velox/expression/EvalCtx.h"
 
 namespace gluten {
 using namespace facebook::velox;
@@ -84,9 +85,10 @@ std::shared_ptr<VeloxColumnarBatch> VeloxExpressionEvaluator::evaluate(const std
   }
   RowVector boundInput(pool_.get(), inputType_, row->nulls(), row->size(), std::move(columns));
   exec::EvalCtx context(&execCtx_, expressions_.get(), &boundInput);
-  SelectivityVector rows(row->size());
+  exec::LocalSelectivityVector rows(execCtx_, row->size());
+  rows->setAll();
   std::vector<VectorPtr> result(1);
-  expressions_->eval(rows, context, result);
+  expressions_->eval(*rows, context, result);
   GLUTEN_CHECK(result[0] != nullptr, "Native expression returned no result");
   GLUTEN_CHECK(result[0]->size() >= row->size(), "Native expression returned too few rows");
 

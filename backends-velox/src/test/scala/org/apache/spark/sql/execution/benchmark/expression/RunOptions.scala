@@ -63,10 +63,7 @@ final private[benchmark] case class RunOptions(
 
 private[benchmark] object RunOptions {
   def withBatchSize(batchSize: Int): RunOptions =
-    RunOptions(
-      Duration.Zero,
-      Duration.Zero,
-      input = InputOptions(batchSize = batchSize))
+    RunOptions(Duration.Zero, Duration.Zero, input = InputOptions(batchSize = batchSize))
 
   val sqlConf: Seq[(String, String)] = Seq(
     SQLConf.SESSION_LOCAL_TIMEZONE.key -> "UTC",
@@ -81,25 +78,30 @@ private[benchmark] object RunOptions {
       cases: Seq[String],
       list: Boolean,
       runtime: RunOptions) {
-    def selected(catalog: Seq[Catalog.CaseDef])
-        : Seq[Catalog.CaseDef] = {
-      val groups = if (cases.nonEmpty) cases.distinct.map {
-        pattern =>
-          require(pattern.indexOf('/') > 0, s"Expected function/case pattern: $pattern")
-          val regex = pattern.map {
-            case '*' => "[^/]*"
-            case '?' => "[^/]"
-            case c => Pattern.quote(c.toString)
-          }.mkString.r
-          val matches = catalog.filter(c => regex.pattern.matcher(c.id).matches())
-          require(matches.nonEmpty, s"No cases match: $pattern")
-          matches
-      }
-      else functions.distinct.map {
-        function =>
-          val matches = catalog.filter(_.id.startsWith(function + "/"))
-          require(matches.nonEmpty, s"Unknown function: $function")
-          matches
+    def selected(catalog: Seq[Catalog.CaseDef]): Seq[Catalog.CaseDef] = {
+      val groups = if (cases.nonEmpty) {
+        cases.map {
+          pattern =>
+            require(pattern.indexOf('/') > 0, s"Expected function/case pattern: $pattern")
+            val regex = pattern
+              .map {
+                case '*' => "[^/]*"
+                case '?' => "[^/]"
+                case c => Pattern.quote(c.toString)
+              }
+              .mkString
+              .r
+            val matches = catalog.filter(c => regex.pattern.matcher(c.id).matches())
+            require(matches.nonEmpty, s"No cases match: $pattern")
+            matches
+        }
+      } else {
+        functions.map {
+          function =>
+            val matches = catalog.filter(_.id.startsWith(function + "/"))
+            require(matches.nonEmpty, s"Unknown function: $function")
+            matches
+        }
       }
       groups.flatten.distinct
     }
@@ -108,9 +110,15 @@ private[benchmark] object RunOptions {
       require(list, "Not a list request")
       if (functions.isEmpty) {
         catalog.map(_.id.takeWhile(_ != '/')).distinct.mkString("\n")
-      } else selected(catalog).map {
-        c => s"${c.id}\n  inputs=${c.inputs.mkString(", ")}\n  sql=${c.sql}\n  ${c.description}"
-      }.mkString("\n")
+      } else {
+        selected(catalog)
+          .map {
+            c =>
+              val inputs = if (c.inputs.isEmpty) "none" else c.inputs.mkString(", ")
+              s"${c.id}\n  inputs=$inputs\n  sql=${c.sql}\n  ${c.description}"
+          }
+          .mkString("\n")
+      }
     }
   }
 
@@ -148,8 +156,10 @@ private[benchmark] object RunOptions {
         key match {
           case "functions" | "cases" =>
             require(
-              n.isArray && n.size() > 0 && n.elements().asScala.forall(
-                v => v.isTextual && v.textValue().trim.nonEmpty),
+              n.isArray && n.size() > 0 && n
+                .elements()
+                .asScala
+                .forall(v => v.isTextual && v.textValue().trim.nonEmpty),
               s"$key must be a nonempty string array")
           // Positive Int seconds also fit exactly in Long nanoseconds.
           case "rows" | "batchSize" | "warmupSeconds" | "measurementSeconds" =>
@@ -163,9 +173,10 @@ private[benchmark] object RunOptions {
               s"Invalid Long field: $key")
           case _ =>
             require(n.isTextual, s"$key must be a string")
-            choices.get(key).foreach(
-              allowed =>
-                require(allowed(n.textValue()), s"Unknown $key: ${n.textValue()}"))
+            choices
+              .get(key)
+              .foreach(
+                allowed => require(allowed(n.textValue()), s"Unknown $key: ${n.textValue()}"))
             if (key == "asyncProfiler" || key == "profileOutput") {
               require(n.textValue().trim.nonEmpty, "Path must not be empty or blank")
             }
@@ -173,9 +184,10 @@ private[benchmark] object RunOptions {
     }
   }
 
-  def callerDirectory: Path = Paths.get(
-    System.getProperty("gluten.expressionBenchmark.cwd", System.getProperty("user.dir")))
-    .toAbsolutePath.normalize()
+  def callerDirectory: Path = Paths
+    .get(System.getProperty("gluten.expressionBenchmark.cwd", System.getProperty("user.dir")))
+    .toAbsolutePath
+    .normalize()
 
   private def csv(value: String): Seq[String] = {
     val values = value.split(",", -1).toSeq.map(_.trim)
@@ -232,19 +244,21 @@ private[benchmark] object RunOptions {
       base.resolve(value).toAbsolutePath.normalize()
     }
     val configPath = config.map(resolve(_, cwd))
-    val json = configPath.map {
-      path =>
-        try {
-          val text = UTF_8.newDecoder().decode(ByteBuffer.wrap(Files.readAllBytes(path))).toString
-          val tree = mapper.readTree(text)
-          require(tree != null && tree.isObject, "Config must be a JSON object")
-          require(tree.fieldNames().asScala.forall(fields), "Unknown config key")
-          tree.fields().asScala.map(e => e.getKey -> e.getValue).toMap
-        } catch {
-          case NonFatal(e) =>
-            throw new IllegalArgumentException(s"Invalid config $path: ${e.getMessage}", e)
-        }
-    }.getOrElse(Map.empty[String, JsonNode])
+    val json = configPath
+      .map {
+        path =>
+          try {
+            val text = UTF_8.newDecoder().decode(ByteBuffer.wrap(Files.readAllBytes(path))).toString
+            val tree = mapper.readTree(text)
+            require(tree != null && tree.isObject, "Config must be a JSON object")
+            require(tree.fieldNames().asScala.forall(fields), "Unknown config key")
+            tree.fields().asScala.map(e => e.getKey -> e.getValue).toMap
+          } catch {
+            case NonFatal(e) =>
+              throw new IllegalArgumentException(s"Invalid config $path: ${e.getMessage}", e)
+          }
+      }
+      .getOrElse(Map.empty[String, JsonNode])
     // Validate each source before merging: overrides must not hide an invalid config value.
     validate(json)
     val replaced = if (selectors.exists(cli.contains)) selectors else Set.empty[String]

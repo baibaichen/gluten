@@ -17,16 +17,20 @@
 package org.apache.spark.sql.execution.benchmark.expression
 
 import org.apache.gluten.expression.ExpressionUtils
+import org.apache.gluten.utils.Arm
 
+import org.apache.spark.SparkConf
 import org.apache.spark.benchmark
+import org.apache.spark.serializer.JavaSerializer
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode, FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.expressions.codegen.Block._
-import org.apache.spark.sql.catalyst.optimizer.{ConstantFolding, ReplaceExpressions}
+import org.apache.spark.sql.catalyst.optimizer.{ComputeCurrentTime, ConstantFolding, ReplaceCurrentLike, ReplaceExpressions}
 import org.apache.spark.sql.catalyst.plans.logical.{LocalRelation, LogicalPlan, Project}
+import org.apache.spark.sql.catalyst.rules.RuleExecutor
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.vectorized.ColumnarBatch
@@ -40,13 +44,12 @@ import java.util.function.Consumer
 
 import scala.concurrent.duration.Duration
 
-/** Shared execution in the caller's scopes; registerCases prepares both engines before run(). */
+/** Prepare once in the caller's scopes; compile fresh stateful copies before run(). */
 final private[benchmark] class Benchmark(
     spark: SparkSession,
     scenario: Catalog.CaseDef,
     context: Data.Context,
-    options: RunOptions =
-      RunOptions(Duration.Zero, Duration.Zero),
+    options: RunOptions = RunOptions(Duration.Zero, Duration.Zero),
     output: Option[OutputStream] = None,
     data: Option[Data.Plan] = None,
     profiler: Option[Profiler] = None,
@@ -59,16 +62,14 @@ final private[benchmark] class Benchmark(
     options.minTime,
     output = output) {
 
-  lazy val (dataPlan, native, vanilla, inputs) = {
-    val plan = data.getOrElse(Data.compile(scenario.inputs))
-    val (nativeExpression, nativeAttributes) = fresh(plan.inputSchema, true)
-    val (vanillaExpression, vanillaAttributes) = fresh(plan.inputSchema, false)
-    require(nativeExpression.dataType == vanillaExpression.dataType, "Engine result types differ")
+  lazy val dataPlan: Data.Plan = data.getOrElse(Data.compile(scenario.inputs))
+
+  lazy val (native, vanilla, inputs) = {
+    val (expression, attributes) = freshExpression()
     (
-      plan,
-      new NativeExpressionEvaluator(Seq(nativeExpression), nativeAttributes),
-      prepareJvm(vanillaExpression, vanillaAttributes),
-      Data.materialize(plan, context, options.batchSize))
+      new NativeExpressionEvaluator(Seq(expression), attributes),
+      prepareJvm(expression, attributes),
+      Data.materialize(dataPlan, context, options.batchSize))
   }
 
   def registerCases(): Unit = {
@@ -79,10 +80,12 @@ final private[benchmark] class Benchmark(
     register("native")(runNative())
   }
 
-  private def register(engine: String)(action: => Unit): Unit = profiler match {
+  private[expression] def register(engine: String)(action: => Unit): Unit = profiler match {
     case None => super.addCase(engine)(_ => action)
     case Some(controller) =>
-      val path = controller.profileRoot.resolve(scenario.id).resolve(engine)
+      val path = controller.profileRoot
+        .resolve(scenario.id)
+        .resolve(engine)
         .resolve("profile.collapsed")
       var elapsed = 0L
       super.addTimerCase(engine) {
@@ -97,7 +100,8 @@ final private[benchmark] class Benchmark(
           // A failed start must not authorize cleanup of another profiler session.
           if (timer.iteration == 0) controller.start()
           var stopAfter = true
-          try Utils.tryWithSafeFinally {
+          try
+            Utils.tryWithSafeFinally {
               timer.startTiming()
               Utils.tryWithSafeFinally(action)(timer.stopTiming())
               if (measured) {
@@ -144,67 +148,60 @@ final private[benchmark] class Benchmark(
     .flatMap(_.rules)
     .find(_.ruleName == "org.apache.spark.sql.catalyst.optimizer.RewriteWithExpression")
 
-  private def rewriteWithExpression(plan: LogicalPlan): LogicalPlan = {
-    val rewritten = rewriteWithRule.fold(plan)(_.apply(plan))
-    rewritten.foreach(_.expressions.foreach(_.foreach {
-      case expression
-          if expression.nodeName == "With" || expression.nodeName == "CommonExpressionRef" =>
-        throw new IllegalArgumentException(s"Unprepared expression: $expression")
-      case _ =>
-    }))
-    rewritten
+  private lazy val expressionOptimizer = new RuleExecutor[LogicalPlan] {
+    override protected def batches: Seq[Batch] = Seq(
+      Batch(
+        "Prepare expressions",
+        Once,
+        ReplaceExpressions,
+        ComputeCurrentTime,
+        ReplaceCurrentLike(spark.sessionState.catalogManager)),
+      Batch(
+        "Rewrite With",
+        FixedPoint(spark.sessionState.conf.optimizerMaxIterations),
+        rewriteWithRule.toSeq: _*),
+      Batch("Fold constants", Once, ConstantFolding)
+    )
   }
 
-  private[expression] def prepareAnalyzed(schema: StructType, native: Boolean): Project = checked {
-    val relation = LocalRelation(ExpressionUtils.attributesFromStruct(schema))
+  private[expression] lazy val prepared: Project = checked {
+    val relation = LocalRelation(ExpressionUtils.attributesFromStruct(dataPlan.inputSchema))
     val parsed = spark.sessionState.sqlParser.parseExpression(scenario.sql)
     require(!parsed.exists(_.isInstanceOf[SubqueryExpression]), "Subqueries are not scalar inputs")
-    val analyzed = spark.sessionState.executePlan(
-      Project(Seq(Alias(parsed, "result")()), relation)).analyzed
+    val analyzed =
+      spark.sessionState.executePlan(Project(Seq(Alias(parsed, "result")()), relation)).analyzed
     analyzed.foreach(_.expressions.foreach(_.foreach {
       case expression @ (_: AggregateExpression | _: WindowExpression | _: Generator |
           _: SubqueryExpression) =>
         throw new IllegalArgumentException(s"Unsupported scalar expression: $expression")
-      case expression =>
-        require(expression.deterministic, s"Nondeterministic expression: $expression")
+      case _ =>
     }))
     val project = singleProject(analyzed, relation.output)
-    def nativeReplacement(expression: Expression): Expression = expression match {
-      case replaceable: RuntimeReplaceable with InheritAnalysisRules =>
-        nativeReplacement(replaceable.replacement)
-      // ArraySize is not in the converter map; Size is. Keep Encode and StructsToJson intact.
-      case size: ArraySize => nativeReplacement(size.replacement)
-      case other => other.mapChildren(nativeReplacement)
-    }
-    val replaced = if (native) project.mapExpressions(nativeReplacement)
-    else ReplaceExpressions.apply(project)
-    val rewritten = rewriteWithExpression(replaced)
-    val prepared = singleProject(ConstantFolding(rewritten), relation.output)
-    prepared.projectList.foreach(_.foreach {
-      case expression: ArraySize =>
+    val optimized = singleProject(expressionOptimizer.execute(project), relation.output)
+    optimized.projectList.foreach(_.foreach {
+      case expression: RuntimeReplaceable =>
+        throw new IllegalArgumentException(s"Unreplaced expression: $expression")
+      case expression
+          if expression.nodeName == "With" || expression.nodeName == "CommonExpressionRef" =>
         throw new IllegalArgumentException(s"Unprepared expression: $expression")
-      case expression: RuntimeReplaceable if !native =>
-        throw new IllegalArgumentException(s"Unreplaced JVM expression: $expression")
       case _ =>
     })
-    prepared
+    optimized
   }
 
-  private def fresh(schema: StructType, native: Boolean): (Expression, Seq[Attribute]) = {
-    val project = prepareAnalyzed(schema, native)
-    (project.projectList.head.asInstanceOf[Alias].child, project.child.output)
+  def freshExpression(): (Expression, Seq[Attribute]) = checked {
+    val expression = prepared.projectList.head.asInstanceOf[Alias].child
+    // Match Spark's expression tests, including state inside replacement evaluator literals.
+    val serializer = new JavaSerializer(new SparkConf()).newInstance()
+    (serializer.deserialize[Expression](serializer.serialize(expression)), prepared.child.output)
   }
-
-  def freshJvm(): (Expression, Seq[Attribute]) = fresh(dataPlan.inputSchema, native = false)
 
   def runNative(consume: (ColumnarBatch, ColumnarBatch, Int) => Unit = (_, _, _) => ()): Unit = {
     var offset = 0
     var i = 0
     while (i < inputs.batches.length) {
       val input = inputs.batches(i)
-      val output = native.evaluate(input)
-      try consume(input, output, offset)
-      finally output.close()
+      Arm.withResource(native.evaluate(input))(output => consume(input, output, offset))
       offset += input.numRows()
       i += 1
     }
@@ -265,7 +262,8 @@ final private[expression] case class ConsumeCodegenResult(
             $target.accept(${result.value});
           }
         """
-      case None => child.dataType match {
+      case None =>
+        child.dataType match {
           case BooleanType | ByteType | ShortType | IntegerType | LongType | FloatType |
               DoubleType | DateType | TimestampType | BinaryType | _: ArrayType | _: MapType |
               _: StructType | _: DecimalType =>

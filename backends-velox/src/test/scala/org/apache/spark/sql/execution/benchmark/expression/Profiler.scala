@@ -25,7 +25,11 @@ import java.nio.file.{Files, Path, StandardOpenOption}
 class Profiler(val options: ProfilerOptions) {
   lazy val profileRoot: Path = {
     Files.createDirectories(options.output)
-    Files.createTempDirectory(options.output, "profile-")
+    val root = Files.createTempDirectory(options.output, "profile-")
+    // scalastyle:off println
+    System.err.println(s"Expression benchmark profiles: ${root.toAbsolutePath.normalize()}")
+    // scalastyle:on println
+    root
   }
   lazy val execute: String => String = {
     val library = options.home.resolve("lib").resolve(System.mapLibraryName("asyncProfiler"))
@@ -36,8 +40,9 @@ class Profiler(val options: ProfilerOptions) {
 
   def start(): Unit = {
     require(state == "new", s"Cannot start profiler in state: $state")
-    val arguments = if (options.event == "cpu") "event=cpu,interval=1ms,cstack=dwarf,threads"
-    else "event=alloc,alloc=512k,threads"
+    val arguments =
+      if (options.event == "cpu") "event=cpu,interval=1ms,cstack=dwarf,threads"
+      else "event=alloc,alloc=512k,threads"
     // A failed command must not authorize cleanup of another process-wide profiler session.
     state = "failed"
     try execute(s"start,$arguments")

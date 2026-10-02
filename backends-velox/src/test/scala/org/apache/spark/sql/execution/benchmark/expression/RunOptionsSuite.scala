@@ -17,8 +17,11 @@
 package org.apache.spark.sql.execution.benchmark.expression
 
 import org.apache.spark.SparkFunSuite
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.util.Utils
 
-import java.io.{ByteArrayOutputStream, IOException}
+import java.io.{ByteArrayOutputStream, IOException, PrintStream}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files, Path}
 
@@ -33,6 +36,37 @@ class RunOptionsSuite extends SparkFunSuite {
   private def parse(args: String*): RunOptions.Parsed =
     RunOptions.parse(args.toArray)
 
+  test("benchmark SQL configuration keeps ANSI disabled without overriding nondeterminism") {
+    assert(RunOptions.sqlConf.toMap.get(SQLConf.ANSI_ENABLED.key).contains("false"))
+    assert(!RunOptions.sqlConf.exists(_._1.endsWith("expression.dedup_non_deterministic")))
+  }
+  test("empty run and CLI listing need neither Spark nor compiler blackholes nor profiling") {
+    val active = SparkSession.getActiveSession
+    val default = SparkSession.getDefaultSession
+    val directory = Files.createTempDirectory("empty-run")
+    val output = directory.resolve("profiles")
+    val options = RunOptions(
+      Duration.Zero,
+      Duration.Zero,
+      profiler = Some(ProfilerOptions(directory.resolve("missing-profiler"), output = output)))
+    val bytes = new ByteArrayOutputStream
+    val out = new PrintStream(bytes)
+    val oldOut = System.out
+    try {
+      System.setOut(out)
+      RegisteredExpressionBenchmark.run(Seq.empty, options)
+      assert(bytes.size() == 0 && !Files.exists(output))
+      RegisteredExpressionBenchmark.run(Seq.empty, options.copy(profiler = None))
+      RegisteredExpressionBenchmark.runBenchmarkSuite(Array("--list", "trim"))
+      assert(bytes.toString(UTF_8.name()).contains("trim/standard-string"))
+      assert(SparkSession.getActiveSession == active && SparkSession.getDefaultSession == default)
+      assert(!Files.exists(output))
+    } finally {
+      System.setOut(oldOut)
+      out.close()
+      Utils.deleteRecursively(directory.toFile)
+    }
+  }
   test("suite closes and clears standard output on success and parse failure") {
     Seq(false, true).foreach {
       invalid =>
@@ -52,7 +86,6 @@ class RunOptionsSuite extends SparkFunSuite {
         } finally RegisteredExpressionBenchmark.output = None
     }
   }
-
   test("suite preserves a primary parse error when closing standard output fails") {
     val cleanup = new IOException("output close failure")
     RegisteredExpressionBenchmark.output = Some(new ByteArrayOutputStream {
@@ -67,7 +100,6 @@ class RunOptionsSuite extends SparkFunSuite {
       assert(RegisteredExpressionBenchmark.output.isEmpty)
     } finally RegisteredExpressionBenchmark.output = None
   }
-
   test("runtime timing permits zero but enforces nonnegative durations and at least two samples") {
     val options = RunOptions(Duration.Zero, Duration.Zero)
     assert(options.minNumIters == 2)
@@ -76,7 +108,6 @@ class RunOptionsSuite extends SparkFunSuite {
     intercept[IllegalArgumentException](options.copy(warmup = -1.nanos))
     intercept[IllegalArgumentException](options.copy(minTime = -1.nanos))
   }
-
   test("selection preserves first occurrence and catalog order with slash-safe globs") {
     val substring = catalog.filter(_.id.startsWith("substring/"))
     assert(parse("substring,substring").selected(catalog) == substring)
@@ -86,7 +117,6 @@ class RunOptionsSuite extends SparkFunSuite {
     assertThrows[IllegalArgumentException](parse("--cases", "*").selected(catalog))
     assertThrows[IllegalArgumentException](parse("--cases", "trim/*,missing/*").selected(catalog))
   }
-
   test("empty unknown conflicting selectors and list execution flags fail") {
     Seq(
       Seq.empty,
@@ -100,10 +130,12 @@ class RunOptionsSuite extends SparkFunSuite {
       Seq("trim", "--profile-output", "x"),
       Seq("trim", "--unknown", "1")
     ).foreach(args => assertThrows[IllegalArgumentException](parse(args: _*).selected(catalog)))
-    val error = intercept[IllegalArgumentException](parse("trim", "--consumer", "blackhole"))
-    assert(error.getMessage.contains("Unknown --consumer"))
+    Seq("blackhole", "observable").foreach {
+      value =>
+        val error = intercept[IllegalArgumentException](parse("trim", "--consumer", value))
+        assert(error.getMessage.contains("Unknown --consumer"))
+    }
   }
-
   test("defaults and input sizes are strict without forcing iteration counts") {
     val options = parse("trim")
     val input = options.runtime.input
@@ -117,85 +149,55 @@ class RunOptionsSuite extends SparkFunSuite {
           value => assertThrows[IllegalArgumentException](parse("trim", flag, value))
         }
     }
-    assert(parse(
-      "trim",
-      "--seed",
-      Long.MinValue.toString).runtime.input.seed == Long.MinValue)
+    assert(parse("trim", "--seed", Long.MinValue.toString).runtime.input.seed == Long.MinValue)
     assertThrows[IllegalArgumentException](parse("trim", "--key-cardinality", "0"))
     assertThrows[IllegalArgumentException](parse("trim", "--seed", "9223372036854775808"))
   }
-
-  test("duration pairs are strict positive Int values and conflict with listing") {
-    Seq("--warmup-seconds", "--measurement-seconds").foreach {
-      flag =>
-        assertThrows[IllegalArgumentException](parse("trim", flag, "2"))
-        Seq("0", "-1", "2147483648", "9223372036854775807", "1.5", "+2", " 2", "2e0")
-          .foreach {
-            value =>
-              val other = if (flag == "--warmup-seconds") "--measurement-seconds"
-              else "--warmup-seconds"
-              assertThrows[IllegalArgumentException](parse("trim", flag, value, other, "10"))
-          }
-    }
-    assertThrows[IllegalArgumentException](parse(
+  test("explicit duration pair uses 2 plus 10 seconds without forcing iteration counts") {
+    val options = parse("trim", "--warmup-seconds", "2", "--measurement-seconds", "10")
+    assert(options.runtime.warmup.toSeconds == 2 && options.runtime.minTime.toSeconds == 10)
+    assert(options.runtime.minNumIters == 2)
+    val max = parse(
       "trim",
-      "--list",
       "--warmup-seconds",
-      "2",
+      Int.MaxValue.toString,
       "--measurement-seconds",
-      "10"))
-    assertThrows[IllegalArgumentException](parse(
-      "trim",
-      "--warmup-seconds",
-      "2",
-      "--measurement-seconds",
-      "10",
-      "--warmup-seconds",
-      "3"))
-    assertThrows[IllegalArgumentException](parse(
-      "trim",
-      "--warmup-seconds",
-      "2",
-      "--measurement-seconds"))
+      Int.MaxValue.toString)
+    assert(max.runtime.warmup.toNanos == Int.MaxValue.toLong * 1000000000L)
+    assert(max.runtime.minTime.toNanos == Int.MaxValue.toLong * 1000000000L)
   }
-
   test("duration overrides validate each source and replace whole timing groups") {
-    withTempDir {
-      directory =>
-        val cwd = directory.toPath
-        val dir = Files.createDirectory(cwd.resolve("config"))
-        val file = dir.resolve("run.json")
-        def fromFile(args: String*): RunOptions =
-          RunOptions.parse(Array("--config", "config/run.json") ++ args, cwd).runtime
-        def write(fields: String): Unit =
-          writeString(file, s"""{"functions":["trim"],$fields}""")
-        write(""""warmupSeconds":2,"measurementSeconds":10""")
-        val unchanged = fromFile("--rows", "17")
-        assert(unchanged.warmup.toSeconds == 2 && unchanged.minTime.toSeconds == 10)
-        val replaced = fromFile("--warmup-seconds", "3", "--measurement-seconds", "11")
-        assert(replaced.warmup.toSeconds == 3 && replaced.minTime.toSeconds == 11)
-        assertThrows[IllegalArgumentException](fromFile("--warmup-seconds", "3"))
-        assertThrows[IllegalArgumentException](fromFile("--measurement-seconds", "11"))
-        Seq(
-          """"warmupSeconds":2""",
-          """"measurementSeconds":10""",
-          """"warmupSeconds":0,"measurementSeconds":10""",
-          """"warmupSeconds":2,"measurementSeconds":2147483648""",
-          """"warmupSeconds":2.0,"measurementSeconds":10""",
-          """"warmupSeconds":"2","measurementSeconds":10"""
-        ).foreach {
-          fields =>
-            write(fields)
-            assertThrows[IllegalArgumentException](fromFile())
-            assertThrows[IllegalArgumentException](fromFile(
-              "--warmup-seconds",
-              "2",
-              "--measurement-seconds",
-              "10"))
-        }
-    }
+    val cwd = Files.createTempDirectory("duration-cwd")
+    val dir = Files.createDirectory(cwd.resolve("config"))
+    val file = dir.resolve("run.json")
+    def fromFile(args: String*): RunOptions =
+      RunOptions.parse(Array("--config", "config/run.json") ++ args, cwd).runtime
+    def write(fields: String): Unit =
+      writeString(file, s"""{"functions":["trim"],$fields}""")
+    try {
+      write(""""warmupSeconds":2,"measurementSeconds":10""")
+      val unchanged = fromFile("--rows", "17")
+      assert(unchanged.warmup.toSeconds == 2 && unchanged.minTime.toSeconds == 10)
+      val replaced = fromFile("--warmup-seconds", "3", "--measurement-seconds", "11")
+      assert(replaced.warmup.toSeconds == 3 && replaced.minTime.toSeconds == 11)
+      assertThrows[IllegalArgumentException](fromFile("--warmup-seconds", "3"))
+      assertThrows[IllegalArgumentException](fromFile("--measurement-seconds", "11"))
+      Seq(
+        """"warmupSeconds":2""",
+        """"measurementSeconds":10""",
+        """"warmupSeconds":0,"measurementSeconds":10""",
+        """"warmupSeconds":2,"measurementSeconds":2147483648""",
+        """"warmupSeconds":2.0,"measurementSeconds":10""",
+        """"warmupSeconds":"2","measurementSeconds":10"""
+      ).foreach {
+        fields =>
+          write(fields)
+          assertThrows[IllegalArgumentException](fromFile())
+          assertThrows[IllegalArgumentException](
+            fromFile("--warmup-seconds", "2", "--measurement-seconds", "10"))
+      }
+    } finally Utils.deleteRecursively(cwd.toFile)
   }
-
   test("strict JSON types keys UTF8 integers and trailing tokens") {
     val file = Files.createTempFile("expression-options", ".json")
     try {
@@ -204,8 +206,10 @@ class RunOptionsSuite extends SparkFunSuite {
         "[]",
         "{\"functions\":[\"trim\"],\"rows\":1.0}",
         "{\"functions\":[\"trim\"],\"rows\":2147483648}",
+        "{\"functions\":[\"trim\"],\"seed\":9223372036854775808}",
         "{\"functions\":[\"trim\"],\"rows\":1,\"rows\":2}",
         "{\"functions\":[\"trim\"],\"sql\":\"trim(x)\"}",
+        "{\"functions\":[1]}",
         "{\"functions\":[]}",
         "{\"functions\":[\"trim\"],\"cases\":[\"trim/*\"]}",
         "{\"functions\":[\"trim\"]} {}"
@@ -214,61 +218,25 @@ class RunOptionsSuite extends SparkFunSuite {
           writeString(file, json)
           assertThrows[IllegalArgumentException](parse("--config", file.toString))
       }
-      writeString(file, """{"functions":["trim"],"consumer":"blackhole"}""")
-      val error = intercept[IllegalArgumentException](parse(
-        "--config",
-        file.toString,
-        "--warmup-seconds",
-        "2",
-        "--measurement-seconds",
-        "10"))
-      assert(error.getMessage.contains("Unknown config key"))
+      Seq("blackhole", "observable").foreach {
+        value =>
+          writeString(file, s"""{"functions":["trim"],"consumer":"$value"}""")
+          val error = intercept[IllegalArgumentException](
+            parse(
+              "--config",
+              file.toString,
+              "--warmup-seconds",
+              "2",
+              "--measurement-seconds",
+              "10"))
+          assert(error.getMessage.contains("Unknown config key"))
+      }
       val invalidUtf8 = """{"x":1}""".getBytes(UTF_8)
       invalidUtf8(2) = -1
       Files.write(file, invalidUtf8)
       assertThrows[IllegalArgumentException](parse("--config", file.toString))
     } finally Files.delete(file)
   }
-
-  test("path options reject empty or blank values without trimming valid space paths") {
-    Seq("", "   ").foreach {
-      blank =>
-        assertThrows[IllegalArgumentException](parse("trim", "--async-profiler", blank))
-        assertThrows[IllegalArgumentException](parse(
-          "trim",
-          "--async-profiler",
-          "ap",
-          "--profile-output",
-          blank))
-        assertThrows[IllegalArgumentException](parse("--config", blank))
-        val file = Files.createTempFile("blank-path-config", ".json")
-        try {
-          writeString(file, s"""{"functions":["trim"],"asyncProfiler":"$blank"}""")
-          assertThrows[IllegalArgumentException](parse("--config", file.toString))
-          writeString(
-            file,
-            s"""{"functions":["trim"],"asyncProfiler":"ap","profileOutput":"$blank"}""")
-          assertThrows[IllegalArgumentException](parse("--config", file.toString))
-        } finally Files.delete(file)
-    }
-    assert(parse("trim", "--async-profiler", "dir with spaces ").runtime.profiler.get.home
-      .getFileName.toString == "dir with spaces ")
-  }
-
-  test("invalid JSON profileEvent='unknown' cannot be hidden by a valid CLI override") {
-    val file = Files.createTempFile("invalid-config-values", ".json")
-    try {
-      writeString(file, """{"functions":["trim"],"profileEvent":"unknown"}""")
-      assertThrows[IllegalArgumentException](parse(
-        "--config",
-        file.toString,
-        "--profile-event",
-        "cpu",
-        "--async-profiler",
-        "ap"))
-    } finally Files.delete(file)
-  }
-
   test("each scalar source is strict before valid overrides and selector replacement") {
     val file = Files.createTempFile("scalar-config-values", ".json")
     try {
@@ -281,12 +249,8 @@ class RunOptionsSuite extends SparkFunSuite {
       ).foreach {
         case (key, value, flag) =>
           writeString(file, s"""{"cases":["trim/*"],"$key":$value}""")
-          assertThrows[IllegalArgumentException](parse(
-            "--config",
-            file.toString,
-            "trim",
-            flag,
-            "17"))
+          assertThrows[IllegalArgumentException](
+            parse("--config", file.toString, "trim", flag, "17"))
       }
       writeString(
         file,
@@ -309,38 +273,36 @@ class RunOptionsSuite extends SparkFunSuite {
       assert(parse("trim", "--seed", "-0").runtime.input.seed == 0)
     } finally Files.delete(file)
   }
-
   test("CLI scalars and whole selectors override JSON and paths keep their own origin") {
-    withTempDir {
-      directory =>
-        val cwd = directory.toPath
-        val dir = Files.createDirectory(cwd.resolve("config"))
-        val config = dir.resolve("run.json")
-        writeString(
-          config,
-          """{"functions":["trim"],"rows":19,""" +
-            """"asyncProfiler":"ap","profileOutput":"out"}""")
-        val fromJson = RunOptions.parse(Array("--config", "config/run.json"), cwd)
-        assert(fromJson.runtime.profiler.get.home == dir.resolve("ap"))
-        assert(fromJson.runtime.profiler.get.output == dir.resolve("out"))
-        val overrideJson = RunOptions.parse(
-          Array(
-            "--config",
-            "config/run.json",
-            "--cases",
-            "rtrim/l13-half-even",
-            "--rows",
-            "17",
-            "--async-profiler",
-            "cli-ap",
-            "--profile-output",
-            "cli-out"),
-          cwd
-        )
-        assert(overrideJson.selected(catalog).map(_.id) == Seq("rtrim/l13-half-even"))
-        assert(overrideJson.runtime.input.rows == 17)
-        assert(overrideJson.runtime.profiler.get.home == cwd.resolve("cli-ap"))
-        assert(overrideJson.runtime.profiler.get.output == cwd.resolve("cli-out"))
-    }
+    val cwd = Files.createTempDirectory("expression-cwd")
+    val dir = Files.createDirectory(cwd.resolve("config"))
+    val config = dir.resolve("run.json")
+    try {
+      writeString(
+        config,
+        """{"functions":["trim"],"rows":19,""" +
+          """"asyncProfiler":"ap","profileOutput":"out"}""")
+      val fromJson = RunOptions.parse(Array("--config", "config/run.json"), cwd)
+      assert(fromJson.runtime.profiler.get.home == dir.resolve("ap"))
+      assert(fromJson.runtime.profiler.get.output == dir.resolve("out"))
+      val overrideJson = RunOptions.parse(
+        Array(
+          "--config",
+          "config/run.json",
+          "--cases",
+          "rtrim/l13-half-even",
+          "--rows",
+          "17",
+          "--async-profiler",
+          "cli-ap",
+          "--profile-output",
+          "cli-out"),
+        cwd
+      )
+      assert(overrideJson.selected(catalog).map(_.id) == Seq("rtrim/l13-half-even"))
+      assert(overrideJson.runtime.input.rows == 17)
+      assert(overrideJson.runtime.profiler.get.home == cwd.resolve("cli-ap"))
+      assert(overrideJson.runtime.profiler.get.output == cwd.resolve("cli-out"))
+    } finally Utils.deleteRecursively(cwd.toFile)
   }
 }

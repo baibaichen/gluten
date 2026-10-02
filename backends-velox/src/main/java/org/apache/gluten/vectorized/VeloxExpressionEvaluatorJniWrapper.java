@@ -20,7 +20,10 @@ import org.apache.gluten.runtime.Runtime;
 import org.apache.gluten.runtime.RuntimeAware;
 
 /**
- * Direct scalar expression evaluation using Velox's default query configuration.
+ * Direct scalar expression evaluation using the creating runtime's Spark session configuration.
+ *
+ * <p>Query settings include the session timezone, ANSI/legacy behavior, duplicate-map-key policy,
+ * and dynamic Velox overrides. The runtime must provide a valid session timezone.
  *
  * <p>Evaluators are reusable but not thread-safe. Keep the evaluator and every input/output batch
  * within their task resource scope, with the creating runtime alive. Inputs are borrowed and must

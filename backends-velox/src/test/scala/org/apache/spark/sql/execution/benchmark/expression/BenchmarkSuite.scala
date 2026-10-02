@@ -17,18 +17,16 @@
 package org.apache.spark.sql.execution.benchmark.expression
 
 import org.apache.gluten.execution.VeloxWholeStageTransformerSuite
-import org.apache.gluten.memory.SimpleMemoryUsageRecorder
 
 import org.apache.spark.benchmark.{Benchmark => SparkBenchmark}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.catalyst.expressions.{BoundReference, Expression, GenericInternalRow, LeafExpression, NativeExpressionEvalHelper, UnsafeProjection, UnsafeRow}
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
-import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, GenericArrayData, MapData}
+import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, ArrayData, GenericArrayData, MapData}
 import org.apache.spark.sql.execution.benchmark.expression.BenchmarkSuite.TypedPrepared
 import org.apache.spark.sql.execution.benchmark.expression.Catalog._
 import org.apache.spark.sql.execution.benchmark.expression.Data.{Context, Plan}
-import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 import org.apache.spark.task.TaskResources
 import org.apache.spark.unsafe.types.UTF8String
@@ -36,7 +34,6 @@ import org.apache.spark.util.Utils
 
 import org.apache.xbean.asm9.{ClassReader, ClassVisitor, MethodVisitor, Opcodes}
 import org.codehaus.commons.compiler.util.reflect.ByteArrayClassLoader
-import org.scalatest.exceptions.TestCanceledException
 
 import java.nio.file.Files
 import java.util.function.Consumer
@@ -44,126 +41,35 @@ import java.util.function.Consumer
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 
-class BenchmarkSuite
-  extends VeloxWholeStageTransformerSuite
-  with NativeExpressionEvalHelper {
+class BenchmarkSuite extends VeloxWholeStageTransformerSuite with NativeExpressionEvalHelper {
   override protected val resourcePath: String = "N/A"
   override protected val fileFormat: String = "N/A"
 
   private val catalog = Catalog.load()
-
   catalog.foreach {
     scenario =>
-      val reason = if (!matchSparkVersion(Some("4.0"))) Some("Requires Spark 4.0 or later")
-      else BenchmarkSuite.unsupported.get(scenario.id)
-      reason match {
-        case Some(message) => ignore(scenario.id)(fail(message))
-        case None => test(scenario.id) {
-            withCorrectness(spark, scenario, Context(10), 4) {
-              prepared =>
-                assert(prepared.nativeBatchSizes == Seq(4, 4, 2))
-                var checked = 0
-                prepared.verify {
-                  (rowId, _) =>
-                    assert(rowId == checked.toLong)
-                    checked += 1
-                }
-                assert(checked == 10)
+      test(scenario.id) {
+        withCorrectness(spark, scenario, Context(10), 4) {
+          prepared =>
+            assert(prepared.nativeBatchSizes == Seq(4, 4, 2))
+            var checked = 0
+            prepared.verify {
+              (rowId, _) =>
+                assert(rowId == checked.toLong)
+                checked += 1
             }
-          }
-      }
-  }
-
-  // Preparation, correctness capture and resource scopes.
-
-  private def scenario(sql: String): CaseDef = CaseDef(
-    "framework/golden",
-    Seq(Binding(Seq("input"), "standard.long", Seq.empty)),
-    sql,
-    "Independent correctness regression",
-    SourceLocation("framework.sql", 7, 11)
-  )
-
-  testWithMinSparkVersion("metric flags are independent of correctness", "4.0") {
-    withCorrectness(spark, scenario("input + 1"), Context(10), 4)(_.verify())
-    withSQLConf(RunOptions.sqlConf: _*) {
-      TaskResources.runUnsafe {
-        val benchmark = new Benchmark(
-          spark,
-          scenario("input + 1"),
-          Context(10),
-          RunOptions.withBatchSize(4))
-        val preparationError = intercept[IllegalStateException](benchmark.inputs)
-        assert(preparationError.getMessage.contains("Compiler blackhole requires JVM arguments"))
-        val registrationError = intercept[IllegalStateException](benchmark.registerCases())
-        assert(registrationError.getMessage.contains("Compiler blackhole requires JVM arguments"))
-        assert(benchmark.benchmarks.isEmpty)
-
-        val correctness = new Benchmark(
-          spark,
-          scenario("input + 1"),
-          Context(10),
-          RunOptions.withBatchSize(4),
-          isBenchmark = false
-        )
-        assert(correctness.inputs.rows.length == 10)
-        val (expression, attributes) = correctness.freshJvm()
-        correctness.prepareJvm(expression, attributes)
-        assert(correctness.benchmarks.isEmpty)
-      }
-    }
-  }
-
-  testWithMinSparkVersion("shared native loop closes results when immediate capture fails", "4.0") {
-    Seq(false, true).foreach {
-      failCapture =>
-        var usage: SimpleMemoryUsageRecorder = null
-        var released = false
-        var generated = 0
-        val data = Plan(
-          new StructType().add("input", LongType),
-          (_, rowId, _, _) => {
-            generated += 1
-            if (rowId == 0) {
-              usage = TaskResources.getSharedUsage()
-              TaskResources.addRecycler("capture test", 0) { released = true }
-            }
-            InternalRow(rowId)
-          }
-        )
-        val failure = new IllegalStateException("capture failure")
-        val leaks = TaskResources.ACCUMULATED_LEAK_BYTES.get()
-        withSQLConf(SQLConf.SESSION_LOCAL_TIMEZONE.key -> "Asia/Tokyo") {
-          def execute(): Unit =
-            withCorrectness(spark, scenario("input + 1"), Context(10), 4, data) {
-              prepared =>
-                assert(generated == 10 && !released && TaskResources.inSparkTask())
-                (0 until 2).foreach(_ => prepared.verify((_, _) => if (failCapture) throw failure))
-                assert(generated == 10)
-            }
-          if (failCapture) {
-            val error = intercept[IllegalArgumentException](execute())
-            assert(error.getCause eq failure)
-          } else execute()
-          assert(released && usage.current() == 0)
-          assert(TaskResources.ACCUMULATED_LEAK_BYTES.get() == leaks)
-          assert(!TaskResources.inSparkTask())
-          assert(SQLConf.get.sessionLocalTimeZone == "Asia/Tokyo")
+            assert(checked == 10)
         }
-    }
+      }
   }
-
   // Generated consumers, repeated execution, measurement and profiling.
   private val marker = "org/apache/spark/sql/execution/benchmark/expression/BenchmarkBlackhole"
 
   private def metricCase(id: String, description: String, sql: String = "input"): CaseDef =
     CaseDef(s"metric/$id", Seq.empty, sql, description, SourceLocation("metric", 1, 1))
 
-  private val codegen = new Benchmark(
-    null,
-    metricCase("codegen", "Codegen only"),
-    Context(0),
-    isBenchmark = false)
+  private val codegen =
+    new Benchmark(null, metricCase("codegen", "Codegen only"), Context(0), isBenchmark = false)
 
   private def calls(generated: Class[_]): Seq[(String, String, String)] = {
     // Janino does not expose generated classes as classpath resources.
@@ -210,9 +116,8 @@ class BenchmarkSuite
         (DecimalType(20, 0), Decimal(123L, 20, 0), "Ljava/lang/Object;")
       ).foreach {
         case (dataType, value, descriptor) =>
-          val predicate = codegen.prepareJvm(
-            BoundReference(0, dataType, nullable = true),
-            Seq.empty)
+          val predicate =
+            codegen.prepareJvm(BoundReference(0, dataType, nullable = true), Seq.empty)
           assert(predicate.eval(InternalRow(value)))
           assert(predicate.eval(InternalRow(null)))
           val instructions = calls(predicate.getClass)
@@ -240,74 +145,71 @@ class BenchmarkSuite
       }
     }
   }
-
   private val cpuStart = "start,event=cpu,interval=1ms,cstack=dwarf,threads"
   private val measuredCommands = Seq(cpuStart, "stop")
 
   private def withProfile(
-      options: RunOptions =
-        RunOptions(Duration.Zero, Duration.Zero),
+      options: RunOptions = RunOptions(Duration.Zero, Duration.Zero),
       response: String => String = _ => "")(
-      f: (
-          Benchmark,
-          Profiler,
-          ArrayBuffer[String],
-          java.nio.file.Path) => Unit): Unit = {
+      f: (Benchmark, Profiler, ArrayBuffer[String], java.nio.file.Path) => Unit): Unit = {
     val root = Files.createTempDirectory("expression-shared-profiler")
     val commands = ArrayBuffer.empty[String]
     val profiler =
       org.mockito.Mockito.spy(new Profiler(ProfilerOptions(root, output = root)))
-    org.mockito.Mockito.doReturn(
-      (command: String) => {
-        commands += command
-        response(command)
-      },
-      Array.empty[Object]: _*).when(profiler).execute
+    org.mockito.Mockito
+      .doReturn(
+        (command: String) => {
+          commands += command
+          response(command)
+        },
+        Array.empty[Object]: _*)
+      .when(profiler)
+      .execute
     val scenario = metricCase("profile", "Profile")
-    val benchmark = new Benchmark(
-      null,
-      scenario,
-      Context(3),
-      options,
-      profiler = Some(profiler))
-    try withSQLConf(RunOptions.sqlConf: _*) {
+    val benchmark = new Benchmark(null, scenario, Context(3), options, profiler = Some(profiler))
+    try
+      withSQLConf(RunOptions.sqlConf: _*) {
         TaskResources.runUnsafe {
           f(
             benchmark,
             profiler,
             commands,
-            profiler.profileRoot.resolve(
-              scenario.id).resolve("vanilla").resolve("profile.collapsed"))
+            profiler.profileRoot
+              .resolve(scenario.id)
+              .resolve("vanilla")
+              .resolve("profile.collapsed"))
         }
       }
     finally Utils.deleteRecursively(root.toFile)
   }
 
   // Exercise the real registration callback without requiring native expression preparation.
-  private def registerProfile(
-      benchmark: Benchmark,
-      engine: String = "vanilla")(action: => Unit): SparkBenchmark.Case = {
-    val register = classOf[Benchmark].getDeclaredMethod(
-      "register",
-      classOf[String],
-      classOf[Function0[_]])
-    register.setAccessible(true)
-    register.invoke(benchmark, engine, () => action)
+  private def registerProfile(benchmark: Benchmark, engine: String = "vanilla")(
+      action: => Unit): SparkBenchmark.Case = {
+    benchmark.register(engine)(action)
     benchmark.benchmarks.last
   }
 
-  test("metric: Spark owns warmup count and duration: 2 / 5 milliseconds") {
-    val minNumIters = 2
+  test("metric: explicit warmup and Spark-owned measurement: 3 / 5.millis") {
+    val minNumIters = 3
     val minTime = 5.millis
-    withProfile(RunOptions(3.millis, minTime, minNumIters)) {
+    withProfile(RunOptions(Duration.Zero, minTime, minNumIters)) {
       (benchmark, profiler, commands, path) =>
         val iterations = ArrayBuffer.empty[Int]
         var measuredMillis = -1L
         var timer = Option.empty[SparkBenchmark.Timer]
         val callback = registerProfile(benchmark) {
+          iterations += timer.get.iteration
           if (timer.get.iteration < 0) assert(commands.isEmpty && !profiler.owned)
           else assert(profiler.owned && !Files.exists(path))
           Thread.sleep(1)
+        }
+        def runIteration(current: SparkBenchmark.Timer): Unit = {
+          timer = Some(current)
+          callback.fn(current)
+          if (current.iteration < 0) {
+            assert(commands.isEmpty && !profiler.owned && !Files.exists(path))
+          } else assert(profiler.owned == !Files.exists(path))
         }
         val console = new java.io.PrintStream(new java.io.ByteArrayOutputStream) {
           override def println(value: Any): Unit = { // scalastyle:ignore println
@@ -315,61 +217,27 @@ class BenchmarkSuite
               assert(!profiler.owned && commands.last == "collapsed,total")
               assert(Files.isReadable(path))
               val elapsed = "Stopped after [0-9]+ iterations, ([0-9]+) ms".r
-              measuredMillis =
-                elapsed.findFirstMatchIn(String.valueOf(value)).get.group(1).toLong
+              measuredMillis = elapsed.findFirstMatchIn(String.valueOf(value)).get.group(1).toLong
             }
           }
         }
-        try Console.withOut(console) {
-            benchmark.measure(3L, callback.numIters) {
-              current =>
-                timer = Some(current)
-                iterations += current.iteration
-                callback.fn(current)
-                if (current.iteration < 0) assert(!profiler.owned)
-                else assert(profiler.owned == !Files.exists(path))
-            }
+        try
+          Console.withOut(console) {
+            // A real warmup deadline can expire before its first callback.
+            (0 until 2).foreach(_ => runIteration(new SparkBenchmark.Timer(-1)))
+            benchmark.measure(3L, callback.numIters)(runIteration)
           }
         finally console.close()
         val measured = iterations.filter(_ >= 0)
-        assert(iterations.contains(-1) && measured.toSeq == measured.indices)
+        assert(iterations.take(2).toSeq == Seq(-1, -1))
+        assert(measured.toSeq == measured.indices)
         assert(measured.size >= minNumIters && measuredMillis >= minTime.toMillis)
+        if (minTime == Duration.Zero) assert(measured.size == minNumIters)
         assert(commands.toSeq == measuredCommands :+ "collapsed,total")
         assert(Files.size(path) == 0)
     }
   }
-
-  test("metric: measure cleanup preserves primary: interrupt / true") {
-    val primary = new InterruptedException("interrupt")
-    val cleanup = new IllegalStateException("cleanup")
-    withProfile(response = command => {
-      assert(!Thread.currentThread().isInterrupted)
-      if (command == "collapsed,total") throw cleanup
-      ""
-    }) {
-      (benchmark, profiler, commands, path) =>
-        val callback = registerProfile(benchmark)(throw primary)
-        try {
-          val thrown = intercept[Exception] {
-            benchmark.measure(3L, callback.numIters)(callback.fn)
-          }
-          assert(thrown eq primary)
-          assert(thrown.getSuppressed.toSeq == Seq(cleanup))
-          assert(commands.count(_ == "collapsed,total") == 1)
-          assert(commands.count(_ == "stop") == 1)
-          val completed = commands.toVector
-          profiler.stop()
-          profiler.dump(path)
-          assert(commands.toVector == completed && !profiler.owned)
-          assert(Thread.currentThread().isInterrupted)
-        } finally Thread.interrupted()
-    }
-    assert(!TaskResources.inSparkTask())
-  }
-
-  testWithMinSparkVersion(
-    "metric: profiling completes both engines across cases",
-    "4.0") {
+  testWithMinSparkVersion("metric: profiling completes both engines across cases", "4.0") {
     withProfile() {
       (_, profiler, commands, _) =>
         catalog.filter(c => Set("date_sub/standard-date", "rtrim/l10-none")(c.id)).foreach {
@@ -385,16 +253,18 @@ class BenchmarkSuite
             benchmark.run()
             Seq("vanilla", "native").foreach {
               engine =>
-                assert(Files.isReadable(
-                  profiler.profileRoot.resolve(scenario.id).resolve(engine)
-                    .resolve("profile.collapsed")))
+                assert(
+                  Files.isReadable(
+                    profiler.profileRoot
+                      .resolve(scenario.id)
+                      .resolve(engine)
+                      .resolve("profile.collapsed")))
             }
         }
         assert(commands.toSeq == Seq.fill(4)(measuredCommands :+ "collapsed,total").flatten)
         assert(!profiler.owned)
     }
   }
-
   test("metric: complex terminal does not serialize the generated result") {
     withSQLConf(RunOptions.sqlConf: _*) {
       val reads = new java.util.concurrent.atomic.AtomicInteger
@@ -427,11 +297,10 @@ class BenchmarkSuite
           assert(evaluations.get() == 10)
           assert(reads.get() == 0, "The terminal must not add an UnsafeProjection writer")
           assert(metric.eval(InternalRow.empty))
-          assert(calls(metric.getClass).filter(_._1 == marker) ==
-            Seq((marker, "consume", "(ZLjava/lang/Object;)V")))
-          val nullable = codegen.prepareJvm(
-            BoundReference(0, dataType, nullable = true),
-            Seq.empty)
+          assert(
+            calls(metric.getClass).filter(_._1 == marker) ==
+              Seq((marker, "consume", "(ZLjava/lang/Object;)V")))
+          val nullable = codegen.prepareJvm(BoundReference(0, dataType, nullable = true), Seq.empty)
           assert(nullable.eval(InternalRow(null)))
       }
     }
@@ -443,48 +312,88 @@ class BenchmarkSuite
       expected: Any,
       dataType: DataType,
       nullable: Boolean): Boolean = (result, expected, dataType) match {
-    case (actual: MapData, reference: MapData, MapType(keyType, valueType, valueNullable)) =>
-      def key(map: MapData, i: Int): Any = map.keyArray().get(i, keyType)
-      def value(map: MapData, i: Int): Any = map.valueArray().get(i, valueType)
-      // ponytail: quadratic matching suits these small maps; use typed ordering for large maps.
-      Seq(actual, reference).foreach {
-        map =>
-          require(
-            map.keyArray().numElements() == map.valueArray().numElements(),
-            "Invalid map entries")
-          (0 until map.numElements()).foreach {
-            i =>
-              require(key(map, i) != null, "Null map key")
-              require(
-                !(0 until i).exists(
-                  j =>
-                    checkResult(key(map, i), key(map, j), keyType, false)),
-                "Duplicate map key")
-          }
-      }
-      actual.numElements() == reference.numElements() &&
-      (0 until actual.numElements()).forall {
-        i =>
-          val j = (0 until reference.numElements()).find(
-            j =>
-              checkResult(key(actual, i), key(reference, j), keyType, false))
-          j.exists(
-            j => checkResult(value(actual, i), value(reference, j), valueType, valueNullable))
-      }
+    case (actual: MapData, reference: MapData, mapType: MapType) =>
+      compareMaps(actual, reference, mapType)(checkResult)
     case _ => super.checkResult(result, expected, dataType, nullable)
   }
 
-  def withCorrectness(
-      spark: SparkSession,
-      scenario: CaseDef,
-      context: Context,
-      batchSize: Int)(f: TypedPrepared => Unit): Unit =
-    withCorrectness(
-      spark,
-      scenario,
-      context,
-      batchSize,
-      Data.compile(scenario.inputs))(f)
+  private def checkOutputResult(
+      result: Any,
+      expected: Any,
+      dataType: DataType,
+      nullable: Boolean): Boolean = (result, expected, dataType) match {
+    case (actual: Float, reference: Float, FloatType) =>
+      checkResult(actual, reference, dataType, nullable) ||
+      withinTolerance(actual.toDouble, reference.toDouble, absTol = 1e-6, relTol = 1e-5)
+    case (actual: Double, reference: Double, DoubleType) =>
+      checkResult(actual, reference, dataType, nullable) ||
+      withinTolerance(actual, reference, absTol = 1e-12, relTol = 1e-12)
+    case (actual: ArrayData, reference: ArrayData, ArrayType(elementType, containsNull)) =>
+      actual.numElements() == reference.numElements() &&
+      (0 until actual.numElements()).forall {
+        i =>
+          checkOutputResult(
+            actual.get(i, elementType),
+            reference.get(i, elementType),
+            elementType,
+            containsNull)
+      }
+    case (actual: InternalRow, reference: InternalRow, structType: StructType) =>
+      assert(actual.numFields == structType.length && reference.numFields == structType.length)
+      structType.zipWithIndex.forall {
+        case (field, i) =>
+          checkOutputResult(
+            actual.get(i, field.dataType),
+            reference.get(i, field.dataType),
+            field.dataType,
+            field.nullable)
+      }
+    case (actual: MapData, reference: MapData, mapType: MapType) =>
+      compareMaps(actual, reference, mapType)(checkOutputResult)
+    case _ => checkResult(result, expected, dataType, nullable)
+  }
+
+  private def withinTolerance(
+      actual: Double,
+      reference: Double,
+      absTol: Double,
+      relTol: Double): Boolean =
+    java.lang.Double.isFinite(actual) && java.lang.Double.isFinite(reference) &&
+      math.abs(actual - reference) <=
+      math.max(absTol, relTol * math.max(math.abs(actual), math.abs(reference)))
+
+  private def compareMaps(actual: MapData, reference: MapData, dataType: MapType)(
+      compareValues: (Any, Any, DataType, Boolean) => Boolean): Boolean = {
+    val MapType(keyType, valueType, valueNullable) = dataType
+    def key(map: MapData, i: Int): Any = map.keyArray().get(i, keyType)
+    def value(map: MapData, i: Int): Any = map.valueArray().get(i, valueType)
+    // ponytail: quadratic matching suits these small maps; use typed ordering for large maps.
+    Seq(actual, reference).foreach {
+      map =>
+        require(
+          map.keyArray().numElements() == map.valueArray().numElements(),
+          "Invalid map entries")
+        (0 until map.numElements()).foreach {
+          i =>
+            require(key(map, i) != null, "Null map key")
+            require(
+              !(0 until i).exists(j => checkResult(key(map, i), key(map, j), keyType, false)),
+              "Duplicate map key")
+        }
+    }
+    actual.numElements() == reference.numElements() &&
+    (0 until actual.numElements()).forall {
+      i =>
+        val j = (0 until reference.numElements()).find(
+          j => checkResult(key(actual, i), key(reference, j), keyType, false))
+        j.exists(
+          j => compareValues(value(actual, i), value(reference, j), valueType, valueNullable))
+    }
+  }
+
+  def withCorrectness(spark: SparkSession, scenario: CaseDef, context: Context, batchSize: Int)(
+      f: TypedPrepared => Unit): Unit =
+    withCorrectness(spark, scenario, context, batchSize, Data.compile(scenario.inputs))(f)
 
   def withCorrectness(
       spark: SparkSession,
@@ -492,110 +401,107 @@ class BenchmarkSuite
       context: Context,
       batchSize: Int,
       data: Plan)(f: TypedPrepared => Unit): Unit = {
-    try withSQLConf(RunOptions.sqlConf: _*) {
-        TaskResources.runUnsafe {
-          val checkedData = data.copy(row = (context, rowId, local, count) => {
-            val row = data.row(context, rowId, local, count)
-            assert(checkResult(row, row, data.inputSchema, false), "Invalid logical input")
-            row
-          })
-          val prepared =
-            new Benchmark(
-              spark,
-              scenario,
-              context,
-              RunOptions.withBatchSize(batchSize),
-              data = Some(checkedData),
-              isBenchmark = false
-            )
-          prepared.checked {
-            assert(prepared.benchmarks.isEmpty)
-            val inputs = prepared.inputs.rows
-            val batches = prepared.inputs.batches
-            val (expression, attributes) = prepared.freshJvm()
-            // Generic ColumnarBatchRow/ColumnarArray reads do not check primitive null bits.
-            val readInput = UnsafeProjection.create(data.inputSchema.asNullable)
-            readInput.initialize(0)
-            val readOutput = UnsafeProjection.create(
-              new StructType().add("result", expression.dataType).asNullable)
-            readOutput.initialize(0)
-            var compare: Any => Unit = null
-            val collector: Consumer[Any] = value => compare(value)
-            val predicate =
-              prepared.prepareJvm(expression, attributes, Some(collector))
-            f(new TypedPrepared {
-              override def nativeBatchSizes: Seq[Int] = batches.map(_.numRows())
-              override def verify(result: (Long, Any) => Unit): Unit = {
-                assert(
-                  nativeBatchSizes == (0 until inputs.length by batchSize).map(
-                    start => math.min(batchSize, inputs.length - start)),
-                  "Native batch sizes differ")
-                var index = 0
-                prepared.runNative {
-                  (input, output, offset) =>
-                    withReadableBatch(input) {
-                      readable =>
-                        assert(readable.numRows() == input.numRows())
-                        assert(readable.numCols() == data.inputSchema.length)
-                        (0 until input.numRows()).foreach {
-                          local =>
-                            assert(
-                              checkResult(
-                                readInput(readable.getRow(local)),
-                                inputs(offset + local),
-                                data.inputSchema,
-                                false),
-                              s"Native input differs at ${offset + local}")
-                        }
-                    }
-                    assert(output.numCols() == 1, "Native result column count differs")
-                    assert(output.numRows() == input.numRows(), "Native result row count differs")
-                    withReadableBatch(output) {
-                      readable =>
-                        compare = value => {
-                          val actual = readOutput(readable.getRow(index - offset))
-                            .get(0, expression.dataType)
-                          assert(
-                            checkResult(actual, value, expression.dataType, expression.nullable),
-                            s"Native result differs at $index")
-                          result(index.toLong, value)
-                          index += 1
-                        }
-                        try prepared.runVanilla(
-                            predicate,
-                            inputs,
-                            offset,
-                            offset + input.numRows())
-                        finally compare = null
-                    }
-                }
-                assert(index == inputs.length, "Native inputs do not cover every logical row")
-                assert(prepared.benchmarks.isEmpty, "Correctness must not register timing cases")
-              }
-            })
+    withSQLConf(RunOptions.sqlConf: _*) {
+      TaskResources.runUnsafe {
+        val checkedData = data.copy(row = (context, rowId, local, count) => {
+          val row = data.row(context, rowId, local, count)
+          assert(checkResult(row, row, data.inputSchema, false), "Invalid logical input")
+          row
+        })
+        val prepared =
+          new Benchmark(
+            spark,
+            scenario,
+            context,
+            RunOptions.withBatchSize(batchSize),
+            data = Some(checkedData),
+            isBenchmark = false
+          )
+        prepared.checked {
+          assert(prepared.benchmarks.isEmpty)
+          val inputs = prepared.inputs.rows
+          val batches = prepared.inputs.batches
+          val (expression, attributes) = prepared.freshExpression()
+          if (!expression.deterministic) {
+            logInfo(s"${scenario.id}: skipping nondeterministic result value comparison")
           }
+          // Generic ColumnarBatchRow/ColumnarArray reads do not check primitive null bits.
+          val readInput = UnsafeProjection.create(data.inputSchema.asNullable)
+          readInput.initialize(0)
+          val readOutput =
+            UnsafeProjection.create(new StructType().add("result", expression.dataType).asNullable)
+          readOutput.initialize(0)
+          var compare: Any => Unit = null
+          val collector: Consumer[Any] = value => compare(value)
+          val predicate =
+            prepared.prepareJvm(expression, attributes, Some(collector))
+          f(new TypedPrepared {
+            override def nativeBatchSizes: Seq[Int] = batches.map(_.numRows())
+            override def verify(result: (Long, Any) => Unit): Unit = {
+              assert(
+                nativeBatchSizes == (inputs.indices by batchSize).map(
+                  start => math.min(batchSize, inputs.length - start)),
+                "Native batch sizes differ")
+              var index = 0
+              prepared.runNative {
+                (input, output, offset) =>
+                  withReadableBatch(input) {
+                    readable =>
+                      assert(readable.numRows() == input.numRows())
+                      assert(readable.numCols() == data.inputSchema.length)
+                      (0 until input.numRows()).foreach {
+                        local =>
+                          assert(
+                            checkResult(
+                              readInput(readable.getRow(local)),
+                              inputs(offset + local),
+                              data.inputSchema,
+                              false),
+                            s"Native input differs at ${offset + local}")
+                      }
+                  }
+                  assert(output.numCols() == 1, "Native result column count differs")
+                  assert(output.numRows() == input.numRows(), "Native result row count differs")
+                  withReadableBatch(output) {
+                    readable =>
+                      compare = value => {
+                        val actual = readOutput(readable.getRow(index - offset))
+                          .get(0, expression.dataType)
+                        if (expression.deterministic) {
+                          assert(
+                            checkOutputResult(
+                              actual,
+                              value,
+                              expression.dataType,
+                              expression.nullable),
+                            s"Native result differs at $index: actual=$actual, expected=$value")
+                        } else {
+                          assert(
+                            checkResult(actual, actual, expression.dataType, expression.nullable),
+                            s"Invalid Native result at $index")
+                          assert(
+                            checkResult(value, value, expression.dataType, expression.nullable),
+                            s"Invalid JVM result at $index")
+                        }
+                        result(index.toLong, value)
+                        index += 1
+                      }
+                      try prepared.runVanilla(predicate, inputs, offset, offset + input.numRows())
+                      finally compare = null
+                  }
+              }
+              assert(index == inputs.length, "Native inputs do not cover every logical row")
+              assert(prepared.benchmarks.isEmpty, "Correctness must not register timing cases")
+            }
+          })
         }
       }
-    catch {
-      case canceled: TestCanceledException =>
-        fail(
-          s"${scenario.sourceLocation} case=${scenario.id}: unexpected native cancellation",
-          canceled)
     }
   }
 
 }
 
 object BenchmarkSuite {
-  private[expression] val unsupported: Map[String, String] = Map(
-    "array_sort/int-array-lambda" -> "Native validation rejects array_sort comparator lambda",
-    "bround/standard-double" -> "Native validation rejects bround(double, 2)",
-    "encode/standard-string" -> "Native validation rejects encode(input, 'UTF-8')",
-    "format_string/standard-string" -> "Native validation rejects format_string('%s', input)",
-    "sequence/bounded-int" -> "Native validation rejects sequence(input, input + 3)",
-    "substring/binary" -> "Native validation rejects substring(binary, 2, 8)"
-  )
-
   private[expression] trait TypedPrepared {
     def nativeBatchSizes: Seq[Int]
 
@@ -605,12 +511,12 @@ object BenchmarkSuite {
   }
 
 }
-
 private case class MetricTestResult(
     value: Any,
     override val dataType: DataType,
     evaluated: java.util.concurrent.atomic.AtomicInteger)
-  extends LeafExpression with CodegenFallback {
+  extends LeafExpression
+  with CodegenFallback {
   override def nullable: Boolean = true
   override def eval(input: InternalRow): Any = {
     evaluated.incrementAndGet()

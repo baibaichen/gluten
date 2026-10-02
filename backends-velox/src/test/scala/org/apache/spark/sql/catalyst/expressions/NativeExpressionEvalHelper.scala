@@ -17,7 +17,7 @@
 package org.apache.spark.sql.catalyst.expressions
 
 import org.apache.gluten.backendsapi.BackendsApiManager
-import org.apache.gluten.columnarbatch.ColumnarBatches
+import org.apache.gluten.columnarbatch.{ColumnarBatches, ColumnarBatchJniWrapper}
 import org.apache.gluten.exception.GlutenNotSupportException
 import org.apache.gluten.expression.ConverterUtils
 import org.apache.gluten.memory.arrow.alloc.ArrowBufferAllocators
@@ -32,6 +32,7 @@ import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.catalyst.CatalystTypeConverters
 import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.apache.spark.task.TaskResources
+import org.apache.spark.util.Utils
 
 import io.substrait.proto.{ExpressionReference, ExtendedExpression, Type}
 import org.scalatest.Assertions.cancel
@@ -41,7 +42,8 @@ import scala.collection.JavaConverters._
 /** Compile inside the caller's live TaskResources scope, which also owns cleanup. */
 final private[spark] class NativeExpressionEvaluator(
     expressions: Seq[Expression],
-    inputAttributes: Seq[Attribute]) extends AutoCloseable {
+    inputAttributes: Seq[Attribute])
+  extends AutoCloseable {
   private val numInputColumns = inputAttributes.size
   private val (backendName, jni, handle) = {
     require(expressions.size == 1, "Native preparation supports exactly one output expression")
@@ -69,11 +71,13 @@ final private[spark] class NativeExpressionEvaluator(
       } catch {
         case unsupported: GlutenNotSupportException => cancel(unsupported.getMessage, unsupported)
       }
-    val inputType = TypeBuilder.makeStruct(
-      false,
-      ConverterUtils.collectAttributeTypeNodes(attributes.asJava))
+    val inputType =
+      TypeBuilder.makeStruct(
+        false,
+        ConverterUtils.collectAttributeTypeNodes(attributes.asJava))
     if (
-      !BackendsApiManager.getValidatorApiInstance
+      !BackendsApiManager
+        .getValidatorApiInstance
         .doNativeValidateExpression(context, expressionNode, inputType)
     ) {
       cancel(s"Native validation does not support: ${expression.sql}")
@@ -108,8 +112,23 @@ final private[spark] class NativeExpressionEvaluator(
     require(!closed, "Native expression evaluator is closed")
     require(input.numCols() == numInputColumns, "Input columns and attributes must match")
     ColumnarBatches.checkOffloaded(input)
-    ColumnarBatches.create(
-      jni.evaluate(handle, ColumnarBatches.getNativeHandle(backendName, input)))
+    val inputHandle = ColumnarBatches.getNativeHandle(backendName, input)
+    Utils.tryWithSafeFinally {
+      val outputHandle = jni.evaluate(handle, inputHandle)
+      try {
+        ColumnarBatches.create(outputHandle)
+      } catch {
+        case t: Throwable =>
+          Utils.tryWithSafeFinally {
+            throw t
+          } {
+            ColumnarBatchJniWrapper.close(outputHandle)
+          }
+      }
+    } {
+      // Zero-column lookup owns a fresh handle; nonempty lookup borrows the input's handle.
+      if (input.numCols() == 0) ColumnarBatchJniWrapper.close(inputHandle)
+    }
   }
 
   override def close(): Unit = {
@@ -137,13 +156,19 @@ trait NativeExpressionEvalHelper extends ExpressionEvalHelper {
 
   /** Loads a separate batch handle because loading consumes the native handle it receives. */
   protected def withReadableBatch[T](batch: ColumnarBatch)(f: ColumnarBatch => T): T = {
-    Arm.withResource(ColumnarBatches.select(
-      BackendsApiManager.getBackendName,
-      batch,
-      (0 until batch.numCols()).toArray)) {
-      readable =>
-        ColumnarBatches.load(ArrowBufferAllocators.contextInstance(), readable)
-        f(readable)
+    if (batch.numCols() == 0) {
+      f(batch)
+    } else {
+      Arm.withResource(
+        ColumnarBatches
+          .select(
+            BackendsApiManager.getBackendName,
+            batch,
+            (0 until batch.numCols()).toArray)) {
+        readable =>
+          ColumnarBatches.load(ArrowBufferAllocators.contextInstance(), readable)
+          f(readable)
+      }
     }
   }
 

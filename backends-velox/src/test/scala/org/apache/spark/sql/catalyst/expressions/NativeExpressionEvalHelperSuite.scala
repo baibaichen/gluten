@@ -19,7 +19,8 @@ package org.apache.spark.sql.catalyst.expressions
 import org.apache.gluten.execution.VeloxWholeStageTransformerSuite
 import org.apache.gluten.utils.Arm
 
-import org.apache.spark.sql.types.StringType
+import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.sql.types.{ArrayType, IntegerType, StringType, TimestampType}
 import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
 import org.apache.spark.task.TaskResources
 
@@ -65,10 +66,11 @@ class NativeExpressionEvalHelperSuite
             identity =>
               Seq("value", null, "", "next", null).foreach {
                 expected =>
-                  val output = Arm.withResource(evaluateWithNative(
-                    Literal.create(expected, StringType),
-                    constantInput,
-                    Seq.empty)) {
+                  val output = Arm.withResource(
+                    evaluateWithNative(
+                      Literal.create(expected, StringType),
+                      constantInput,
+                      Seq.empty)) {
                     input =>
                       val first = identity.evaluate(input)
                       first.close()
@@ -95,6 +97,77 @@ class NativeExpressionEvalHelperSuite
                   }
               }
           }
+      }
+    }
+  }
+
+  test("native evaluation returns null for division by zero with ANSI disabled") {
+    withSQLConf(SQLConf.ANSI_ENABLED.key -> "false") {
+      TaskResources.runUnsafe {
+        Arm.withResource(new ColumnarBatch(Array.empty[ColumnVector], 1)) {
+          constantInput =>
+            Arm.withResource(evaluateWithNative(Literal(1), constantInput, Seq.empty)) {
+              input =>
+                val attribute = AttributeReference("value", IntegerType, nullable = false)()
+                checkEvaluationWithNative(
+                  Remainder(attribute, Literal(0)),
+                  Seq(null),
+                  input,
+                  Seq(attribute))
+            }
+        }
+      }
+    }
+  }
+
+  Seq("UTC" -> "1970-01-01 00:00:00", "Asia/Tokyo" -> "1970-01-01 09:00:00").foreach {
+    case (zone, expected) =>
+      test(s"native evaluation honors the session time zone: $zone") {
+        withSQLConf(SQLConf.SESSION_LOCAL_TIMEZONE.key -> zone) {
+          TaskResources.runUnsafe {
+            Arm.withResource(new ColumnarBatch(Array.empty[ColumnVector], 1)) {
+              constantInput =>
+                Arm.withResource(
+                  evaluateWithNative(Literal(0L, TimestampType), constantInput, Seq.empty)) {
+                  input =>
+                    val attribute = AttributeReference("value", TimestampType, nullable = false)()
+                    val expression =
+                      DateFormatClass(attribute, Literal("yyyy-MM-dd HH:mm:ss"), Some(zone))
+                    checkEvaluationWithNative(expression, Seq(expected), input, Seq(attribute))
+                }
+            }
+          }
+        }
+      }
+  }
+
+  test("compares native strings, nulls and nested values without consuming the input") {
+    TaskResources.runUnsafe {
+      Arm.withResource(new ColumnarBatch(Array.empty[ColumnVector], 3)) {
+        input =>
+          val values = Seq(
+            ("spark", StringType),
+            (null, StringType),
+            (Seq("spark", null), ArrayType(StringType)))
+          values.foreach {
+            case (value, dataType) =>
+              val expression = Literal.create(value, dataType)
+              checkEvaluationWithNative(expression, Seq.fill(3)(value), input, Seq.empty)
+              Arm.withResource(prepareNativeExpression(Seq(expression), Seq.empty)) {
+                prepared =>
+                  Arm.withResource(prepared.evaluate(input)) {
+                    output =>
+                      val attribute = AttributeReference("value", dataType)()
+                      checkEvaluationWithNative(
+                        BoundReference(0, dataType, nullable = true),
+                        Seq.fill(3)(value),
+                        output,
+                        Seq(attribute))
+                      assert(output.numRows() == 3)
+                  }
+              }
+          }
+          assert(input.numRows() == 3)
       }
     }
   }

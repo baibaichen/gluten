@@ -47,19 +47,22 @@ object RegisteredExpressionBenchmark extends BenchmarkBase {
     }
   }
 
-  private[benchmark] def run(
-      cases: Seq[Catalog.CaseDef],
-      options: RunOptions): Unit = {
+  private[benchmark] def run(cases: Seq[Catalog.CaseDef], options: RunOptions): Unit = {
     if (cases.isEmpty) return
     val input = options.input
     val context = Data.Context(input.rows, input.keyCardinality, input.seed)
     BenchmarkBlackhole.requireEnabled(true)
     val profiler = options.profiler.map(new Profiler(_))
-    try Utils.tryWithSafeFinally {
-        val conf = MockVeloxBackend.mockPluginContext().conf()
-          .setMaster("local[1]").setAppName("ExpressionBenchmark")
+    try
+      Utils.tryWithSafeFinally {
+        val conf = MockVeloxBackend
+          .mockPluginContext()
+          .conf()
+          .setMaster("local[1]")
+          .setAppName("ExpressionBenchmark")
           .set("spark.plugins", "org.apache.gluten.GlutenPlugin")
-          .set("spark.memory.offHeap.enabled", "true").set("spark.memory.offHeap.size", "8g")
+          .set("spark.memory.offHeap.enabled", "true")
+          .set("spark.memory.offHeap.size", "8g")
           .set("spark.ui.enabled", "false")
         RunOptions.sqlConf.foreach { case (key, value) => conf.set(key, value) }
         val spark = SparkSession.builder().config(conf).getOrCreate()
@@ -87,14 +90,10 @@ object RegisteredExpressionBenchmark extends BenchmarkBase {
       profiler: Option[Profiler]): Unit =
     withSQLConf(RunOptions.sqlConf: _*) {
       TaskResources.runUnsafe {
-        val benchmark = new Benchmark(
-          spark,
-          scenario,
-          context,
-          options,
-          output,
-          profiler = profiler)
-        try benchmark.checked {
+        val benchmark =
+          new Benchmark(spark, scenario, context, options, output, profiler = profiler)
+        try
+          benchmark.checked {
             System.err.println(s"${scenario.id}: ${scenario.description}")
             benchmark.registerCases()
             runBenchmark(scenario.id)(benchmark.run())

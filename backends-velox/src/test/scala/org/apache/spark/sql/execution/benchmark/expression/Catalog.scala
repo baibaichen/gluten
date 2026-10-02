@@ -54,16 +54,17 @@ private[benchmark] object Catalog {
       description: String,
       sourceLocation: SourceLocation)
 
-  private val markdown = Parser.builder(
-    new MutableDataSet()
-      .set(
-        Parser.EXTENSIONS,
-        Collections.singletonList[com.vladsch.flexmark.util.misc.Extension](
-          TablesExtension.create()))
-      .set(TablesExtension.COLUMN_SPANS, java.lang.Boolean.FALSE)
-      .set(TablesExtension.APPEND_MISSING_COLUMNS, java.lang.Boolean.FALSE)
-      .set(TablesExtension.DISCARD_EXTRA_COLUMNS, java.lang.Boolean.FALSE)
-      .set(TablesExtension.HEADER_SEPARATOR_COLUMN_MATCH, java.lang.Boolean.TRUE))
+  private val markdown = Parser
+    .builder(
+      new MutableDataSet()
+        .set(
+          Parser.EXTENSIONS,
+          Collections.singletonList[com.vladsch.flexmark.util.misc.Extension](
+            TablesExtension.create()))
+        .set(TablesExtension.COLUMN_SPANS, java.lang.Boolean.FALSE)
+        .set(TablesExtension.APPEND_MISSING_COLUMNS, java.lang.Boolean.FALSE)
+        .set(TablesExtension.DISCARD_EXTRA_COLUMNS, java.lang.Boolean.FALSE)
+        .set(TablesExtension.HEADER_SEPARATOR_COLUMN_MATCH, java.lang.Boolean.TRUE))
     .build()
 
   private def fail(location: SourceLocation, caseId: String, cause: Throwable): Nothing =
@@ -134,12 +135,11 @@ private[benchmark] object Catalog {
         id,
         "Expected a nonempty single-line code span")
       // Keep UTF-16 source offsets while removing only the table-layer escape before a pipe.
-      val offsets = raw.indices.filterNot(i => raw(i) == '\\' && raw.lift(i + 1).contains('|'))
-        .toVector
+      val offsets =
+        raw.indices.filterNot(i => raw(i) == '\\' && raw.lift(i + 1).contains('|')).toVector
       (
         offsets.map(raw.charAt).mkString,
-        location(span).copy(column =
-          location(span).column + span.getOpeningMarker.length()),
+        location(span).copy(column = location(span).column + span.getOpeningMarker.length()),
         offsets :+ raw.length)
     }
     val rows = table.getDescendants.asScala.collect {
@@ -171,12 +171,13 @@ private[benchmark] object Catalog {
           check(seen.add(localId), cells(0), id, "Duplicate case ID")
           val (input, inputLocation, inputOffsets) = code(cells(1), id)
           val (sql, _, _) = code(cells(2), id)
-          Some(CaseDef(
-            id,
-            parseInputs(input, inputLocation, id, inputOffsets),
-            sql,
-            plain(cells(3), id),
-            location(cells(0))))
+          Some(
+            CaseDef(
+              id,
+              parseInputs(input, inputLocation, id, inputOffsets),
+              sql,
+              plain(cells(3), id),
+              location(cells(0))))
         }
     } match {
       case cases if cases.nonEmpty => cases
@@ -185,7 +186,8 @@ private[benchmark] object Catalog {
   }
 
   private object InputsParser extends JavaTokenParsers {
-    private val json = new ObjectMapper().readerFor(classOf[String])
+    private val json = new ObjectMapper()
+      .readerFor(classOf[String])
       .`with`(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
     private def identifier: Parser[String] = "[A-Za-z_][A-Za-z0-9_]*".r
     private def registry: Parser[String] = rep1sep(identifier, ".") ^^ (_.mkString("."))
@@ -203,7 +205,8 @@ private[benchmark] object Catalog {
       names ~ ("=" ~> registry) ~ ("(" ~> repsep(argument, ",") <~ ")") ^^ {
         case columns ~ name ~ args => Binding(columns, name, args)
       }
-    def bindings: Parser[Seq[Binding]] = rep1sep(binding, ";")
+    def bindings: Parser[Seq[Binding]] =
+      rep1sep(binding, ";") | ("none" ^^^ Seq.empty[Binding])
   }
 
   def parseInputs(text: String, location: SourceLocation, caseId: String): Seq[Binding] =
@@ -253,8 +256,9 @@ private[benchmark] object Catalog {
       loader: ClassLoader = getClass.getClassLoader,
       root: String = "expression-benchmark/cases"): Seq[CaseDef] = {
     def read(file: String): String = checked(SourceLocation(file, 1, 1), "index") {
-      Arm.withResource(Option(loader.getResourceAsStream(file))
-        .getOrElse(throw new FileNotFoundException(file))) {
+      Arm.withResource(
+        Option(loader.getResourceAsStream(file))
+          .getOrElse(throw new FileNotFoundException(file))) {
         input =>
           // A decoder reports malformed UTF-8 rather than replacing bytes in SQL or IDs.
           UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(IOUtils.toByteArray(input))).toString

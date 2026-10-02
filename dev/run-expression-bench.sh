@@ -18,8 +18,9 @@ set -euo pipefail
 
 usage() {
   printf '%s\n' \
-    'Usage: dev/run-expression-bench.sh functionsCSV [options] | --cases function/case,glob [options]' \
-    '       dev/run-expression-bench.sh --list [functionsCSV] | --config file [options]' \
+    'Usage: dev/run-expression-bench.sh [--skip-build] functionsCSV [options]' \
+    '       dev/run-expression-bench.sh [--skip-build] --cases function/case,glob [options]' \
+    '       dev/run-expression-bench.sh [--skip-build] --list [functionsCSV] | --config file [options]' \
     'Options: --rows --batch-size --seed --key-cardinality' \
     '         --warmup-seconds N --measurement-seconds N' \
     '         --async-profiler dir --profile-event cpu|alloc --profile-output dir' \
@@ -27,8 +28,16 @@ usage() {
     'Always measures JVM first, then Native.' \
     'Requires JAVA_HOME (Java 17 HotSpot) and native libraries built in this checkout.' \
     'Compiles Spark 4.1 / Scala 2.13 sources before each run; does not rebuild native libraries.' \
+    '--skip-build skips Maven compilation and classpath export; requires existing build outputs.' \
+    'With --skip-build, the caller must ensure those outputs match the current sources.' \
     'Example: dev/run-expression-bench.sh --cases rtrim/l13-half-even --rows 4000000 --batch-size 10240'
 }
+
+SKIP_BUILD=false
+if [[ "${1:-}" == "--skip-build" ]]; then
+  SKIP_BUILD=true
+  shift
+fi
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   usage
@@ -54,18 +63,36 @@ TARGET="$GLUTEN_HOME/backends-velox/target"
 CLASSPATH_FILE="$TARGET/expression-benchmark.classpath"
 JVM_ARGS_FILE="$TARGET/expression-benchmark.jvmargs"
 
-mkdir -p "$TARGET"
+if [[ "$SKIP_BUILD" == false ]]; then
+  mkdir -p "$TARGET"
+  # Install this reactor's dependencies rather than using older local SNAPSHOT jars.
+  ./build/mvn -P"$PROFILES" -pl backends-velox -am install -DskipTests
+  ./build/mvn -P"$PROFILES" -pl gluten-arrow,backends-velox dependency:build-classpath help:evaluate \
+    -DincludeScope=test -Dmdep.outputFile="$CLASSPATH_FILE" \
+    -Dexpression=extraJavaTestArgs -Doutput="$JVM_ARGS_FILE"
+fi
 
-# Install this reactor's dependencies rather than using older local SNAPSHOT jars.
-./build/mvn -P"$PROFILES" -pl backends-velox -am install -DskipTests
-./build/mvn -P"$PROFILES" -pl backends-velox dependency:build-classpath help:evaluate \
-  -DincludeScope=test -Dmdep.outputFile="$CLASSPATH_FILE" \
-  -Dexpression=extraJavaTestArgs -Doutput="$JVM_ARGS_FILE"
-test -s "$CLASSPATH_FILE"
-test -s "$JVM_ARGS_FILE"
+for file in "$CLASSPATH_FILE" "$JVM_ARGS_FILE" "$TARGET/scala-2.13/test-classes/${MAIN//.//}.class"; do
+  if [[ ! -s "$file" ]]; then
+    printf 'Missing benchmark artifact: %s. Run without --skip-build to prepare it.\n' "$file" >&2
+    exit 1
+  fi
+done
+if [[ ! -d "$TARGET/scala-2.13/classes" ]]; then
+  printf 'Missing benchmark classes directory. Run without --skip-build to prepare it.\n' >&2
+  exit 1
+fi
+
+IFS=: read -r -a DEPENDENCIES <<< "$(< "$CLASSPATH_FILE")"
+for entry in "${DEPENDENCIES[@]}"; do
+  if [[ ! -e "$entry" ]]; then
+    printf 'Missing benchmark classpath entry: %s. Run without --skip-build to prepare it.\n' "$entry" >&2
+    exit 1
+  fi
+done
 
 exec "$JAVA_HOME/bin/java" @"$JVM_ARGS_FILE" \
-  -Dspark.testing=true -Xms4g -Xmx4g \
+  -Dspark.testing=true -Xmx4g \
   "-Dgluten.expressionBenchmark.cwd=$CALLER_CWD" \
   -XX:+UnlockExperimentalVMOptions \
   '-XX:CompileCommand=blackhole,org.apache.spark.sql.execution.benchmark.expression.BenchmarkBlackhole::consume' \

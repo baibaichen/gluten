@@ -20,17 +20,19 @@ import org.apache.gluten.columnarbatch.ColumnarBatches
 import org.apache.gluten.execution.RowToVeloxColumnarExec
 
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{UnsafeProjection, UnsafeRow}
-import org.apache.spark.sql.catalyst.util.GenericArrayData
+import org.apache.spark.sql.catalyst.expressions.{UnsafeProjection, UnsafeRow, XXH64}
+import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, GenericArrayData}
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.vectorized.ColumnarBatch
+import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
 import org.apache.spark.task.TaskResources
 import org.apache.spark.unsafe.types.UTF8String
 
 import org.apache.commons.lang3.StringUtils
 
+import java.net.URLEncoder
 import java.nio.charset.StandardCharsets.UTF_8
-import java.util.Locale
+import java.time.LocalDate
+import java.util.{Base64, Locale}
 
 /**
  * Compile only the requested projections; no calibration rows or sketch fixtures are initialized.
@@ -68,11 +70,16 @@ private[benchmark] object Data {
 
   def materialize(plan: Plan, context: Context, batchSize: Int): Inputs = {
     val rows = materializeRows(plan, context, batchSize)
-    val batches = RowToVeloxColumnarExec.toColumnarBatchIterator(
-      rows.iterator,
-      plan.inputSchema,
-      batchSize,
-      Long.MaxValue).zipWithIndex.map {
+    val inputBatches = if (plan.inputSchema.isEmpty) {
+      (0 until rows.length by batchSize).iterator.map {
+        start =>
+          new ColumnarBatch(Array.empty[ColumnVector], math.min(batchSize, rows.length - start))
+      }
+    } else {
+      RowToVeloxColumnarExec
+        .toColumnarBatchIterator(rows.iterator, plan.inputSchema, batchSize, Long.MaxValue)
+    }
+    val batches = inputBatches.zipWithIndex.map {
       case (batch, index) =>
         // The iterator recycles its previous payload when advanced.
         ColumnarBatches.retain(batch)
@@ -93,18 +100,43 @@ private[benchmark] object Data {
     StructField("intArray", ArrayType(IntegerType, containsNull = false), nullable = false),
     StructField(
       "struct",
-      StructType(Seq(
-        StructField("f1", LongType, nullable = false),
-        StructField("f2", StringType, nullable = false))),
+      StructType(
+        Seq(
+          StructField("f1", LongType, nullable = false),
+          StructField("f2", StringType, nullable = false))),
       nullable = false),
     StructField("boundedInt", IntegerType, nullable = false),
     StructField("stringArray", ArrayType(StringType, containsNull = false), nullable = false),
-    StructField("timestampString", StringType, nullable = false)
+    StructField("timestampString", StringType, nullable = false),
+    StructField("fractionalDouble", DoubleType, nullable = false),
+    StructField("positiveDouble", DoubleType, nullable = false),
+    StructField("text", StringType, nullable = false),
+    StructField("base64String", StringType, nullable = false),
+    StructField("hexString", StringType, nullable = false),
+    StructField("jsonArrayString", StringType, nullable = false),
+    StructField("urlString", StringType, nullable = false),
+    StructField("dateString", StringType, nullable = false),
+    StructField(
+      "intMap",
+      MapType(StringType, IntegerType, valueContainsNull = true),
+      nullable = false),
+    StructField(
+      "mapEntries",
+      ArrayType(
+        StructType(
+          Seq(
+            StructField("key", StringType, nullable = false),
+            StructField("value", IntegerType, nullable = true))),
+        containsNull = false),
+      nullable = false
+    )
   ).map(f => s"standard.${f.name}" -> f).toMap
   private val patterns = Set("none", "first", "cluster", "half-even", "last", "penultimate", "all")
   private val trimGenerators = Set("rtrimPattern", "ltrimPattern", "trimPattern")
+  private val hashedGenerators = Set("hashedLong", "hashedString", "hashedBinary")
   private val special =
-    trimGenerators ++ Set("rtrimBoundary", "ltrimBoundary", "rtrimCustom", "ltrimCustom")
+    trimGenerators ++ hashedGenerators ++
+      Set("rtrimBoundary", "ltrimBoundary", "rtrimCustom", "ltrimCustom", "nullableBoundedInt")
   private val strings = Set("standard.string", "standard.stringArray")
 
   private def argument(binding: Binding, name: String): Option[Argument] =
@@ -129,7 +161,6 @@ private[benchmark] object Data {
   }
 
   def validate(bindings: Seq[Binding]): Unit = {
-    require(bindings.nonEmpty, "Inputs must not be empty")
     val names = scala.collection.mutable.HashSet.empty[String]
     bindings.foreach {
       binding =>
@@ -149,6 +180,12 @@ private[benchmark] object Data {
           Set("length")
         } else if (trimGenerators.contains(binding.generator)) {
           Set("length", "pattern", "nullPercent", "utf8")
+        } else if (binding.generator == "hashedLong") {
+          Set("column")
+        } else if (binding.generator == "hashedString" || binding.generator == "hashedBinary") {
+          Set("column", "length", "prefix", "nullPercent")
+        } else if (binding.generator == "nullableBoundedInt") {
+          Set("nullPercent")
         } else {
           Set.empty[String]
         }
@@ -157,14 +194,24 @@ private[benchmark] object Data {
             require(args.add(name), s"Duplicate argument: $name")
             require(allowed.contains(name), s"Unknown argument: $name")
         }
+        if (args.contains("nullPercent")) {
+          val nulls = integer(binding, "nullPercent")
+          require(nulls >= 0 && nulls <= 100, "nullPercent must be between 0 and 100")
+        }
         if (strings.contains(binding.generator)) {
           require(integer(binding, "length", Some(10)) >= 0, "length must not be negative")
         } else if (trimGenerators.contains(binding.generator)) {
           require(integer(binding, "length") >= 2, "Trim length must be at least two bytes")
           pattern(binding)
-          val nulls = integer(binding, "nullPercent", Some(0))
-          require(nulls >= 0 && nulls <= 100, "nullPercent must be between 0 and 100")
           utf8(binding)
+        } else if (hashedGenerators.contains(binding.generator)) {
+          require(integer(binding, "column") >= 0, "column must be non-negative")
+          if (binding.generator == "hashedString" || binding.generator == "hashedBinary") {
+            val length = integer(binding, "length")
+            val prefix = integer(binding, "prefix", Some(0))
+            require(length > 0, "length must be positive")
+            require(prefix >= 0 && prefix < length, "prefix must be between 0 and length - 1")
+          }
         }
     }
   }
@@ -181,6 +228,56 @@ private[benchmark] object Data {
               (context, rowId, _, _) => InternalRow(value(context, rowId)))
           case None =>
             val input: (Context, Long, Int, Int) => InternalRow = binding.generator match {
+              case "nullableBoundedInt" =>
+                val nulls = integer(binding, "nullPercent", Some(0))
+                (c, i, _, _) => {
+                  val index = i % c.keys
+                  if (nulls != 0 && Math.floorMod(XXH64.hashLong(index, c.seed), 100L) < nulls) {
+                    InternalRow.fromSeq(Seq(null))
+                  } else {
+                    InternalRow((index % 20).toInt)
+                  }
+                }
+              case "hashedLong" =>
+                val column = integer(binding, "column")
+                (c, i, _, _) => InternalRow(hashedKey(c, i, column))
+              case "hashedString" =>
+                val column = integer(binding, "column")
+                val prefix = "x" * integer(binding, "prefix", Some(0))
+                val width = integer(binding, "length") - prefix.length
+                val nulls = integer(binding, "nullPercent", Some(0))
+                (c, i, _, _) => {
+                  if (hashedNull(c, i, column, nulls)) {
+                    InternalRow.fromSeq(Seq(null))
+                  } else {
+                    val key =
+                      StringUtils.leftPad(
+                        java.lang.Long.toHexString(hashedKey(c, i, column)),
+                        16,
+                        '0')
+                    val value = prefix + StringUtils.rightPad(key, width, key).take(width)
+                    InternalRow(UTF8String.fromString(value))
+                  }
+                }
+              case "hashedBinary" =>
+                val column = integer(binding, "column")
+                val length = integer(binding, "length")
+                val prefix = integer(binding, "prefix", Some(0))
+                val nulls = integer(binding, "nullPercent", Some(0))
+                (c, i, _, _) => {
+                  if (hashedNull(c, i, column, nulls)) {
+                    InternalRow.fromSeq(Seq(null))
+                  } else {
+                    val key = hashedKey(c, i, column)
+                    val value = Array.fill[Byte](length)('x'.toByte)
+                    var position = prefix
+                    while (position < length) {
+                      value(position) = (key >>> (8 * (7 - (position - prefix) % 8))).toByte
+                      position += 1
+                    }
+                    InternalRow(value)
+                  }
+                }
               case "rtrimPattern" | "ltrimPattern" | "trimPattern" =>
                 val size = integer(binding, "length")
                 val selected = pattern(binding)
@@ -204,7 +301,13 @@ private[benchmark] object Data {
               case "rtrimBoundary" | "ltrimBoundary" => (c, i, _, _) => trimBoundary(c.seed, i)
               case "rtrimCustom" | "ltrimCustom" => (c, i, _, _) => trimCustom(c.seed, i)
             }
-            Plan(StructType(binding.names.map(StructField(_, StringType, nullable = true))), input)
+            val dataType = binding.generator match {
+              case "hashedLong" => LongType
+              case "hashedBinary" => BinaryType
+              case "nullableBoundedInt" => IntegerType
+              case _ => StringType
+            }
+            Plan(StructType(binding.names.map(StructField(_, dataType, nullable = true))), input)
         }
     }
     val generate: (Context, Long, Int, Int) => InternalRow = if (projections.size == 1) {
@@ -230,8 +333,19 @@ private[benchmark] object Data {
     )
   }
 
+  private def hashedKey(context: Context, rowId: Long, column: Int): Long =
+    XXH64.hashLong(rowId % context.keys, context.seed + column.toLong)
+
+  private def hashedNull(context: Context, rowId: Long, column: Int, percent: Int): Boolean =
+    percent == 100 || (percent != 0 &&
+      Math.floorMod(
+        XXH64.hashLong(rowId % context.keys, context.seed ^ (column.toLong + 0x5bd1e995L)),
+        100L) < percent)
+
   private def pad(value: Long, length: Int): String =
     StringUtils.leftPad(value.toString, length, '0')
+
+  private val timestampString = UTF8String.fromString("2020-01-02 03:04:05")
 
   private def standard(name: String, length: Int): (Context, Long) => Any = {
     // Select the generator once, not once per row; every binding sees the same context and row ID.
@@ -243,21 +357,63 @@ private[benchmark] object Data {
       case "standard.timestamp" => (c, i) => Math.multiplyExact(i % c.keys, 1000000L)
       case "standard.date" => (c, i) => Math.toIntExact(Math.addExact(18262L, i % c.keys))
       case "standard.binary" => (c, i) => pad(i % c.keys, 10).getBytes(UTF_8)
-      case "standard.intArray" => (c, i) =>
-          new GenericArrayData(Array(
-            (i % c.keys).toInt,
-            ((i + 1) % c.keys).toInt,
-            ((i + 2) % c.keys).toInt))
-      case "standard.struct" => (c, i) =>
-          InternalRow(i % c.keys, UTF8String.fromString(pad(i % c.keys, 10)))
+      case "standard.intArray" =>
+        (c, i) =>
+          new GenericArrayData(
+            Array((i % c.keys).toInt, ((i + 1) % c.keys).toInt, ((i + 2) % c.keys).toInt))
+      case "standard.struct" =>
+        (c, i) => InternalRow(i % c.keys, UTF8String.fromString(pad(i % c.keys, 10)))
       case "standard.boundedInt" => (c, i) => (i % c.keys % 20).toInt
-      case "standard.stringArray" => (c, i) =>
-          new GenericArrayData(Array(
-            UTF8String.fromString(pad(i % c.keys, length)),
-            UTF8String.fromString("fixed")))
-      case "standard.timestampString" => (_, _) => UTF8String.fromString("2020-01-02 03:04:05")
+      case "standard.stringArray" =>
+        (c, i) =>
+          new GenericArrayData(
+            Array(UTF8String.fromString(pad(i % c.keys, length)), UTF8String.fromString("fixed")))
+      case "standard.timestampString" => (_, _) => timestampString
+      case "standard.fractionalDouble" =>
+        (c, i) => {
+          val key = i % c.keys
+          val value = key.toDouble + 0.125
+          if (key % 2 == 0) value else -value
+        }
+      case "standard.positiveDouble" => (c, i) => (i % c.keys).toDouble + 0.125
+      case "standard.text" =>
+        (c, i) => UTF8String.fromString(s"spark SQL ${i % c.keys} caf${0xe9.toChar}")
+      case "standard.base64String" =>
+        (c, i) =>
+          UTF8String.fromBytes(Base64.getEncoder.encode(pad(i % c.keys, 10).getBytes(UTF_8)))
+      case "standard.hexString" =>
+        (c, i) => UTF8String.fromString(java.lang.Long.toHexString(i % c.keys))
+      case "standard.jsonArrayString" =>
+        (c, i) => {
+          val key = i % c.keys
+          UTF8String.fromString(if (key % 4 == 0) "[]" else s"[$key,${key + 1},null]")
+        }
+      case "standard.urlString" =>
+        (c, i) =>
+          UTF8String.fromString(
+            URLEncoder.encode(s"spark SQL/${i % c.keys} caf${0xe9.toChar}", UTF_8.name()))
+      case "standard.dateString" =>
+        (c, i) => UTF8String.fromString(LocalDate.ofEpochDay(18262L + i % c.keys % 3653L).toString)
+      case "standard.intMap" => (c, i) => intMap(c, i)
+      case "standard.mapEntries" =>
+        (c, i) => {
+          val map = intMap(c, i)
+          new GenericArrayData((0 until map.numElements()).map {
+            entry =>
+              InternalRow(map.keyArray.getUTF8String(entry), map.valueArray.get(entry, IntegerType))
+          }.toArray)
+        }
       case other => throw new IllegalArgumentException(s"Unknown standard projection: $other")
     }
+  }
+
+  private def intMap(context: Context, rowId: Long): ArrayBasedMapData = {
+    val key = rowId % context.keys
+    new ArrayBasedMapData(
+      new GenericArrayData(Array(UTF8String.fromString("a"), UTF8String.fromString("b"))),
+      new GenericArrayData(
+        Array[Any]((key % 20).toInt - 10, if (key % 3 == 0) null else (key % 20).toInt))
+    )
   }
 
   private def trimPattern(
@@ -276,7 +432,10 @@ private[benchmark] object Data {
       else if (pattern == "penultimate" && count > 1 && local == count - 1) count - 2
       else local
     val global = index - local + sourceLocal
-    if (((global % 200) * 73 + 37) % 200 < nullPercent * 2) {
+    if (
+      nullPercent == 100 || (nullPercent != 0 &&
+        ((global % 200) * 73 + 37) % 200 < nullPercent * 2)
+    ) {
       InternalRow.fromSeq(Seq(null))
     } else {
       val trim = pattern match {
@@ -320,19 +479,28 @@ private[benchmark] object Data {
     }
   }
 
-  private val boundaryString = "  " + "x" * 60 + "  "
+  private val emptyString = UTF8String.fromString("")
+  private val boundaryString = UTF8String.fromString("  " + "x" * 60 + "  ")
+  private val customXy = UTF8String.fromString("xy")
+  private val customSpace = UTF8String.fromString(" ")
+  private val customXyValue = UTF8String.fromString("xyvaluexy")
+  private val customSpaceValue = UTF8String.fromString(" value ")
+  private val customValues: Array[(UTF8String, UTF8String)] = Array(
+    (null, customXy),
+    (customSpaceValue, null),
+    (customXyValue, customXy),
+    (customSpaceValue, customSpace),
+    (customXyValue, customXy),
+    (customSpaceValue, customSpace)
+  )
 
   private def trimBoundary(seed: Long, index: Long): InternalRow = {
     val position = Math.floorMod(index + seed, 1000L)
-    InternalRow(UTF8String.fromString(if (position % 101 == 0) "" else boundaryString))
+    InternalRow(if (position % 101 == 0) emptyString else boundaryString)
   }
 
   private def trimCustom(seed: Long, index: Long): InternalRow = {
-    val position = Math.floorMod(index + seed, 6L).toInt
-    val chars = if (position % 2 == 0) "xy" else " "
-    // Matching characters on the opposite side must be preserved.
-    val value = if (position == 0) null else UTF8String.fromString(chars + "value" + chars)
-    val trim = if (position == 1) null else UTF8String.fromString(chars)
+    val (value, trim) = customValues(Math.floorMod(index + seed, customValues.length).toInt)
     InternalRow(value, trim)
   }
 }

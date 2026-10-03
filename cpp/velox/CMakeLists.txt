@@ -158,6 +158,7 @@ set(VELOX_SRCS
     ${VELOX_PROTO_SRCS}
     compute/VeloxBackend.cc
     compute/VeloxRuntime.cc
+    compute/VeloxExpressionEvaluator.cc
     compute/VeloxPlanConverter.cc
     compute/WholeStageResultIterator.cc
     compute/delta/DeltaConnector.cpp

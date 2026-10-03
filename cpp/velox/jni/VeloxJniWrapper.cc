@@ -29,6 +29,7 @@
 #include "JniUdf.h"
 #include "compute/Runtime.h"
 #include "compute/VeloxBackend.h"
+#include "compute/VeloxExpressionEvaluator.h"
 #include "compute/VeloxRuntime.h"
 #include "config/GlutenConfig.h"
 #include "config/VeloxConfig.h"
@@ -41,6 +42,7 @@
 #include "operators/hashjoin/HashTableBuilder.h"
 #include "shuffle/rss/RssPartitionWriter.h"
 #include "substrait/SubstraitToVeloxPlanValidator.h"
+#include "utils/ConfigExtractor.h"
 #include "utils/ObjectStore.h"
 #include "utils/VeloxBatchResizer.h"
 #include "velox/common/base/BloomFilter.h"
@@ -261,6 +263,52 @@ JNIEXPORT jboolean JNICALL Java_org_apache_gluten_vectorized_PlanEvaluatorJniWra
     return false;
   }
   JNI_METHOD_END(false)
+}
+
+JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_VeloxExpressionEvaluatorJniWrapper_compile( // NOLINT
+    JNIEnv* env,
+    jobject wrapper,
+    jbyteArray extendedExpression) {
+  JNI_METHOD_START
+  GLUTEN_CHECK(extendedExpression != nullptr, "ExtendedExpression must not be null");
+  auto* runtime = dynamic_cast<VeloxRuntime*>(getRuntime(env, wrapper));
+  GLUTEN_CHECK(runtime != nullptr, "Expression evaluation requires a Velox runtime");
+  const auto bytes = getByteArrayElementsSafe(env, extendedExpression);
+  auto* memoryManager = runtime->memoryManager();
+  const auto partitionId = runtime->getSparkTaskInfo().value_or(SparkTaskInfo{}).partitionId;
+  auto queryCtx = velox::core::QueryCtx::create(
+      nullptr,
+      velox::core::QueryConfig{getQueryContextConf(runtime->veloxCfg().get(), partitionId)},
+      {},
+      nullptr,
+      memoryManager->getAggregateMemoryPool());
+  auto evaluator = std::make_shared<VeloxExpressionEvaluator>(
+      memoryManager->getLeafMemoryPool(), std::move(queryCtx), bytes.elems(), bytes.length());
+  return runtime->saveObject(std::move(evaluator));
+  JNI_METHOD_END(kInvalidObjectHandle)
+}
+
+JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_VeloxExpressionEvaluatorJniWrapper_evaluate( // NOLINT
+    JNIEnv* env,
+    jobject wrapper,
+    jlong evaluatorHandle,
+    jlong inputBatchHandle) {
+  JNI_METHOD_START
+  auto* runtime = dynamic_cast<VeloxRuntime*>(getRuntime(env, wrapper));
+  GLUTEN_CHECK(runtime != nullptr, "Expression evaluation requires a Velox runtime");
+  auto evaluator = ObjectStore::retrieve<VeloxExpressionEvaluator>(evaluatorHandle);
+  auto input = ObjectStore::retrieve<ColumnarBatch>(inputBatchHandle);
+  return runtime->saveObject(evaluator->evaluate(input));
+  JNI_METHOD_END(kInvalidObjectHandle)
+}
+
+JNIEXPORT void JNICALL Java_org_apache_gluten_vectorized_VeloxExpressionEvaluatorJniWrapper_close( // NOLINT
+    JNIEnv* env,
+    jobject,
+    jlong evaluatorHandle) {
+  JNI_METHOD_START
+  ObjectStore::release(evaluatorHandle);
+  JNI_METHOD_END()
 }
 
 JNIEXPORT jlong JNICALL Java_org_apache_gluten_columnarbatch_VeloxColumnarBatchJniWrapper_from( // NOLINT

@@ -14,7 +14,7 @@
 # limitations under the License.
 
 add_library(myudf SHARED "MyUDF.cc")
-target_link_libraries(myudf velox)
+target_link_libraries(myudf gluten_velox_backend)
 
 add_library(myudaf SHARED "MyUDAF.cc")
-target_link_libraries(myudaf velox)
+target_link_libraries(myudaf gluten_velox_backend)

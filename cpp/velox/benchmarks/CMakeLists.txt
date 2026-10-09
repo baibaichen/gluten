@@ -22,11 +22,11 @@ target_link_libraries(velox_benchmark_common
                       PUBLIC gluten_velox_impl benchmark::benchmark glog::glog)
 function(add_velox_benchmark BM_EXEC BM_FILE)
   add_executable(${BM_EXEC} ${BM_FILE})
-  target_link_libraries(
-    ${BM_EXEC} PRIVATE velox_benchmark_common gluten_velox_impl
-                       gluten_core_impl ${GLUTEN_VELOX_TEST_LIBRARIES})
+  target_link_libraries(${BM_EXEC} PRIVATE velox_benchmark_common
+                        gluten_velox_impl gluten_core_impl
+                        velox_exec_test_lib)
   if(ENABLE_GPU)
-    target_link_libraries(${BM_EXEC} PRIVATE velox_curl)
+    target_link_libraries(${BM_EXEC} PRIVATE CURL::libcurl)
   endif()
 endfunction()
 

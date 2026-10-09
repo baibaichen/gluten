@@ -31,37 +31,17 @@ function(add_velox_test TEST_EXEC)
   target_compile_definitions(
     ${TEST_EXEC}
     PRIVATE GLUTEN_VELOX_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
-  target_link_libraries(
-    ${TEST_EXEC}
-    gluten_velox_impl
-    gluten_core_impl
-    ${GLUTEN_VELOX_TEST_LIBRARIES}
-    ${GLUTEN_ROARING_LINK_LIBRARY}
-    GTest::gtest
-    GTest::gtest_main)
+  target_link_libraries(${TEST_EXEC} gluten_velox_impl gluten_core_impl
+                        velox_exec_test_lib roaring
+                        GTest::gtest GTest::gtest_main)
   if(ENABLE_GPU)
-    target_link_libraries(${TEST_EXEC} velox_curl)
+    target_link_libraries(${TEST_EXEC} CURL::libcurl)
   endif()
   gtest_discover_tests(${TEST_EXEC} DISCOVERY_MODE PRE_TEST DISCOVERY_TIMEOUT
                        60)
 endfunction()
 
 if(ENABLE_GPU)
-  import_library(
-    facebook::velox::velox_cudf_expression
-    ${VELOX_BUILD_PATH}/velox/experimental/cudf/expression/libvelox_cudf_expression.a
-  )
-  import_library(
-    facebook::velox::velox_cudf_exec
-    ${VELOX_BUILD_PATH}/velox/experimental/cudf/exec/libvelox_cudf_exec.a)
-  import_library(
-    facebook::velox::velox_cudf_vector
-    ${VELOX_BUILD_PATH}/velox/experimental/cudf/vector/libvelox_cudf_vector.a)
-  import_library(
-    facebook::velox::velox_cudf_hive_connector
-    ${VELOX_BUILD_PATH}/velox/experimental/cudf/connectors/hive/libvelox_cudf_hive_connector.a
-  )
-
   function(add_velox_gpu_test TEST_EXEC)
     set(options)
     set(one_value_args)
@@ -79,24 +59,11 @@ if(ENABLE_GPU)
                                                     ${CMAKE_SOURCE_DIR}/src)
     target_compile_definitions(
       ${TEST_EXEC}
-      PUBLIC LIBCUDACXX_ENABLE_EXPERIMENTAL_MEMORY_RESOURCE
       PRIVATE GLUTEN_VELOX_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     target_link_libraries(
-      ${TEST_EXEC}
-      PUBLIC facebook::velox::velox_cudf_expression
-             facebook::velox::velox_cudf_exec
-             facebook::velox::velox_cudf_vector
-             facebook::velox::velox_cudf_hive_connector)
-    target_link_libraries(
-      ${TEST_EXEC}
-      PRIVATE gluten_velox_impl
-              gluten_core_impl
-              ${GLUTEN_VELOX_TEST_LIBRARIES}
-              ${GLUTEN_ROARING_LINK_LIBRARY}
-              cudf::cudf
-              velox_curl
-              GTest::gtest
-              GTest::gtest_main)
+      ${TEST_EXEC} PRIVATE gluten_velox_impl gluten_core_impl
+                           velox_exec_test_lib roaring
+                           CURL::libcurl GTest::gtest GTest::gtest_main)
     gtest_discover_tests(
       ${TEST_EXEC} DISCOVERY_MODE PRE_TEST
       PROPERTIES LABELS "cuda_driver"
@@ -154,7 +121,7 @@ add_velox_test(spark_functions_test SOURCES SparkFunctionTest.cc
                FunctionTest.cc)
 add_velox_test(runtime_test SOURCES RuntimeTest.cc)
 add_velox_test(velox_backend_test SOURCES VeloxBackendTest.cc)
-add_velox_test(velox_memory_test SOURCES MemoryManagerTest.cc)
+add_velox_test(gluten_velox_memory_test SOURCES MemoryManagerTest.cc)
 add_velox_test(buffer_outputstream_test SOURCES BufferOutputStreamTest.cc)
 add_velox_test(velox_whole_stage_dumper_test SOURCES
                VeloxWholeStageDumperTest.cc)
@@ -169,7 +136,7 @@ if(BUILD_EXAMPLES)
   # runtime.
   set_property(
     TARGET my_udf_test
-    PROPERTY LINK_LIBRARIES velox ${GLUTEN_VELOX_TEST_LIBRARIES} GTest::gtest
+    PROPERTY LINK_LIBRARIES gluten_velox_backend velox_exec_test_lib GTest::gtest
              GTest::gtest_main)
 endif()
 

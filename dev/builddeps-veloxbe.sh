@@ -286,7 +286,6 @@ function build_gluten_cpp {
   cd build
 
   GLUTEN_CMAKE_OPTIONS=(
-    "-DBUILD_VELOX_BACKEND=ON"
     "-DCMAKE_BUILD_TYPE=$BUILD_TYPE"
     "-DVELOX_HOME=$VELOX_HOME"
     "-DBUILD_TESTS=$BUILD_TESTS"

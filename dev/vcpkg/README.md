@@ -40,6 +40,16 @@ Run the dependency integration checks after installing dependencies:
 python3 dev/vcpkg/tests/test_cmake.py
 ```
 
+Native tests link implementation objects rather than production JNI shared
+libraries. Check the ELF dependencies and GoogleTest discovery after building:
+
+```sh
+python3 cpp/CMake/tests/check_native_runtime.py \
+  cpp/build/velox/tests/velox_plan_conversion_test \
+  cpp/build/velox/compute/delta/tests/velox_roaring_bitmap_array_test
+ctest --test-dir cpp/build --output-on-failure
+```
+
 ### Setup build toolkits
 
 Please install build depends on your system to compile all libraries:

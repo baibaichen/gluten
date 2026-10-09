@@ -36,7 +36,7 @@ class RunOptionsSuite extends SparkFunSuite {
   private def parse(args: String*): RunOptions.Parsed =
     RunOptions.parse(args.toArray)
 
-  test("benchmark SQL configuration keeps ANSI disabled without overriding nondeterminism") {
+  test("benchmark SQL configuration disables unsupported ANSI mode") {
     assert(RunOptions.sqlConf.toMap.get(SQLConf.ANSI_ENABLED.key).contains("false"))
     assert(!RunOptions.sqlConf.exists(_._1.endsWith("expression.dedup_non_deterministic")))
   }

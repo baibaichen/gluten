@@ -20,7 +20,6 @@
 #include "substrait/SubstraitToVeloxExpr.h"
 #include "substrait/extended_expression.pb.h"
 #include "utils/Exception.h"
-#include "velox/expression/EvalCtx.h"
 
 namespace gluten {
 using namespace facebook::velox;

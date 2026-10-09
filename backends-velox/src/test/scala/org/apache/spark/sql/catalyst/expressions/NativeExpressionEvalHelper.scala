@@ -114,17 +114,7 @@ final private[spark] class NativeExpressionEvaluator(
     ColumnarBatches.checkOffloaded(input)
     val inputHandle = ColumnarBatches.getNativeHandle(backendName, input)
     Utils.tryWithSafeFinally {
-      val outputHandle = jni.evaluate(handle, inputHandle)
-      try {
-        ColumnarBatches.create(outputHandle)
-      } catch {
-        case t: Throwable =>
-          Utils.tryWithSafeFinally {
-            throw t
-          } {
-            ColumnarBatchJniWrapper.close(outputHandle)
-          }
-      }
+      ColumnarBatches.create(jni.evaluate(handle, inputHandle))
     } {
       // Zero-column lookup owns a fresh handle; nonempty lookup borrows the input's handle.
       if (input.numCols() == 0) ColumnarBatchJniWrapper.close(inputHandle)

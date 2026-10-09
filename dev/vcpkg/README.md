@@ -48,7 +48,10 @@ benchmarks are disabled by default. Configure with `BUILD_TESTS` /
 `BUILD_BENCHMARKS` for Gluten and `VELOX_BUILD_TESTING` /
 `VELOX_ENABLE_BENCHMARKS` for Velox to override these defaults. These options
 are independent; the native library and required test utilities are built in
-the same graph. To check IDE target visibility, request the CMake File API:
+the same graph. `package-vcpkg.sh` initializes vcpkg, builds only the
+`gluten_velox_backend` target (which also produces both Java JNI libraries),
+then runs Maven packaging. To check IDE target visibility, request the CMake
+File API:
 
 ```sh
 mkdir -p cpp/build/.cmake/api/v1/query
@@ -60,6 +63,65 @@ python3 cpp/CMake/tests/check_unified_graph.py cpp/build
 Velox tests/benchmarks enable its GEO support because upstream fuzzer utilities
 reference S2 operations even outside geospatial tests. GEOS and S2 remain
 vcpkg-managed dependencies; library-only builds retain GEO disabled.
+
+### Three independent build stages
+
+The following commands run on Linux from the Gluten checkout. Dependency
+installation is explicit; CMake does not install packages.
+
+1. Install dependencies:
+
+   ```sh
+   source dev/vcpkg/env.sh --build_tests=ON --enable_s3=ON --enable_gcs=ON --enable_hdfs=ON
+   ```
+
+   `--build_tests=ON` is the default and installs DuckDB, matching the default
+   native tests and benchmarks. Use `--build_tests=OFF` only when both projects'
+   tests, benchmarks, and test utilities are disabled.
+
+2. Configure and build native targets:
+
+   ```sh
+   cmake -S cpp -B "$PWD/.clion-build/debug" -G Ninja \
+     -DCMAKE_BUILD_TYPE=Debug \
+     -DENABLE_S3=ON -DENABLE_GCS=ON -DENABLE_HDFS=ON
+   jobs=$(( $(nproc) > 2 ? $(nproc) - 2 : 1 ))
+   cmake --build "$PWD/.clion-build/debug" --parallel "$jobs" \
+     --target gluten_velox_backend
+   ```
+
+   For Release use `.clion-build/release` and `-DCMAKE_BUILD_TYPE=Release`.
+   Ninja limits native linking to six concurrent jobs to bound memory use;
+   override this with `-DMAX_LINK_JOBS=N` if needed.
+   Large Debug test executables can exhaust memory at higher concurrency.
+   Lower this value on smaller machines; existing caches retain their setting.
+   `VELOX_HOME` defaults to `ep/build-velox/build/velox_ep`. Missing or empty
+   directories are cloned using the repo/ref defaults in `get-velox.sh`.
+   `-DVELOX_REPO` and `-DVELOX_BRANCH` override those defaults for new clones.
+   Existing nonempty directories are never fetched, reset, checked out, or
+   updated; missing files/submodules must be prepared manually.
+   A custom `-DVELOX_HOME=/path/to/velox` must contain a checkout compatible
+   with the current Gluten revision. An arbitrary upstream Meta checkout
+   may lack APIs supplied by Gluten's default IBM Velox branch.
+
+3. Build Java and package existing native libraries:
+
+   ```sh
+   export JAVA_HOME=/usr/lib/jvm/msopenjdk-17
+   export PATH="$JAVA_HOME/bin:$PATH"
+   ./dev/buildbundle-veloxbe.sh --skip_native=ON \
+     --cpp_build_dir="$PWD/.clion-build/debug" \
+     --spark_version=4.1
+   ```
+
+   This stage validates the two existing JNI libraries and skips native
+   compilation and vcpkg installation. Maven uses the selected native output
+   directory. If stage 2 used a custom `VELOX_HOME`, pass the matching
+   `--velox_home=/path/to/velox` here for consistent build information.
+   Configure Maven repository access through `MAVEN_ARGS` if required by
+   your environment. For the original all-in-one pipeline, continue to run
+   `./dev/package-vcpkg.sh`; CI invocation and default `cpp/build/releases`
+   packaging paths are unchanged.
 
 ### CLion without presets
 
@@ -104,6 +166,10 @@ changing the host's kernel configuration:
 ```sh
 prlimit --core=1:1 ctest --test-dir .clion-build/debug --output-on-failure
 ```
+
+Spark 4.1 enables ANSI mode by default. For native integration suites expecting
+non-ANSI execution, pass `-DargLine=-Dspark.sql.ansi.enabled=false` to Maven.
+This avoids validating Spark fallback instead of the native backend.
 
 ### Setup build toolkits
 

@@ -30,9 +30,9 @@ function build_for_spark {
     # Force Java 17 release target to override any `maven.compiler.source/target=1.8`
     # that may be injected by a user's ~/.m2/settings.xml (e.g. an active jdk-8 profile),
     # which would otherwise cause scalac to fail with: "'1.8' is not a valid choice for '-release'".
-    ${MVN_CMD} clean install -Pbackends-velox -Pspark-$spark_version -Pjava-17 -Pscala-2.13 -DskipTests -Dmaven.compiler.release=17
+    ${MVN_CMD} clean install -Pbackends-velox -Pspark-$spark_version -Pjava-17 -Pscala-2.13 -DskipTests -Dmaven.compiler.release=17 "-Dcpp.build.dir=$CPP_BUILD_DIR"
   else
-    ${MVN_CMD} clean install -Pbackends-velox -Pspark-$spark_version -DskipTests
+    ${MVN_CMD} clean install -Pbackends-velox -Pspark-$spark_version -DskipTests "-Dcpp.build.dir=$CPP_BUILD_DIR"
   fi
 }
 

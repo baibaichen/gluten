@@ -26,11 +26,15 @@ CURRENT_DIR=$(cd "$(dirname "$BASH_SOURCE")"; pwd)
 GLUTEN_DIR="$CURRENT_DIR/.."
 BUILD_TYPE=Release
 BUILD_TESTS=OFF
+BUILD_TESTS_EXPLICIT=OFF
 BUILD_EXAMPLES=OFF
 BUILD_BENCHMARKS=OFF
+BUILD_BENCHMARKS_EXPLICIT=OFF
 ENABLE_JEMALLOC_STATS=OFF
 BUILD_VELOX_TESTS=OFF
+BUILD_VELOX_TESTS_EXPLICIT=OFF
 BUILD_VELOX_BENCHMARKS=OFF
+BUILD_VELOX_BENCHMARKS_EXPLICIT=OFF
 ENABLE_QAT=OFF
 ENABLE_GCS=OFF
 ENABLE_S3=OFF
@@ -49,6 +53,8 @@ VELOX_PARAMETER=""
 BUILD_ARROW=ON
 BUILD_ARROW_EXPLICIT=OFF
 SPARK_VERSION=ALL
+SKIP_NATIVE=OFF
+CPP_BUILD_DIR="$GLUTEN_DIR/cpp/build"
 
 # set default number of threads as cpu cores minus 2
 if [[ "$(uname)" == "Darwin" ]]; then
@@ -70,8 +76,17 @@ do
         BUILD_TYPE=("${arg#*=}")
         shift # Remove argument name from processing
         ;;
+        --skip_native=*)
+        SKIP_NATIVE="${arg#*=}"
+        shift
+        ;;
+        --cpp_build_dir=*)
+        CPP_BUILD_DIR="${arg#*=}"
+        shift
+        ;;
         --build_tests=*)
         BUILD_TESTS=("${arg#*=}")
+        BUILD_TESTS_EXPLICIT=ON
         shift # Remove argument name from processing
         ;;
         --build_examples=*)
@@ -80,6 +95,7 @@ do
         ;;
         --build_benchmarks=*)
         BUILD_BENCHMARKS=("${arg#*=}")
+        BUILD_BENCHMARKS_EXPLICIT=ON
         shift # Remove argument name from processing
         ;;
         --enable_jemalloc_stats=*)
@@ -144,10 +160,12 @@ do
         ;;
         --build_velox_tests=*)
         BUILD_VELOX_TESTS=("${arg#*=}")
+        BUILD_VELOX_TESTS_EXPLICIT=ON
         shift # Remove argument name from processing
         ;;
         --build_velox_benchmarks=*)
         BUILD_VELOX_BENCHMARKS=("${arg#*=}")
+        BUILD_VELOX_BENCHMARKS_EXPLICIT=ON
         shift # Remove argument name from processing
         ;;
         --build_arrow=*)
@@ -170,6 +188,19 @@ do
     esac
 done
 
+case "$BUILD_TYPE" in
+  debug|Debug) BUILD_TYPE=Debug ;;
+  release|Release) BUILD_TYPE=Release ;;
+esac
+
+if [[ "$CPP_BUILD_DIR" != /* ]]; then
+    CPP_BUILD_DIR="$GLUTEN_DIR/$CPP_BUILD_DIR"
+fi
+VELOX_HOME="${VELOX_HOME:-$GLUTEN_DIR/ep/build-velox/build/velox_ep}"
+if [[ "$VELOX_HOME" != /* ]]; then
+    VELOX_HOME="$GLUTEN_DIR/$VELOX_HOME"
+fi
+
 function vcpkg_is_active {
     [ "$ENABLE_VCPKG" = "ON" ] || [ -n "${GLUTEN_VCPKG_ENABLED:-}" ]
 }
@@ -180,6 +211,12 @@ if vcpkg_is_active; then
         exit 1
     fi
     BUILD_ARROW=OFF
+    if [ "$BUILD_TESTS_EXPLICIT" != "ON" ]; then
+        BUILD_TESTS=ON
+    fi
+    if [ "$BUILD_BENCHMARKS_EXPLICIT" != "ON" ]; then
+        BUILD_BENCHMARKS=ON
+    fi
 fi
 
 if [[ "$(uname)" == "Darwin" ]]; then
@@ -221,11 +258,40 @@ function concat_velox_param {
 }
 
 
-if [ "$ENABLE_VCPKG" = "ON" ]; then
+if [ "$ENABLE_VCPKG" = "ON" ] && [ "$SKIP_NATIVE" != "ON" ]; then
     # vcpkg will install static depends and init build environment
-    BUILD_OPTIONS="--build_tests=$BUILD_TESTS --enable_s3=$ENABLE_S3 --enable_gcs=$ENABLE_GCS \
+    VCPKG_TEST_DEPS=OFF
+    # Match CMake's precedence: explicit options, existing cache, then defaults.
+    for option in BUILD_TESTS BUILD_BENCHMARKS VELOX_BUILD_TESTING VELOX_ENABLE_BENCHMARKS BUILD_TEST_UTILS VELOX_BUILD_TEST_UTILS; do
+        case "$option" in
+            VELOX_BUILD_TESTING) variable=BUILD_VELOX_TESTS ;;
+            VELOX_ENABLE_BENCHMARKS) variable=BUILD_VELOX_BENCHMARKS ;;
+            *) variable="$option" ;;
+        esac
+        value=OFF
+        explicit=OFF
+        case "$option" in
+            BUILD_TEST_UTILS|VELOX_BUILD_TEST_UTILS) ;;
+            *)
+                explicit_variable="${variable}_EXPLICIT"
+                explicit="${!explicit_variable}"
+                value="${!variable}"
+                ;;
+        esac
+        if [ "$explicit" != "ON" ] && [ -f "$CPP_BUILD_DIR/CMakeCache.txt" ]; then
+            if cached=$(grep -m1 "^${option}:[^=]*=" "$CPP_BUILD_DIR/CMakeCache.txt"); then
+                value="${cached#*=}"
+            fi
+        fi
+        case "$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')" in
+            ""|0|OFF|NO|FALSE|N|IGNORE|NOTFOUND|*-NOTFOUND) ;;
+            *) VCPKG_TEST_DEPS=ON ;;
+        esac
+    done
+    BUILD_OPTIONS="--build_tests=$VCPKG_TEST_DEPS --enable_s3=$ENABLE_S3 --enable_gcs=$ENABLE_GCS \
                    --enable_hdfs=$ENABLE_HDFS --enable_abfs=$ENABLE_ABFS --enable_kafka=$ENABLE_KAFKA"
-    source ./dev/vcpkg/env.sh ${BUILD_OPTIONS}
+    source "$GLUTEN_DIR/dev/vcpkg/env.sh" ${BUILD_OPTIONS}
+
 fi
 
 # Supported Spark versions
@@ -269,6 +335,10 @@ function build_arrow {
 }
 
 function build_velox {
+  if vcpkg_is_active; then
+    build_gluten_cpp
+    return
+  fi
   echo "Start to build Velox"
   cd $GLUTEN_DIR/ep/build-velox/src
   # When BUILD_TESTS is on for gluten cpp, we need turn on VELOX_BUILD_TEST_UTILS via build_test_utils.
@@ -280,17 +350,12 @@ function build_velox {
 
 function build_gluten_cpp {
   echo "Start to build Gluten CPP"
-  cd $GLUTEN_DIR/cpp
-  rm -rf build
-  mkdir build
-  cd build
+  cd "$GLUTEN_DIR"
 
   GLUTEN_CMAKE_OPTIONS=(
     "-DCMAKE_BUILD_TYPE=$BUILD_TYPE"
     "-DVELOX_HOME=$VELOX_HOME"
-    "-DBUILD_TESTS=$BUILD_TESTS"
     "-DBUILD_EXAMPLES=$BUILD_EXAMPLES"
-    "-DBUILD_BENCHMARKS=$BUILD_BENCHMARKS"
     "-DENABLE_JEMALLOC_STATS=$ENABLE_JEMALLOC_STATS"
     "-DENABLE_QAT=$ENABLE_QAT"
     "-DENABLE_GCS=$ENABLE_GCS"
@@ -303,6 +368,35 @@ function build_gluten_cpp {
     "-DENABLE_ENHANCED_FEATURES=$ENABLE_ENHANCED_FEATURES"
     "-DENABLE_LTO=$ENABLE_LTO"
   )
+  if vcpkg_is_active; then
+    if [ "$BUILD_TESTS_EXPLICIT" = "ON" ]; then
+      GLUTEN_CMAKE_OPTIONS+=("-DBUILD_TESTS=$BUILD_TESTS")
+    fi
+    if [ "$BUILD_BENCHMARKS_EXPLICIT" = "ON" ]; then
+      GLUTEN_CMAKE_OPTIONS+=("-DBUILD_BENCHMARKS=$BUILD_BENCHMARKS")
+    fi
+    if [ "$BUILD_VELOX_TESTS_EXPLICIT" = "ON" ]; then
+      GLUTEN_CMAKE_OPTIONS+=("-DVELOX_BUILD_TESTING=$BUILD_VELOX_TESTS")
+    fi
+    if [ "$BUILD_VELOX_BENCHMARKS_EXPLICIT" = "ON" ]; then
+      GLUTEN_CMAKE_OPTIONS+=("-DVELOX_ENABLE_BENCHMARKS=$BUILD_VELOX_BENCHMARKS")
+    fi
+    GLUTEN_CMAKE_OPTIONS+=("-DENABLE_GLUTEN_VCPKG=ON")
+  else
+    GLUTEN_CMAKE_OPTIONS+=(
+      "-DBUILD_TESTS=$BUILD_TESTS"
+      "-DBUILD_BENCHMARKS=$BUILD_BENCHMARKS"
+      "-DVELOX_BUILD_TESTING=$BUILD_VELOX_TESTS"
+      "-DVELOX_ENABLE_BENCHMARKS=$BUILD_VELOX_BENCHMARKS"
+      "-DENABLE_GLUTEN_VCPKG=OFF"
+    )
+  fi
+  if [[ -n "$VELOX_REPO" ]]; then
+    GLUTEN_CMAKE_OPTIONS+=("-DVELOX_REPO=$VELOX_REPO")
+  fi
+  if [[ -n "$VELOX_BRANCH" ]]; then
+    GLUTEN_CMAKE_OPTIONS+=("-DVELOX_BRANCH=$VELOX_BRANCH")
+  fi
 
   if [ -n "${INSTALL_PREFIX:-}" ]; then
     GLUTEN_CMAKE_OPTIONS+=("-DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX")
@@ -319,19 +413,29 @@ function build_gluten_cpp {
     GLUTEN_CMAKE_OPTIONS+=("-DCMAKE_CXX_FLAGS=-Wno-inconsistent-missing-override -Wno-macro-redefined")
   fi
 
-  cmake -G Ninja "${GLUTEN_CMAKE_OPTIONS[@]}" ..
-  ninja -j $NUM_THREADS
+  cmake -S "$GLUTEN_DIR/cpp" -B "$CPP_BUILD_DIR" -G Ninja "${GLUTEN_CMAKE_OPTIONS[@]}"
+  cmake --build "$CPP_BUILD_DIR" --parallel "$NUM_THREADS" --target gluten_velox_backend
 }
 
 function build_velox_backend {
   if [ $BUILD_ARROW == "ON" ]; then
     build_arrow
   fi
-  build_velox
+  if ! vcpkg_is_active; then
+    build_velox
+  fi
   build_gluten_cpp
 }
 
 function get_velox {
+  if vcpkg_is_active; then
+    VELOX_SOURCE_OPTIONS=("-DVELOX_HOME=$VELOX_HOME"
+                         "-DENABLE_ENHANCED_FEATURES=$ENABLE_ENHANCED_FEATURES")
+    [[ -z "$VELOX_REPO" ]] || VELOX_SOURCE_OPTIONS+=("-DVELOX_REPO=$VELOX_REPO")
+    [[ -z "$VELOX_BRANCH" ]] || VELOX_SOURCE_OPTIONS+=("-DVELOX_BRANCH=$VELOX_BRANCH")
+    cmake "${VELOX_SOURCE_OPTIONS[@]}" -P "$GLUTEN_DIR/cpp/CMake/AcquireVelox.cmake"
+    return
+  fi
   cd $GLUTEN_DIR/ep/build-velox/src
   ./get-velox.sh $VELOX_PARAMETER
 }
@@ -374,8 +478,17 @@ OS=`uname -s`
 ARCH=`uname -m`
 commands_to_run=(${OTHER_ARGUMENTS[@]:-})
 (
-  if [[ ${#commands_to_run[@]} -eq 0 ]]; then
-    get_velox
+  if [[ "$SKIP_NATIVE" == "ON" ]]; then
+    for library in libgluten.so libvelox.so; do
+      if [[ ! -f "$CPP_BUILD_DIR/releases/$library" && ! -f "$CPP_BUILD_DIR/releases/${library%.so}.dylib" ]]; then
+        echo "ERROR: Missing native library $CPP_BUILD_DIR/releases/$library" >&2
+        exit 1
+      fi
+    done
+  elif [[ ${#commands_to_run[@]} -eq 0 ]]; then
+    if ! vcpkg_is_active; then
+      get_velox
+    fi
     if [ -z "${GLUTEN_VCPKG_ENABLED:-}" ] && [ $RUN_SETUP_SCRIPT == "ON" ]; then
       setup_dependencies
     elif [ "$ENABLE_KAFKA" = "ON" ] && ! vcpkg_is_active; then

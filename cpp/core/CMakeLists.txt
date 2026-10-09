@@ -155,12 +155,13 @@ add_library(gluten_core_impl OBJECT ${SPARK_COLUMNAR_PLUGIN_SRCS})
 set_target_properties(gluten_core_impl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_dependencies(gluten_core_impl jni_proto)
 add_library(gluten SHARED jni/JniWrapper.cc)
-target_link_libraries(gluten PRIVATE gluten_core_impl)
+target_link_libraries(gluten PUBLIC gluten_core_impl)
 
 # Hide symbols of some static dependencies. Otherwise, if such dependencies are
 # already statically linked to libvelox.so, a runtime error will be reported:
 # xxx is being linked both statically and dynamically.
 if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
+  target_link_options(gluten PRIVATE "LINKER:--no-undefined")
   target_link_options(
     gluten PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/symbols.map)
   # libgluten statically links libstdc++/libgcc (see dev/vcpkg/toolchain.cmake's
@@ -260,16 +261,3 @@ endif()
 target_link_libraries(gluten_core_impl PRIVATE glog::glog)
 
 install(TARGETS gluten DESTINATION ${CMAKE_INSTALL_LIBDIR})
-
-if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-  add_custom_command(
-    TARGET gluten
-    POST_BUILD
-    COMMAND ld $<TARGET_FILE:gluten> || true
-    COMMENT "Checking ld result of libgluten.so")
-  add_custom_command(
-    TARGET gluten
-    POST_BUILD
-    COMMAND ldd $<TARGET_FILE:gluten> || true
-    COMMENT "Checking ldd result of libgluten.so")
-endif()

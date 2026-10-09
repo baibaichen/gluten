@@ -29,7 +29,7 @@ add_executable(
                         DeltaDeletionVectorReaderTest.cpp DeltaSplitTest.cpp)
 
 target_link_libraries(velox_delta_read_test gluten_velox_impl gluten_core_impl roaring
-                      facebook::velox::exec_test_lib GTest::gtest)
+                      velox_exec_test_lib GTest::gtest)
 
 add_test(
   NAME velox_delta_read_test

@@ -11,7 +11,7 @@ HotSpot and matching native libraries already built in `cpp/build`. The launcher
 builds JVM artifacts; it does not build native code.
 
 ```bash
-export JAVA_HOME=/path/to/jdk-17
+export JAVA_HOME=/usr/lib/jvm/msopenjdk-17
 
 # Build/install the JVM reactor, export the test classpath, then list functions.
 dev/run-expression-bench.sh --list
@@ -23,7 +23,7 @@ dev/run-expression-bench.sh --skip-build --list ltrim
 dev/run-expression-bench.sh --skip-build \
   --cases ltrim/l13-half-even \
   --rows 4000000 --batch-size 10240 \
-  --seed 20260912 \
+  --seed 20260912 --key-cardinality 4000000 \
   --warmup-seconds 10 --measurement-seconds 50
 ```
 
@@ -72,9 +72,7 @@ options or `--config`.
 Explicit warmup and measurement durations must be supplied together and be
 positive integer seconds. Rows and batch size are positive integers.
 The input seed is a signed 64-bit integer; key cardinality is positive and
-controls key-based generators, not a guarantee about the output's distinct count.
-The trim pattern, boundary and custom-trim generators do not use key cardinality;
-changing it has no effect on their inputs.
+controls generator inputs, not a guarantee about the output's distinct count.
 The runner performs at least two measured iterations per engine.
 
 For example, save this as `target/trim-run.json`:
@@ -85,6 +83,7 @@ For example, save this as `target/trim-run.json`:
   "rows": 4000000,
   "batchSize": 10240,
   "seed": 20260912,
+  "keyCardinality": 4000000,
   "warmupSeconds": 10,
   "measurementSeconds": 50
 }
@@ -153,8 +152,6 @@ invalid, and `none` cannot be combined with generator bindings.
 Each native evaluation releases its temporary zero-column input handle on both
 success and failure. The underlying empty-schema batch stays cached until task
 teardown. Nonempty input handles remain borrowed and are not closed by evaluation.
-If wrapping a native result as a Java batch fails, its output handle is also
-released while preserving the original exception.
 
 Common generator choices:
 

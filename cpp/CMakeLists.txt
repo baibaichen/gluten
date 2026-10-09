@@ -86,9 +86,8 @@ option(ENABLE_LTO "Enable IPO/LTO" OFF)
 set(root_directory ${PROJECT_BINARY_DIR})
 get_filename_component(GLUTEN_HOME "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
 
-if(NOT DEFINED VELOX_HOME)
-  set(VELOX_HOME ${GLUTEN_HOME}/ep/build-velox/build/velox_ep)
-  message(STATUS "Set VELOX_HOME to ${VELOX_HOME}")
+if(BUILD_VELOX_BACKEND)
+  include(AcquireVelox)
 endif()
 
 set(VELOX_BUILD_PATH "${CMAKE_BINARY_DIR}/velox-native")

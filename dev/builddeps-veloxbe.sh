@@ -48,6 +48,8 @@ VELOX_PARAMETER=""
 BUILD_ARROW=ON
 BUILD_ARROW_EXPLICIT=OFF
 SPARK_VERSION=ALL
+SKIP_NATIVE=OFF
+CPP_BUILD_DIR="$GLUTEN_DIR/cpp/build"
 
 # set default number of threads as cpu cores minus 2
 if [[ "$(uname)" == "Darwin" ]]; then
@@ -68,6 +70,14 @@ do
         --build_type=*)
         BUILD_TYPE=("${arg#*=}")
         shift # Remove argument name from processing
+        ;;
+        --skip_native=*)
+        SKIP_NATIVE="${arg#*=}"
+        shift
+        ;;
+        --cpp_build_dir=*)
+        CPP_BUILD_DIR="${arg#*=}"
+        shift
         ;;
         --build_tests=*)
         BUILD_TESTS=("${arg#*=}")
@@ -165,6 +175,19 @@ do
     esac
 done
 
+case "$BUILD_TYPE" in
+  debug|Debug) BUILD_TYPE=Debug ;;
+  release|Release) BUILD_TYPE=Release ;;
+esac
+
+if [[ "$CPP_BUILD_DIR" != /* ]]; then
+    CPP_BUILD_DIR="$GLUTEN_DIR/$CPP_BUILD_DIR"
+fi
+VELOX_HOME="${VELOX_HOME:-$GLUTEN_DIR/ep/build-velox/build/velox_ep}"
+if [[ "$VELOX_HOME" != /* ]]; then
+    VELOX_HOME="$GLUTEN_DIR/$VELOX_HOME"
+fi
+
 function vcpkg_is_active {
     [ "$ENABLE_VCPKG" = "ON" ] || [ -n "${GLUTEN_VCPKG_ENABLED:-}" ]
 }
@@ -216,11 +239,15 @@ function concat_velox_param {
 }
 
 
-if [ "$ENABLE_VCPKG" = "ON" ]; then
+if [ "$ENABLE_VCPKG" = "ON" ] && [ "$SKIP_NATIVE" != "ON" ]; then
     # vcpkg will install static depends and init build environment
-    BUILD_OPTIONS="--build_tests=$BUILD_TESTS --enable_s3=$ENABLE_S3 --enable_gcs=$ENABLE_GCS \
+    VCPKG_TEST_DEPS=OFF
+    if [[ "$BUILD_TESTS" == "ON" || "$BUILD_BENCHMARKS" == "ON" || "$BUILD_VELOX_TESTS" == "ON" || "$BUILD_VELOX_BENCHMARKS" == "ON" ]]; then
+        VCPKG_TEST_DEPS=ON
+    fi
+    BUILD_OPTIONS="--build_tests=$VCPKG_TEST_DEPS --enable_s3=$ENABLE_S3 --enable_gcs=$ENABLE_GCS \
                    --enable_hdfs=$ENABLE_HDFS --enable_abfs=$ENABLE_ABFS"
-    source ./dev/vcpkg/env.sh ${BUILD_OPTIONS}
+    source "$GLUTEN_DIR/dev/vcpkg/env.sh" ${BUILD_OPTIONS}
 fi
 
 # Supported Spark versions
@@ -261,6 +288,10 @@ function build_arrow {
 }
 
 function build_velox {
+  if vcpkg_is_active; then
+    build_gluten_cpp
+    return
+  fi
   echo "Start to build Velox"
   cd $GLUTEN_DIR/ep/build-velox/src
   # When BUILD_TESTS is on for gluten cpp, we need turn on VELOX_BUILD_TEST_UTILS via build_test_utils.
@@ -272,10 +303,7 @@ function build_velox {
 
 function build_gluten_cpp {
   echo "Start to build Gluten CPP"
-  cd $GLUTEN_DIR/cpp
-  rm -rf build
-  mkdir build
-  cd build
+  cd "$GLUTEN_DIR"
 
   GLUTEN_CMAKE_OPTIONS=(
     "-DBUILD_VELOX_BACKEND=ON"
@@ -284,6 +312,8 @@ function build_gluten_cpp {
     "-DBUILD_TESTS=$BUILD_TESTS"
     "-DBUILD_EXAMPLES=$BUILD_EXAMPLES"
     "-DBUILD_BENCHMARKS=$BUILD_BENCHMARKS"
+    "-DVELOX_BUILD_TESTING=$BUILD_VELOX_TESTS"
+    "-DVELOX_ENABLE_BENCHMARKS=$BUILD_VELOX_BENCHMARKS"
     "-DENABLE_JEMALLOC_STATS=$ENABLE_JEMALLOC_STATS"
     "-DENABLE_QAT=$ENABLE_QAT"
     "-DENABLE_GCS=$ENABLE_GCS"
@@ -295,6 +325,17 @@ function build_gluten_cpp {
     "-DENABLE_ENHANCED_FEATURES=$ENABLE_ENHANCED_FEATURES"
     "-DENABLE_LTO=$ENABLE_LTO"
   )
+  if vcpkg_is_active; then
+    GLUTEN_CMAKE_OPTIONS+=("-DENABLE_GLUTEN_VCPKG=ON")
+  else
+    GLUTEN_CMAKE_OPTIONS+=("-DENABLE_GLUTEN_VCPKG=OFF")
+  fi
+  if [[ -n "$VELOX_REPO" ]]; then
+    GLUTEN_CMAKE_OPTIONS+=("-DVELOX_REPO=$VELOX_REPO")
+  fi
+  if [[ -n "$VELOX_BRANCH" ]]; then
+    GLUTEN_CMAKE_OPTIONS+=("-DVELOX_BRANCH=$VELOX_BRANCH")
+  fi
 
   if [ -n "${INSTALL_PREFIX:-}" ]; then
     GLUTEN_CMAKE_OPTIONS+=("-DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX")
@@ -311,19 +352,29 @@ function build_gluten_cpp {
     GLUTEN_CMAKE_OPTIONS+=("-DCMAKE_CXX_FLAGS=-Wno-inconsistent-missing-override -Wno-macro-redefined")
   fi
 
-  cmake -G Ninja "${GLUTEN_CMAKE_OPTIONS[@]}" ..
-  ninja -j $NUM_THREADS
+  cmake -S "$GLUTEN_DIR/cpp" -B "$CPP_BUILD_DIR" -G Ninja "${GLUTEN_CMAKE_OPTIONS[@]}"
+  cmake --build "$CPP_BUILD_DIR" --parallel "$NUM_THREADS"
 }
 
 function build_velox_backend {
   if [ $BUILD_ARROW == "ON" ]; then
     build_arrow
   fi
-  build_velox
+  if ! vcpkg_is_active; then
+    build_velox
+  fi
   build_gluten_cpp
 }
 
 function get_velox {
+  if vcpkg_is_active; then
+    VELOX_SOURCE_OPTIONS=("-DVELOX_HOME=$VELOX_HOME"
+                         "-DENABLE_ENHANCED_FEATURES=$ENABLE_ENHANCED_FEATURES")
+    [[ -z "$VELOX_REPO" ]] || VELOX_SOURCE_OPTIONS+=("-DVELOX_REPO=$VELOX_REPO")
+    [[ -z "$VELOX_BRANCH" ]] || VELOX_SOURCE_OPTIONS+=("-DVELOX_BRANCH=$VELOX_BRANCH")
+    cmake "${VELOX_SOURCE_OPTIONS[@]}" -P "$GLUTEN_DIR/cpp/CMake/AcquireVelox.cmake"
+    return
+  fi
   cd $GLUTEN_DIR/ep/build-velox/src
   ./get-velox.sh $VELOX_PARAMETER
 }
@@ -362,8 +413,17 @@ OS=`uname -s`
 ARCH=`uname -m`
 commands_to_run=(${OTHER_ARGUMENTS[@]:-})
 (
-  if [[ ${#commands_to_run[@]} -eq 0 ]]; then
-    get_velox
+  if [[ "$SKIP_NATIVE" == "ON" ]]; then
+    for library in libgluten.so libvelox.so; do
+      if [[ ! -f "$CPP_BUILD_DIR/releases/$library" && ! -f "$CPP_BUILD_DIR/releases/${library%.so}.dylib" ]]; then
+        echo "ERROR: Missing native library $CPP_BUILD_DIR/releases/$library" >&2
+        exit 1
+      fi
+    done
+  elif [[ ${#commands_to_run[@]} -eq 0 ]]; then
+    if ! vcpkg_is_active; then
+      get_velox
+    fi
     if [ -z "${GLUTEN_VCPKG_ENABLED:-}" ] && [ $RUN_SETUP_SCRIPT == "ON" ]; then
       setup_dependencies
     fi

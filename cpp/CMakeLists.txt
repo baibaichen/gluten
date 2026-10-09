@@ -49,6 +49,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS
     ON
     CACHE INTERNAL "")
 
+option(ENABLE_GLUTEN_VCPKG "Use Gluten vcpkg dependencies" ON)
+if(ENABLE_GLUTEN_VCPKG AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+  set(CMAKE_TOOLCHAIN_FILE
+      "${CMAKE_CURRENT_LIST_DIR}/../dev/vcpkg/toolchain.cmake"
+      CACHE FILEPATH "Native build toolchain")
+endif()
+
 project(gluten)
 
 include(CheckIPOSupported)

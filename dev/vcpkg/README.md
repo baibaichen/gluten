@@ -18,6 +18,28 @@ The gluten packages will be placed in `$GLUTEN_REPO/package/target/gluten-velox-
 
 ## Setup build environment manually
 
+### Install native dependencies only
+
+From the Gluten checkout, install dependencies without compiling Gluten or
+Velox and without running Maven:
+
+```sh
+source dev/vcpkg/env.sh --build_tests=ON --enable_s3=ON --enable_gcs=ON --enable_hdfs=ON
+```
+
+Gluten's toolchain also works without sourcing this environment: it defaults to
+`dev/vcpkg/.vcpkg` and `dev/vcpkg/vcpkg_installed`. Explicit CMake
+`VCPKG_TARGET_TRIPLET`, `VCPKG_HOST_TRIPLET`, and `VCPKG_INSTALLED_DIR` values
+take precedence over defaults. Dependency installation remains a separate step.
+Roaring 4.3.11 is managed by vcpkg; missing Roaring packages fail configuration
+instead of downloading sources during the native build.
+
+Run the dependency integration checks after installing dependencies:
+
+```sh
+python3 dev/vcpkg/tests/test_cmake.py
+```
+
 ### Setup build toolkits
 
 Please install build depends on your system to compile all libraries:

@@ -152,7 +152,10 @@ private[benchmark] object Data {
         "rtrimCustom",
         "ltrimCustom",
         "nullableBoundedInt",
-        "nanPayloadDouble")
+        "nanPayloadDouble",
+        "arrayJoinInput",
+        "arrayJoinDelimiter",
+        "quarterInput")
   private val strings = Set("standard.string", "standard.stringArray")
 
   private def argument(binding: Binding, name: String): Option[Argument] =
@@ -193,7 +196,9 @@ private[benchmark] object Data {
             require(names.add(name.toLowerCase(Locale.ROOT)), s"Duplicate binding: $name")
         }
         val args = HashSet.empty[String]
-        val allowed = if (strings.contains(binding.generator)) {
+        val allowed = if (fixtureGenerators.contains(binding.generator)) {
+          Set("mode")
+        } else if (strings.contains(binding.generator)) {
           Set("length")
         } else if (trimGenerators.contains(binding.generator)) {
           Set("length", "pattern", "nullPercent", "utf8")
@@ -211,6 +216,7 @@ private[benchmark] object Data {
             require(args.add(name), s"Duplicate argument: $name")
             require(allowed.contains(name), s"Unknown argument: $name")
         }
+        if (fixtureGenerators.contains(binding.generator)) fixtureMode(binding)
         if (args.contains("nullPercent")) {
           val nulls = integer(binding, "nullPercent")
           require(nulls >= 0 && nulls <= 100, "nullPercent must be between 0 and 100")
@@ -247,6 +253,20 @@ private[benchmark] object Data {
             val input: (Context, Long, Int, Int) => InternalRow = binding.generator match {
               case "nanPayloadDouble" =>
                 (_, i, _, _) => InternalRow(JDouble.longBitsToDouble(0x7ff8000000000000L | i))
+              case "arrayJoinInput" =>
+                val mode = fixtureMode(binding)
+                (c, i, _, _) => InternalRow(arrayJoinInput(mode, i % c.keys))
+              case "arrayJoinDelimiter" =>
+                val mode = fixtureMode(binding)
+                (_, _, _, _) =>
+                  InternalRow(UTF8String.fromString(if (mode == "utf8") "分" else "!" + 0.toChar))
+              case "quarterInput" =>
+                val mode = fixtureMode(binding)
+                val dates = quarterDates(mode)
+                (_, i, _, _) => {
+                  if (mode == "nullable" && i % 2 == 0) InternalRow.fromSeq(Seq(null))
+                  else InternalRow(dates((i % dates.length).toInt))
+                }
               case "nullableBoundedInt" =>
                 val nulls = integer(binding, "nullPercent", Some(0))
                 (c, i, _, _) => {
@@ -322,6 +342,8 @@ private[benchmark] object Data {
             }
             val dataType = binding.generator match {
               case "nanPayloadDouble" => DoubleType
+              case "arrayJoinInput" => ArrayType(StringType, containsNull = true)
+              case "quarterInput" => DateType
               case "hashedLong" => LongType
               case "hashedBinary" => BinaryType
               case "nullableBoundedInt" => IntegerType
@@ -351,6 +373,75 @@ private[benchmark] object Data {
         generate(context, rowId, local, count)
       }
     )
+  }
+
+  private val fixtureGenerators = Set("arrayJoinInput", "arrayJoinDelimiter", "quarterInput")
+  private val arrayJoinModes = Set(
+    "empty-array",
+    "single-element",
+    "many-short",
+    "long-elements",
+    "empty-elements",
+    "mixed-nulls",
+    "all-null",
+    "utf8",
+    "embedded-nul",
+    "null-array")
+  private val quarterModes =
+    Set("quarter-boundaries", "leap-centuries", "pre-epoch", "wide-range", "nullable")
+
+  private def fixtureMode(binding: Binding): String = {
+    val modes = binding.generator match {
+      case "quarterInput" => quarterModes
+      case "arrayJoinDelimiter" => Set("utf8", "embedded-nul")
+      case _ => arrayJoinModes
+    }
+    argument(binding, "mode") match {
+      case Some(StringArgument(value)) if modes.contains(value) => value
+      case _ => throw new IllegalArgumentException("Invalid mode for " + binding.generator)
+    }
+  }
+
+  private def arrayJoinInput(mode: String, row: Long): GenericArrayData = {
+    val key = row.toString
+    val values: Seq[String] = mode match {
+      case "null-array" => return null
+      case "empty-array" => Seq.empty
+      case "single-element" => Seq(key)
+      case "many-short" => (0 until 32).map(n => ((row + n) % 10000).toString)
+      case "long-elements" => (0 until 8).map(n => StringUtils.rightPad(s"$key:$n", 128, 'x'))
+      case "empty-elements" => Seq("", key, "", "fixed", "")
+      case "mixed-nulls" => Seq(null, key, null, "fixed", null)
+      case "all-null" => Seq(null, null, null)
+      case "utf8" => Seq(s"中文$key", "é😀", "")
+      case "embedded-nul" => Seq(key + 0.toChar + "tail", "", "fixed" + 0.toChar)
+    }
+    new GenericArrayData(values.map(s => if (s == null) null else UTF8String.fromString(s)).toArray)
+  }
+
+  private def quarterDates(mode: String): Array[Int] = {
+    def day(year: Int, month: Int, dayOfMonth: Int): Int =
+      Math.toIntExact(LocalDate.of(year, month, dayOfMonth).toEpochDay)
+    mode match {
+      case "quarter-boundaries" =>
+        (for {
+          year <- Seq(1999, 2000, 2003, 2004, 2020)
+          month <- Seq(1, 4, 7, 10)
+          offset <- -1 to 1
+        } yield day(year, month, 1) + offset).toArray
+      case "leap-centuries" =>
+        (for { year <- Seq(1900, 2000, 2100); offset <- -2 to 1 } yield day(
+          year,
+          3,
+          1) + offset).toArray
+      case "pre-epoch" =>
+        (Seq(day(1582, 9, 30), day(1582, 10, 1)) ++
+          (-36525 to -1 by 17)).toArray
+      case "wide-range" =>
+        (Seq(day(0, 1, 1), day(0, 2, 29), day(-400, 12, 31), day(-1, 4, 1)) ++
+          (0 until 366).flatMap(n => Seq(Int.MinValue + n, Int.MaxValue - n))).toArray
+      case "nullable" => (0 until 366).map(n => day(2000, 1, 1) + n).toArray
+    }
   }
 
   private def hashedKey(context: Context, rowId: Long, column: Int): Long =

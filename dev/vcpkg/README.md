@@ -60,10 +60,15 @@ the implementation object targets instead of these JNI shared libraries.
 Gluten's memory test target is named `gluten_velox_memory_test` to distinguish
 it from the upstream `velox_memory_test`.
 
-Configure with `BUILD_TESTS` / `BUILD_BENCHMARKS` for Gluten and
-`VELOX_BUILD_TESTING` / `VELOX_ENABLE_BENCHMARKS` for Velox. These options are
-independent; the native library and required test utilities are built in the
-same graph. To check IDE target visibility, request the CMake File API:
+Gluten tests and benchmarks are enabled by default; Velox's own tests and
+benchmarks are disabled by default. Configure with `BUILD_TESTS` /
+`BUILD_BENCHMARKS` for Gluten and `VELOX_BUILD_TESTING` /
+`VELOX_ENABLE_BENCHMARKS` for Velox to override these defaults. These options
+are independent; the native library and required test utilities are built in
+the same graph. `package-vcpkg.sh` initializes vcpkg, builds only the
+`gluten_velox_backend` target (which also produces both Java JNI libraries),
+then runs Maven packaging. To check IDE target visibility, request the CMake
+File API:
 
 ```sh
 mkdir -p cpp/build/.cmake/api/v1/query
@@ -95,11 +100,10 @@ installation is explicit; CMake does not install packages.
    ```sh
    cmake -S cpp -B "$PWD/.clion-build/debug" -G Ninja \
      -DCMAKE_BUILD_TYPE=Debug \
-     -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=ON \
-     -DVELOX_BUILD_TESTING=ON -DVELOX_ENABLE_BENCHMARKS=ON \
      -DENABLE_S3=ON -DENABLE_GCS=ON -DENABLE_HDFS=ON
    jobs=$(( $(nproc) > 2 ? $(nproc) - 2 : 1 ))
-   cmake --build "$PWD/.clion-build/debug" --parallel "$jobs"
+   cmake --build "$PWD/.clion-build/debug" --parallel "$jobs" \
+     --target gluten_velox_backend
    ```
 
    For Release use `.clion-build/release` and `-DCMAKE_BUILD_TYPE=Release`.
@@ -148,15 +152,13 @@ In Settings > Build, Execution, Deployment > CMake, create ordinary profiles:
 | Debug | Debug | `$GLUTEN_HOME/.clion-build/debug` |
 | Release | Release | `$GLUTEN_HOME/.clion-build/release` |
 
-Use absolute paths in CLion. Set Generator to Ninja, Build options to
-`--parallel N` where `N = max(1, nproc - 2)`, and use these CMake options in
-both profiles:
-
-```text
--DBUILD_TESTS=ON -DBUILD_BENCHMARKS=ON
--DVELOX_BUILD_TESTING=ON -DVELOX_ENABLE_BENCHMARKS=ON
--DENABLE_S3=ON -DENABLE_GCS=ON -DENABLE_HDFS=ON
-```
+Use absolute paths in CLion and select Ninja as the generator. No extra CMake
+options are needed for Gluten tests and benchmarks; Velox tests and benchmarks
+remain off unless explicitly enabled. Build the `gluten_velox_backend` target
+to produce both Java JNI libraries. Since Velox is a separate checkout outside
+`cpp`, CLion may show it under **External Sources**; this is expected and code
+navigation works. Copying or symlinking Velox into the project would add
+complexity without improving the CMake build graph.
 
 Use the container's C/C++ compiler, CMake 3.28 or newer, Ninja, and installed
 JDK. Library/header navigation follows CMake usage requirements; vcpkg binary

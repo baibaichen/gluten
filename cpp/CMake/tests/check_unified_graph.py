@@ -28,6 +28,19 @@ def check(build):
         entry["name"]: json.loads((reply / entry["jsonFile"]).read_text())
         for entry in model["configurations"][0]["targets"]
     }
+    options = {}
+    for name in (
+        "BUILD_TESTS",
+        "BUILD_BENCHMARKS",
+        "VELOX_BUILD_TESTING",
+        "VELOX_ENABLE_BENCHMARKS",
+    ):
+        value = next(
+            line.split("=", 1)[1]
+            for line in (build / "CMakeCache.txt").read_text().splitlines()
+            if line.startswith(f"{name}:")
+        )
+        options[name] = value.upper() == "ON"
     for name, kind in (
         ("velox", "STATIC_LIBRARY"),
         ("gluten", "SHARED_LIBRARY"),
@@ -36,11 +49,17 @@ def check(build):
         ("gluten_velox_impl", "OBJECT_LIBRARY"),
     ):
         assert targets[name]["type"] == kind, (name, targets[name]["type"])
-    assert "velox_plan_conversion_test" in targets
-    assert "gluten_velox_memory_test" in targets
-    assert "velox_memory_test" in targets
-    assert "delta_bitmap_benchmark" in targets
-    assert "velox_benchmark_builder" in targets
+    for name, option in (
+        ("velox_plan_conversion_test", "BUILD_TESTS"),
+        ("gluten_velox_memory_test", "BUILD_TESTS"),
+        ("delta_bitmap_benchmark", "BUILD_BENCHMARKS"),
+        ("velox_memory_test", "VELOX_BUILD_TESTING"),
+        (
+            "velox_common_indexed_priority_queue_benchmark",
+            "VELOX_ENABLE_BENCHMARKS",
+        ),
+    ):
+        assert (name in targets) == options[option], (name, options[option])
     core_link = " ".join(
         fragment["fragment"]
         for fragment in targets["gluten"]["link"]["commandFragments"]
@@ -57,7 +76,7 @@ def check(build):
         source.startswith(f"{core}/CMakeFiles/gluten_core_impl.dir/")
         for source in objects
     ), "Backend JNI library duplicates core implementation objects"
-    print(f"Unified graph verified: {len(targets)} targets")
+    print(f"Unified graph verified: {len(targets)} targets; options={options}")
 
 
 if __name__ == "__main__":

@@ -52,8 +52,66 @@ class NativeScriptTest(unittest.TestCase):
             self.assertIn("-DVELOX_BUILD_TESTING=ON", commands[0])
             self.assertIn("-DVELOX_ENABLE_BENCHMARKS=ON", commands[0])
             self.assertIn("--build", commands[1])
+            self.assertIn("--target gluten_velox_backend", commands[1])
             self.assertIn("--parallel 30", commands[1])
             self.assertEqual(sentinel.read_text(), "incremental\n")
+
+    def test_vcpkg_build_uses_cmake_defaults_and_installs_test_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            repo = temp / "repo"
+            dev = repo / "dev"
+            vcpkg = dev / "vcpkg"
+            vcpkg.mkdir(parents=True)
+            script = dev / "builddeps-veloxbe.sh"
+            script.write_text((ROOT / "dev/builddeps-veloxbe.sh").read_text())
+            env_log = temp / "env-args"
+            (vcpkg / "env.sh").write_text(
+                f'printf "%s\\n" "$@" > "{env_log}"\n'
+                'export GLUTEN_VCPKG_ENABLED=1\n'
+            )
+            cmake_log = temp / "cmake-args"
+            cmake = temp / "cmake"
+            cmake.write_text(
+                '#!/bin/bash\nprintf "%s\\n" "$*" >> "$COMMAND_LOG"\n'
+            )
+            cmake.chmod(0o755)
+            env = dict(
+                os.environ,
+                PATH=f"{temp}:{os.environ['PATH']}",
+                COMMAND_LOG=str(cmake_log),
+            )
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(script),
+                    "--enable_vcpkg=ON",
+                    "--spark_version=4.1",
+                    "build_gluten_cpp",
+                ],
+                cwd=repo,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertIn("--build_tests=ON", env_log.read_text())
+            commands = cmake_log.read_text().splitlines()
+            self.assertEqual(len(commands), 2, commands)
+            for option in (
+                "-DBUILD_TESTS=",
+                "-DBUILD_BENCHMARKS=",
+                "-DVELOX_BUILD_TESTING=",
+                "-DVELOX_ENABLE_BENCHMARKS=",
+            ):
+                self.assertNotIn(option, commands[0])
+            self.assertIn("--target gluten_velox_backend", commands[1])
+
+    def test_package_script_leaves_test_and_benchmark_options_to_cmake(self):
+        package_script = (ROOT / "dev/package-vcpkg.sh").read_text()
+        self.assertNotIn("--build_tests=ON", package_script)
+        self.assertNotIn("--build_benchmarks=ON", package_script)
 
     def test_packaging_only_rejects_missing_native_libraries(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -26,11 +26,15 @@ CURRENT_DIR=$(cd "$(dirname "$BASH_SOURCE")"; pwd)
 GLUTEN_DIR="$CURRENT_DIR/.."
 BUILD_TYPE=Release
 BUILD_TESTS=OFF
+BUILD_TESTS_EXPLICIT=OFF
 BUILD_EXAMPLES=OFF
 BUILD_BENCHMARKS=OFF
+BUILD_BENCHMARKS_EXPLICIT=OFF
 ENABLE_JEMALLOC_STATS=OFF
 BUILD_VELOX_TESTS=OFF
+BUILD_VELOX_TESTS_EXPLICIT=OFF
 BUILD_VELOX_BENCHMARKS=OFF
+BUILD_VELOX_BENCHMARKS_EXPLICIT=OFF
 ENABLE_QAT=OFF
 ENABLE_GCS=OFF
 ENABLE_S3=OFF
@@ -81,6 +85,7 @@ do
         ;;
         --build_tests=*)
         BUILD_TESTS=("${arg#*=}")
+        BUILD_TESTS_EXPLICIT=ON
         shift # Remove argument name from processing
         ;;
         --build_examples=*)
@@ -89,6 +94,7 @@ do
         ;;
         --build_benchmarks=*)
         BUILD_BENCHMARKS=("${arg#*=}")
+        BUILD_BENCHMARKS_EXPLICIT=ON
         shift # Remove argument name from processing
         ;;
         --enable_jemalloc_stats=*)
@@ -149,10 +155,12 @@ do
         ;;
         --build_velox_tests=*)
         BUILD_VELOX_TESTS=("${arg#*=}")
+        BUILD_VELOX_TESTS_EXPLICIT=ON
         shift # Remove argument name from processing
         ;;
         --build_velox_benchmarks=*)
         BUILD_VELOX_BENCHMARKS=("${arg#*=}")
+        BUILD_VELOX_BENCHMARKS_EXPLICIT=ON
         shift # Remove argument name from processing
         ;;
         --build_arrow=*)
@@ -198,6 +206,12 @@ if vcpkg_is_active; then
         exit 1
     fi
     BUILD_ARROW=OFF
+    if [ "$BUILD_TESTS_EXPLICIT" != "ON" ]; then
+        BUILD_TESTS=ON
+    fi
+    if [ "$BUILD_BENCHMARKS_EXPLICIT" != "ON" ]; then
+        BUILD_BENCHMARKS=ON
+    fi
 fi
 
 if [[ "$(uname)" == "Darwin" ]]; then
@@ -309,11 +323,7 @@ function build_gluten_cpp {
     "-DBUILD_VELOX_BACKEND=ON"
     "-DCMAKE_BUILD_TYPE=$BUILD_TYPE"
     "-DVELOX_HOME=$VELOX_HOME"
-    "-DBUILD_TESTS=$BUILD_TESTS"
     "-DBUILD_EXAMPLES=$BUILD_EXAMPLES"
-    "-DBUILD_BENCHMARKS=$BUILD_BENCHMARKS"
-    "-DVELOX_BUILD_TESTING=$BUILD_VELOX_TESTS"
-    "-DVELOX_ENABLE_BENCHMARKS=$BUILD_VELOX_BENCHMARKS"
     "-DENABLE_JEMALLOC_STATS=$ENABLE_JEMALLOC_STATS"
     "-DENABLE_QAT=$ENABLE_QAT"
     "-DENABLE_GCS=$ENABLE_GCS"
@@ -326,9 +336,27 @@ function build_gluten_cpp {
     "-DENABLE_LTO=$ENABLE_LTO"
   )
   if vcpkg_is_active; then
+    if [ "$BUILD_TESTS_EXPLICIT" = "ON" ]; then
+      GLUTEN_CMAKE_OPTIONS+=("-DBUILD_TESTS=$BUILD_TESTS")
+    fi
+    if [ "$BUILD_BENCHMARKS_EXPLICIT" = "ON" ]; then
+      GLUTEN_CMAKE_OPTIONS+=("-DBUILD_BENCHMARKS=$BUILD_BENCHMARKS")
+    fi
+    if [ "$BUILD_VELOX_TESTS_EXPLICIT" = "ON" ]; then
+      GLUTEN_CMAKE_OPTIONS+=("-DVELOX_BUILD_TESTING=$BUILD_VELOX_TESTS")
+    fi
+    if [ "$BUILD_VELOX_BENCHMARKS_EXPLICIT" = "ON" ]; then
+      GLUTEN_CMAKE_OPTIONS+=("-DVELOX_ENABLE_BENCHMARKS=$BUILD_VELOX_BENCHMARKS")
+    fi
     GLUTEN_CMAKE_OPTIONS+=("-DENABLE_GLUTEN_VCPKG=ON")
   else
-    GLUTEN_CMAKE_OPTIONS+=("-DENABLE_GLUTEN_VCPKG=OFF")
+    GLUTEN_CMAKE_OPTIONS+=(
+      "-DBUILD_TESTS=$BUILD_TESTS"
+      "-DBUILD_BENCHMARKS=$BUILD_BENCHMARKS"
+      "-DVELOX_BUILD_TESTING=$BUILD_VELOX_TESTS"
+      "-DVELOX_ENABLE_BENCHMARKS=$BUILD_VELOX_BENCHMARKS"
+      "-DENABLE_GLUTEN_VCPKG=OFF"
+    )
   fi
   if [[ -n "$VELOX_REPO" ]]; then
     GLUTEN_CMAKE_OPTIONS+=("-DVELOX_REPO=$VELOX_REPO")
@@ -353,7 +381,7 @@ function build_gluten_cpp {
   fi
 
   cmake -S "$GLUTEN_DIR/cpp" -B "$CPP_BUILD_DIR" -G Ninja "${GLUTEN_CMAKE_OPTIONS[@]}"
-  cmake --build "$CPP_BUILD_DIR" --parallel "$NUM_THREADS"
+  cmake --build "$CPP_BUILD_DIR" --parallel "$NUM_THREADS" --target gluten_velox_backend
 }
 
 function build_velox_backend {

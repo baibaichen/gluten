@@ -72,6 +72,10 @@ touch cpp/build/.cmake/api/v1/query/codemodel-v2
 python3 cpp/CMake/tests/check_unified_graph.py cpp/build
 ```
 
+Velox tests/benchmarks enable its GEO support because upstream fuzzer utilities
+reference S2 operations even outside geospatial tests. GEOS and S2 remain
+vcpkg-managed dependencies; library-only builds retain GEO disabled.
+
 ### Three independent build stages
 
 The following commands run on Linux from the Gluten checkout. Dependency
@@ -99,8 +103,10 @@ installation is explicit; CMake does not install packages.
    ```
 
    For Release use `.clion-build/release` and `-DCMAKE_BUILD_TYPE=Release`.
-   Ninja limits native linking to two concurrent jobs to bound memory use;
+   Ninja limits native linking to six concurrent jobs to bound memory use;
    override this with `-DMAX_LINK_JOBS=N` if needed.
+   Large Debug test executables can exhaust memory at higher concurrency.
+   Lower this value on smaller machines; existing caches retain their setting.
    `VELOX_HOME` defaults to `ep/build-velox/build/velox_ep`. Missing or empty
    directories are cloned using the repo/ref defaults in `get-velox.sh`.
    `-DVELOX_REPO` and `-DVELOX_BRANCH` override those defaults for new clones.
@@ -156,6 +162,27 @@ Use the container's C/C++ compiler, CMake 3.28 or newer, Ninja, and installed
 JDK. Library/header navigation follows CMake usage requirements; vcpkg binary
 packages do not necessarily include third-party implementation source files.
 Do not reuse a standalone Velox cache for this unified project.
+
+### Runtime validation notes
+
+Run Velox tests through CTest, which preserves upstream per-test process
+isolation. Running an entire test executable can expose shared-state conflicts
+between otherwise independent cases.
+Use `ctest` from the same CMake installation that configured the build.
+After sourcing `dev/vcpkg/env.sh`, keep that environment for test execution;
+an older system CTest may not understand the generated GoogleTest policies.
+
+On WSL, a piped kernel crash collector can hang GoogleTest death-test children.
+If this occurs, suppress the collector for the test process only, without
+changing the host's kernel configuration:
+
+```sh
+prlimit --core=1:1 ctest --test-dir .clion-build/debug --output-on-failure
+```
+
+Spark 4.1 enables ANSI mode by default. For native integration suites expecting
+non-ANSI execution, pass `-DargLine=-Dspark.sql.ansi.enabled=false` to Maven.
+This avoids validating Spark fallback instead of the native backend.
 
 ### Setup build toolkits
 

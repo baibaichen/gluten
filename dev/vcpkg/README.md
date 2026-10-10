@@ -92,8 +92,9 @@ installation is explicit; CMake does not install packages.
    source dev/vcpkg/env.sh --build_tests=ON --enable_s3=ON --enable_gcs=ON --enable_hdfs=ON
    ```
 
-   `--build_tests=ON` installs DuckDB, also required by Velox test utilities and
-   benchmarks. Use it when enabling either project's tests or benchmarks.
+   `--build_tests=ON` is the default and installs DuckDB, matching the default
+   native tests and benchmarks. Use `--build_tests=OFF` only when both projects'
+   tests, benchmarks, and test utilities are disabled.
 
 2. Configure and build native targets:
 

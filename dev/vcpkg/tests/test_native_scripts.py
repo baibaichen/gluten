@@ -56,7 +56,58 @@ class NativeScriptTest(unittest.TestCase):
             self.assertIn("--parallel 30", commands[1])
             self.assertEqual(sentinel.read_text(), "incremental\n")
 
-    def test_vcpkg_build_uses_cmake_defaults_and_installs_test_dependencies(self):
+    def test_vcpkg_init_installs_duckdb_by_default_and_respects_overrides(self):
+        for arguments, expected in (([], True), (["--build_tests=ON"], True),
+                                    (["--build_tests=OFF"], False)):
+            with self.subTest(arguments=arguments), tempfile.TemporaryDirectory() as directory:
+                temp = Path(directory)
+                log = temp / "arguments"
+                vcpkg = temp / "vcpkg"
+                vcpkg.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$COMMAND_LOG"\n')
+                vcpkg.chmod(0o755)
+                lib = temp / "installed/lib"
+                lib.mkdir(parents=True)
+                for name in ("z", "ssl", "crypto", "lzma", "dwarf"):
+                    (lib / f"lib{name}.a").touch()
+                env = dict(os.environ, VCPKG_ROOT=str(temp), VCPKG=str(vcpkg),
+                           VCPKG_TRIPLET="x64-linux-avx",
+                           VCPKG_TRIPLET_INSTALL_DIR=str(lib.parent),
+                           COMMAND_LOG=str(log))
+                result = subprocess.run(
+                    ["bash", str(ROOT / "dev/vcpkg/init.sh"), *arguments],
+                    cwd=ROOT, env=env, text=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertEqual("--x-feature=duckdb" in log.read_text().splitlines(), expected)
+
+    def test_vcpkg_build_uses_effective_cmake_options_for_test_dependencies(self):
+        options = {
+            "BUILD_TESTS": "build_tests",
+            "BUILD_BENCHMARKS": "build_benchmarks",
+            "VELOX_BUILD_TESTING": "build_velox_tests",
+            "VELOX_ENABLE_BENCHMARKS": "build_velox_benchmarks",
+        }
+        disabled = dict.fromkeys(options, "OFF")
+        gluten_off = ["--build_tests=OFF", "--build_benchmarks=OFF"]
+        all_off = [f"--{option}=OFF" for option in options.values()]
+        cases = [
+            ({}, [], "ON"),
+            ({}, all_off, "OFF"),
+            (disabled, [], "OFF"),
+            (dict.fromkeys(options, "ON"), all_off, "OFF"),
+            ({**disabled, "BUILD_TESTS": ""}, [], "OFF"),
+        ]
+        for option in (*options, "BUILD_TEST_UTILS", "VELOX_BUILD_TEST_UTILS"):
+            cases.append(({**disabled, option: "ON"}, [], "ON"))
+        for option in ("VELOX_BUILD_TESTING", "VELOX_ENABLE_BENCHMARKS",
+                       "BUILD_TEST_UTILS", "VELOX_BUILD_TEST_UTILS"):
+            cases.append(({**disabled, option: "ON"}, gluten_off, "ON"))
+        for option in options.values():
+            cases.append((disabled, [f"--{option}=ON"], "ON"))
+        for value, expected in (("1", "ON"), ("true", "ON"), ("0", "OFF"),
+                                ("false", "OFF")):
+            cases.append(({**disabled, "BUILD_TEST_UTILS": value}, gluten_off, expected))
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
             repo = temp / "repo"
@@ -76,37 +127,79 @@ class NativeScriptTest(unittest.TestCase):
                 '#!/bin/bash\nprintf "%s\\n" "$*" >> "$COMMAND_LOG"\n'
             )
             cmake.chmod(0o755)
-            env = dict(
-                os.environ,
-                PATH=f"{temp}:{os.environ['PATH']}",
-                COMMAND_LOG=str(cmake_log),
-            )
-            result = subprocess.run(
-                [
-                    "bash",
-                    str(script),
-                    "--enable_vcpkg=ON",
-                    "--spark_version=4.1",
-                    "build_gluten_cpp",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout)
-            self.assertIn("--build_tests=ON", env_log.read_text())
-            commands = cmake_log.read_text().splitlines()
-            self.assertEqual(len(commands), 2, commands)
-            for option in (
-                "-DBUILD_TESTS=",
-                "-DBUILD_BENCHMARKS=",
-                "-DVELOX_BUILD_TESTING=",
-                "-DVELOX_ENABLE_BENCHMARKS=",
-            ):
-                self.assertNotIn(option, commands[0])
-            self.assertIn("--target gluten_velox_backend", commands[1])
+            env = dict(os.environ, PATH=f"{temp}:{os.environ['PATH']}",
+                       COMMAND_LOG=str(cmake_log))
+            for index, (cached, arguments, expected) in enumerate(cases):
+                with self.subTest(cached=cached, arguments=arguments):
+                    build = repo / f"build {index}"
+                    build.mkdir()
+                    if cached:
+                        (build / "CMakeCache.txt").write_text("".join(
+                            f"{key}:BOOL={value}\n" for key, value in cached.items()
+                        ))
+                    cmake_log.write_text("")
+                    result = subprocess.run(
+                        ["bash", str(script), "--enable_vcpkg=ON",
+                         "--spark_version=4.1", f"--cpp_build_dir={build}",
+                         *arguments, "build_gluten_cpp"],
+                        cwd=repo, env=env, text=True,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    self.assertIn(f"--build_tests={expected}", env_log.read_text())
+                    commands = cmake_log.read_text().splitlines()
+                    self.assertEqual(len(commands), 2, commands)
+                    for option, argument in options.items():
+                        explicit = next((arg.split("=", 1)[1] for arg in arguments
+                                         if arg.startswith(f"--{argument}=")), None)
+                        if explicit is None:
+                            self.assertNotIn(f"-D{option}=", commands[0])
+                        else:
+                            self.assertIn(f"-D{option}={explicit}", commands[0])
+                    self.assertIn("--target gluten_velox_backend", commands[1])
+
+    def test_incremental_dependency_update_includes_test_utils(self):
+        disabled = dict.fromkeys(("BUILD_TESTS", "BUILD_BENCHMARKS",
+                                  "VELOX_BUILD_TESTING", "VELOX_ENABLE_BENCHMARKS"), "OFF")
+        cases = [(disabled, "--update_vcpkg", "--build_tests=OFF")]
+        for option in (*disabled, "BUILD_TEST_UTILS", "VELOX_BUILD_TEST_UTILS"):
+            cases.append(({**disabled, option: "ON"}, "--update_vcpkg", "--build_tests=ON"))
+        cases.append(({**disabled, "BUILD_TEST_UTILS": "ON"}, None, "--skip-install"))
+        for value, expected in (("1", "ON"), ("true", "ON"), ("0", "OFF"),
+                                ("false", "OFF")):
+            cases.append(({**disabled, "BUILD_TEST_UTILS": value}, "--update_vcpkg",
+                          f"--build_tests={expected}"))
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            dev = repo / "dev"
+            vcpkg = dev / "vcpkg"
+            vcpkg.mkdir(parents=True)
+            script = dev / "builddep-veloxbe-inc.sh"
+            script.write_text((ROOT / "dev/builddep-veloxbe-inc.sh").read_text())
+            log = repo / "env-args"
+            (vcpkg / "env.sh").write_text(f'printf "%s\\n" "$@" > "{log}"\n')
+            cmake = repo / "cmake"
+            cmake.write_text("#!/bin/bash\nexit 0\n")
+            cmake.chmod(0o755)
+            build = repo / "native build"
+            releases = build / "releases"
+            releases.mkdir(parents=True)
+            (releases / "libgluten.so").touch()
+            (releases / "libvelox.so").touch()
+            env = dict(os.environ, PATH=f"{repo}:{os.environ['PATH']}")
+            for cached, argument, expected in cases:
+                with self.subTest(cached=cached, argument=argument):
+                    (build / "CMakeCache.txt").write_text("".join(
+                        f"{key}:BOOL={value}\n" for key, value in cached.items()
+                    ))
+                    result = subprocess.run(
+                        ["bash", str(script), f"--cpp_build_dir={build}",
+                         *([argument] if argument else [])],
+                        cwd=repo, env=env, text=True,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    self.assertIn(expected, log.read_text().splitlines())
 
     def test_package_script_leaves_test_and_benchmark_options_to_cmake(self):
         package_script = (ROOT / "dev/package-vcpkg.sh").read_text()

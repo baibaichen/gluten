@@ -131,8 +131,12 @@ cd "$GLUTEN_DIR"
 
 # Step 1: vcpkg
 VCPKG_TEST_DEPS=OFF
-for option in BUILD_TESTS BUILD_BENCHMARKS VELOX_BUILD_TESTING VELOX_ENABLE_BENCHMARKS; do
-    [[ "$(extract_opt "$option" OFF)" != "ON" ]] || VCPKG_TEST_DEPS=ON
+for option in BUILD_TESTS BUILD_BENCHMARKS VELOX_BUILD_TESTING VELOX_ENABLE_BENCHMARKS BUILD_TEST_UTILS VELOX_BUILD_TEST_UTILS; do
+    value=$(extract_opt "$option" OFF)
+    case "$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')" in
+        ""|0|OFF|NO|FALSE|N|IGNORE|NOTFOUND|*-NOTFOUND) ;;
+        *) VCPKG_TEST_DEPS=ON ;;
+    esac
 done
 BUILD_OPTIONS="--build_tests=$VCPKG_TEST_DEPS"
 BUILD_OPTIONS="$BUILD_OPTIONS --enable_s3=$(extract_opt ENABLE_S3)"

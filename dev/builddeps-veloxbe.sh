@@ -256,9 +256,33 @@ function concat_velox_param {
 if [ "$ENABLE_VCPKG" = "ON" ] && [ "$SKIP_NATIVE" != "ON" ]; then
     # vcpkg will install static depends and init build environment
     VCPKG_TEST_DEPS=OFF
-    if [[ "$BUILD_TESTS" == "ON" || "$BUILD_BENCHMARKS" == "ON" || "$BUILD_VELOX_TESTS" == "ON" || "$BUILD_VELOX_BENCHMARKS" == "ON" ]]; then
-        VCPKG_TEST_DEPS=ON
-    fi
+    # Match CMake's precedence: explicit options, existing cache, then defaults.
+    for option in BUILD_TESTS BUILD_BENCHMARKS VELOX_BUILD_TESTING VELOX_ENABLE_BENCHMARKS BUILD_TEST_UTILS VELOX_BUILD_TEST_UTILS; do
+        case "$option" in
+            VELOX_BUILD_TESTING) variable=BUILD_VELOX_TESTS ;;
+            VELOX_ENABLE_BENCHMARKS) variable=BUILD_VELOX_BENCHMARKS ;;
+            *) variable="$option" ;;
+        esac
+        value=OFF
+        explicit=OFF
+        case "$option" in
+            BUILD_TEST_UTILS|VELOX_BUILD_TEST_UTILS) ;;
+            *)
+                explicit_variable="${variable}_EXPLICIT"
+                explicit="${!explicit_variable}"
+                value="${!variable}"
+                ;;
+        esac
+        if [ "$explicit" != "ON" ] && [ -f "$CPP_BUILD_DIR/CMakeCache.txt" ]; then
+            if cached=$(grep -m1 "^${option}:[^=]*=" "$CPP_BUILD_DIR/CMakeCache.txt"); then
+                value="${cached#*=}"
+            fi
+        fi
+        case "$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')" in
+            ""|0|OFF|NO|FALSE|N|IGNORE|NOTFOUND|*-NOTFOUND) ;;
+            *) VCPKG_TEST_DEPS=ON ;;
+        esac
+    done
     BUILD_OPTIONS="--build_tests=$VCPKG_TEST_DEPS --enable_s3=$ENABLE_S3 --enable_gcs=$ENABLE_GCS \
                    --enable_hdfs=$ENABLE_HDFS --enable_abfs=$ENABLE_ABFS"
     source "$GLUTEN_DIR/dev/vcpkg/env.sh" ${BUILD_OPTIONS}

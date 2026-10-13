@@ -17,3 +17,5 @@
 | partial-final-json | `v = standard.long()` | `from_json(concat('{"s":', nullif(sum(v), 7L), '}'), 's BIGINT')` | Preserve Spark codegen boundaries. | - | partial-final | 3 | 1 | - |
 | constant-key-0 | `v = standard.long()` | `sum(v)` | Reproduce a constant grouping key interpreted as a SELECT ordinal. | `0` | partial-final | 3 | 1 | - |
 | constant-key-2 | `v = standard.long()` | `sum(v)` | Reproduce a constant grouping key interpreted as a SELECT ordinal. | `2` | partial-final | 3 | 1 | - |
+| projected-plus-one | `v = standard.long()` | `sum(v) + 1` | Aggregate result projection. | - | partial-final | 3 | 1 | - |
+| projected-null | `v = standard.long()` | `nullif(sum(v), sum(v))` | Nullable aggregate result projection. | - | partial-final | 3 | 1 | - |

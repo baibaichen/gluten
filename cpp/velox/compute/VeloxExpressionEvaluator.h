@@ -31,6 +31,13 @@ class VeloxExpressionEvaluator final {
       const uint8_t* data,
       int32_t size);
 
+  VeloxExpressionEvaluator(
+      std::shared_ptr<facebook::velox::memory::MemoryPool> pool,
+      std::shared_ptr<facebook::velox::core::QueryCtx> queryCtx,
+      facebook::velox::RowTypePtr inputType,
+      facebook::velox::RowTypePtr outputType,
+      std::vector<facebook::velox::core::TypedExprPtr> expressions);
+
   std::shared_ptr<VeloxColumnarBatch> evaluate(const std::shared_ptr<ColumnarBatch>& input);
 
  private:

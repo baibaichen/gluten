@@ -19,9 +19,7 @@ package org.apache.spark.sql.execution.benchmark.expression
 import org.apache.gluten.execution.VeloxWholeStageTransformerSuite
 
 import org.apache.spark.{SparkConf, SparkFunSuite}
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.aggregate.{Complete, Final, Partial}
-import org.apache.spark.sql.execution.GlutenImplicits.{withSQLConf => withSessionSQLConf}
 import org.apache.spark.sql.execution.aggregate.BaseAggregateExec
 import org.apache.spark.sql.execution.exchange.Exchange
 
@@ -45,6 +43,7 @@ private[expression] class ExpressionEvaluatorCasesSuite(
     group: String,
     cases: Seq[Catalog.CaseDef])
   extends VeloxWholeStageTransformerSuite {
+  override val invokeBeforeAllAndAfterAllEvenIfNoTestsAreExpected = true
   override def suiteName: String = group
   override def suiteId: String = s"${getClass.getName}:$group"
   override protected val resourcePath: String = "N/A"
@@ -63,31 +62,28 @@ private[expression] class ExpressionEvaluatorCasesSuite(
     "approx_count_distinct/nan-payloads"
   )
 
-  private val support = {
-    val session = createSparkSession
-    try session.withActive {
-        cases.map {
-          scenario =>
-            val result = withSessionSQLConf(
-              (RunOptions.sqlConf ++ ExpressionEvaluator.aggregateSqlConf): _*) {
-              new ExpressionPlan(
-                session,
-                scenario,
-                Data.Context(
-                  10000,
-                  scenario.keyCardinality,
-                  inputPartitions = scenario.maps.getOrElse(3)),
-                Data.compile(scenario.inputs)).validate()
-            }
-            scenario.id -> result
-        }.toMap
-      }
-    finally {
-      session.stop()
-      SparkSession.clearActiveSession()
-      SparkSession.clearDefaultSession()
+  private var unsupportedCases = Set.empty[String]
+
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    unsupportedCases = withSQLConf(
+      (RunOptions.sqlConf ++ ExpressionEvaluator.aggregateSqlConf): _*) {
+      cases.filterNot {
+        scenario =>
+          new ExpressionPlan(
+            spark,
+            scenario,
+            Data.Context(
+              10000,
+              scenario.keyCardinality,
+              inputPartitions = scenario.maps.getOrElse(3)),
+            Data.compile(scenario.inputs)).validate().ok()
+      }.map(_.id).toSet
     }
   }
+
+  override def tags: Map[String, Set[String]] = super.tags ++
+    testNames.filter(unsupportedCases).map(_ -> Set("org.scalatest.Ignore")).toMap
 
   override val nestedSuites: immutable.IndexedSeq[Suite] = {
     val files = cases.groupBy(_.sourceLocation.file)
@@ -96,9 +92,7 @@ private[expression] class ExpressionEvaluatorCasesSuite(
     val suites = multiple.map(cases => new FunctionSuite(cases)).toVector
     single.flatten.foreach {
       scenario =>
-        if (support(scenario.id).ok()) {
-          test(scenario.id)(verifyCase(scenario, ignoreCompare = ignoreCompareCases(scenario.id)))
-        } else ignore(scenario.id) {}
+        test(scenario.id)(verifyCase(scenario, ignoreCompare = ignoreCompareCases(scenario.id)))
     }
     suites
   }
@@ -175,17 +169,31 @@ private[expression] class ExpressionEvaluatorCasesSuite(
     override def suiteName: String = cases.head.id.takeWhile(_ != '/')
     override def suiteId: String = s"${ExpressionEvaluatorCasesSuite.this.suiteId}:$suiteName"
     // The enclosing group owns the Spark session, thread audit and accumulator cleanup.
-    override protected def beforeAll(): Unit = ()
-    override protected def afterAll(): Unit = ()
+    private var ownsFixture = false
+    override protected def beforeAll(): Unit = {
+      if (spark == null) {
+        ownsFixture = true
+        ExpressionEvaluatorCasesSuite.this.beforeAll()
+      }
+    }
+    override protected def afterAll(): Unit = {
+      if (ownsFixture) {
+        try ExpressionEvaluatorCasesSuite.this.afterAll()
+        finally ownsFixture = false
+      }
+    }
+    override val invokeBeforeAllAndAfterAllEvenIfNoTestsAreExpected = true
+    override def tags: Map[String, Set[String]] = super.tags ++
+      cases.filter(c => unsupportedCases(c.id)).map(
+        c =>
+          c.id.split("/", 2)(1) -> Set("org.scalatest.Ignore")).toMap
     override protected def beforeEach(): Unit = ExpressionEvaluatorCasesSuite.this.beforeEach()
     override protected def afterEach(): Unit = ExpressionEvaluatorCasesSuite.this.afterEach()
 
     cases.foreach {
       scenario =>
         val name = scenario.id.split("/", 2)(1)
-        if (support(scenario.id).ok()) {
-          test(name)(verifyCase(scenario, ignoreCompare = ignoreCompareCases(scenario.id)))
-        } else ignore(name) {}
+        test(name)(verifyCase(scenario, ignoreCompare = ignoreCompareCases(scenario.id)))
     }
   }
 }

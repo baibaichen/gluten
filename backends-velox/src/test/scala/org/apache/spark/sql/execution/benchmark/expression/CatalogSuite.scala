@@ -20,7 +20,18 @@ import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.IntegerType
 
+import java.io.ByteArrayInputStream
+import java.io.FileNotFoundException
+import java.io.InputStream
+import java.lang.{Double => JDouble, Long => JLong}
+import java.net.URLDecoder
+import java.nio.charset.CharacterCodingException
 import java.nio.charset.StandardCharsets.UTF_8
+import java.time.LocalDate
+import java.util.Arrays
+import java.util.Base64
+
+import scala.collection.mutable
 
 // scalastyle:off nonascii
 class CatalogSuite extends SparkFunSuite {
@@ -243,7 +254,7 @@ class CatalogSuite extends SparkFunSuite {
         assert(row.getLong(4) == key * 1000000L)
         assert(row.getInt(5) == 18262 + key.toInt)
         assert(
-          new String(row.getBinary(6), java.nio.charset.StandardCharsets.UTF_8) == f"$key%010d")
+          new String(row.getBinary(6), UTF_8) == f"$key%010d")
         assert(
           row.getArray(7).toIntArray().toSeq == Seq(
             key.toInt,
@@ -269,6 +280,15 @@ class CatalogSuite extends SparkFunSuite {
   test("scalar fixtures prepare valid encodings maps and fractional inputs outside evaluation") {
     import Data._
     import org.apache.spark.sql.types._
+
+    val nanPlan = compile(parseInputs(
+      "v = nanPayloadDouble()",
+      SourceLocation("inline.md", 1, 1),
+      "hll/nan-payloads"))
+    val nanRows = materializeRows(nanPlan, Context(16), 4)
+    assert(nanRows.forall(_.getDouble(0).isNaN))
+    assert(nanRows.map(row => JDouble.doubleToRawLongBits(row.getDouble(0))).toSeq ==
+      (0L until 16L).map(i => 0x7ff8000000000000L | i))
 
     val names = Seq(
       "fractionalDouble",
@@ -299,9 +319,9 @@ class CatalogSuite extends SparkFunSuite {
         assert(row.getDouble(0) == (if (key % 2 == 0) number else -number))
         assert(row.getDouble(1) == number)
         assert(row.getUTF8String(2).toString == s"spark SQL $key caf\u00e9")
-        val decoded = java.util.Base64.getDecoder.decode(row.getUTF8String(3).toString)
+        val decoded = Base64.getDecoder.decode(row.getUTF8String(3).toString)
         assert(new String(decoded, UTF_8) == f"$key%010d")
-        assert(java.lang.Long.parseLong(row.getUTF8String(4).toString, 16) == key)
+        assert(JLong.parseLong(row.getUTF8String(4).toString, 16) == key)
         val array = json.readTree(row.getUTF8String(5).toString)
         assert(array.isArray && array.size() == (if (key % 4 == 0) 0 else 3))
         if (array.size() != 0) {
@@ -309,9 +329,9 @@ class CatalogSuite extends SparkFunSuite {
           assert(array.get(2).isNull)
         }
         assert(
-          java.net.URLDecoder.decode(row.getUTF8String(6).toString, UTF_8.name()) ==
+          URLDecoder.decode(row.getUTF8String(6).toString, UTF_8.name()) ==
             s"spark SQL/$key caf\u00e9")
-        assert(java.time.LocalDate.parse(row.getUTF8String(7).toString).toEpochDay == 18262L + key)
+        assert(LocalDate.parse(row.getUTF8String(7).toString).toEpochDay == 18262L + key)
         val map = row.getMap(8)
         val entries = row.getArray(9)
         assert(map.numElements() == 2 && entries.numElements() == 2)
@@ -407,7 +427,7 @@ class CatalogSuite extends SparkFunSuite {
         assert(values.take(16) == values.slice(16, 32))
         assert(values.take(16).distinct.size == 16)
         val changed = plan.row(context.copy(seed = 8L), 0L, 0, 1)
-        assert(changed.get(0, plan.inputSchema(0).dataType) != values.head.head)
+        assert(changed.get(0, plan.inputSchema.head.dataType) != values.head.head)
     }
   }
   test("hashed string and binary generators preserve bytes and deterministic NULL masks") {
@@ -421,7 +441,7 @@ class CatalogSuite extends SparkFunSuite {
       val plan = Data.compile(parseInputs(inputs, source, "hashed/null-generators"))
       val nulls = Array.fill(4)(0)
       val maskDiffers = Array.fill(4)(0)
-      val observedBytes = scala.collection.mutable.Set.empty[Byte]
+      val observedBytes = mutable.Set.empty[Byte]
       for (i <- 0 until 2000) {
         val row = plan.row(context, i, i % 7, math.min(7, 2000 - i + i % 7))
         val otherBatch = plan.row(context, i, 0, 1)
@@ -432,7 +452,7 @@ class CatalogSuite extends SparkFunSuite {
           } else if (generator == "hashedBinary") {
             val bytes = row.getBinary(column)
             assert(bytes.length == 64 && bytes.take(56).forall(_ == 'x'.toByte))
-            assert(java.util.Arrays.equals(bytes, otherBatch.getBinary(column)))
+            assert(Arrays.equals(bytes, otherBatch.getBinary(column)))
             observedBytes ++= bytes.drop(56)
           } else {
             assert(row.getUTF8String(column).numBytes() == 64)
@@ -537,26 +557,9 @@ class CatalogSuite extends SparkFunSuite {
   }
   private val seed = 20260912L
 
-  private def trimInputs(id: String): String = {
-    val Array(direction, name) = id.split("/")
-    val grid = "l([0-9]+)-(.+)".r
-    name match {
-      case "custom" => s"(input, trimChars) = ${direction}Custom()"
-      case "leading-boundary" | "trailing-boundary" => s"input = ${direction}Boundary()"
-      case grid(width, "null50") =>
-        s"""input = ${direction}Pattern(length = $width, pattern = "half-even", nullPercent = 50)"""
-      case grid(width, "utf8-half-even") =>
-        s"""input = ${direction}Pattern(length = $width, pattern = "half-even", utf8 = true)"""
-      case grid(width, pattern) =>
-        s"""input = ${direction}Pattern(length = $width, pattern = "$pattern")"""
-      case identity if identity.startsWith("identity-l") =>
-        val width = identity.stripPrefix("identity-l")
-        s"""input = ${direction}Pattern(length = $width, pattern = "none")"""
-    }
-  }
+  private lazy val trimCases = Catalog.load().map(c => c.id -> c).toMap
 
-  private def trimPlan(id: String): Data.Plan =
-    Data.compile(parseInputs(trimInputs(id), SourceLocation("fixture", 1, 1), id))
+  private def trimPlan(id: String): Data.Plan = Data.compile(trimCases(id).inputs)
 
   private def rows(
       plan: Data.Plan,
@@ -624,21 +627,46 @@ class CatalogSuite extends SparkFunSuite {
         assert(custom(2).getUTF8String(1).toString == "xy")
     }
   }
-  test("loader rejects missing indexed resources and malformed UTF8 without dropping cases") {
+  test("loader preserves file-based unique IDs and rejects missing resources and malformed UTF8") {
     def resources(values: Map[String, Array[Byte]]): ClassLoader = new ClassLoader(null) {
-      override def getResourceAsStream(name: String): java.io.InputStream =
-        values.get(name).map(new java.io.ByteArrayInputStream(_)).orNull
+      override def getResourceAsStream(name: String): InputStream =
+        values.get(name).map(new ByteArrayInputStream(_)).orNull
     }
     val missing = intercept[IllegalArgumentException] {
       load(resources(Map("test/index.txt" -> "trim.md\n".getBytes(UTF_8))), "test")
     }
     assert(missing.getMessage.contains("test/trim.md"))
-    assert(missing.getCause.isInstanceOf[java.io.FileNotFoundException])
+    assert(missing.getCause.isInstanceOf[FileNotFoundException])
     val utf8 = intercept[IllegalArgumentException] {
       load(resources(Map("test/index.txt" -> Array(0xc3.toByte, 0x28.toByte))), "test")
     }
-    assert(utf8.getCause.isInstanceOf[java.nio.charset.CharacterCodingException])
+    assert(utf8.getCause.isInstanceOf[CharacterCodingException])
+    val aggregates = load(root = "expression-benchmark/aggregate", aggregate = true)
+    assert(aggregates.forall {
+      scenario =>
+        scenario.id.takeWhile(_ != '/') ==
+          scenario.sourceLocation.file.split("/").last.stripSuffix(".md")
+    })
+    val catalog = load() ++ aggregates
+    assert(catalog.map(_.id).distinct.size == catalog.size)
   }
+
+  test("aggregate tables carry explicit SQL grouping without restricting case names") {
+    val table = "| case | inputs | expression | description | grouping |\n" +
+      "| --- | --- | --- | --- | --- |\n" +
+      "| long-g256 | `id = standard.long()` | `sum(id)` | grouped | `pmod(id, 256)` |\n" +
+      "| all | `id = standard.long()` | `sum(id)` | global | - |\n"
+    val cases = parseMarkdown("sum", "aggregate.md", table, aggregate = true)
+    assert(cases.head.groupingKeys.contains(Seq("pmod(id, 256)")))
+    assert(cases(1).groupingKeys.contains(Seq.empty))
+    assertThrows[IllegalArgumentException](parseMarkdown("sum", "scalar.md", table))
+    assertThrows[IllegalArgumentException](parseMarkdown(
+      "sum",
+      "aggregate.md",
+      table.replace("`pmod(id, 256)`", "pmod(id, 256)"),
+      aggregate = true))
+  }
+
   test("index rejects duplicates path traversal empty entries and invalid filenames") {
     assert(parseIndex("trim.md\nrtrim.md\n", "index.txt") == Seq("trim.md", "rtrim.md"))
     Seq(

@@ -305,4 +305,17 @@ class RunOptionsSuite extends SparkFunSuite {
       assert(overrideJson.runtime.profiler.get.output == cwd.resolve("cli-out"))
     } finally Utils.deleteRecursively(cwd.toFile)
   }
+
+  test("shuffle directory is optional and rejects empty paths") {
+    assert(parse("trim").runtime.input.maps.isEmpty)
+    assert(parse("trim", "--input-partitions", "8").runtime.input.maps.contains(8))
+    Seq("0", "-1", "1.5", "2147483648").foreach {
+      value => assertThrows[IllegalArgumentException](parse("trim", "--input-partitions", value))
+    }
+    assert(parse("trim").runtime.input.shuffleDir.isEmpty)
+    assert(parse("trim", "--shuffle-dir", "/dev/shm/gluten-benchmark")
+      .runtime.input.shuffleDir.get.toString == "/dev/shm/gluten-benchmark")
+    assertThrows[IllegalArgumentException](parse("trim", "--shuffle-dir", " "))
+  }
+
 }

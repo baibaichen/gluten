@@ -57,8 +57,6 @@ private[benchmark] object Data {
 
   final case class Plan(inputSchema: StructType, row: (Context, Long, Int, Int) => InternalRow)
 
-  final case class Inputs(rows: Array[UnsafeRow], batches: Seq[ColumnarBatch])
-
   def materializeRows(plan: Plan, context: Context, batchSize: Int): Array[UnsafeRow] = {
     require(batchSize > 0, "Batch size must be positive")
     require(context.rows <= Int.MaxValue, "Input rows exceed in-memory array capacity")
@@ -74,25 +72,31 @@ private[benchmark] object Data {
     }
   }
 
-  def materialize(plan: Plan, context: Context, batchSize: Int): Inputs = {
-    val rows = materializeRows(plan, context, batchSize)
-    val inputBatches = if (plan.inputSchema.isEmpty) {
-      (0 until rows.length by batchSize).iterator.map {
-        start =>
-          new ColumnarBatch(Array.empty[ColumnVector], math.min(batchSize, rows.length - start))
-      }
-    } else {
-      RowToVeloxColumnarExec
-        .toColumnarBatchIterator(rows.iterator, plan.inputSchema, batchSize, Long.MaxValue)
+  def materializeBatches(
+      rows: Iterator[InternalRow],
+      schema: StructType,
+      batchSize: Int): Seq[ColumnarBatch] = {
+    var source = rows
+    val detached = new Iterator[InternalRow] {
+      override def hasNext: Boolean = source.hasNext
+      override def next(): InternalRow = source.next()
     }
-    val batches = inputBatches.zipWithIndex.map {
-      case (batch, index) =>
-        // The iterator recycles its previous payload when advanced.
-        ColumnarBatches.retain(batch)
-        TaskResources.addRecycler(s"ExpressionBenchmark input $index", 100)(batch.close())
-        batch
-    }.toVector
-    Inputs(rows, batches)
+    try {
+      val inputBatches = if (schema.isEmpty) {
+        detached.grouped(batchSize).map {
+          group => new ColumnarBatch(Array.empty[ColumnVector], group.size)
+        }
+      } else {
+        RowToVeloxColumnarExec.toColumnarBatchIterator(detached, schema, batchSize, Long.MaxValue)
+      }
+      inputBatches.zipWithIndex.map {
+        case (batch, index) =>
+          // The iterator recycles its previous payload when advanced.
+          ColumnarBatches.retain(batch)
+          TaskResources.addRecycler(s"ExpressionBenchmark input $index", 100)(batch.close())
+          batch
+      }.toVector
+    } finally source = Iterator.empty
   }
 
   private val standardFields: Map[String, StructField] = Seq(

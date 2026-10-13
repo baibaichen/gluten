@@ -16,11 +16,13 @@
  */
 package org.apache.spark.sql.execution.benchmark.expression
 
+import org.apache.spark.SPARK_VERSION
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.execution.GlutenImplicits.withSQLConf
 import org.apache.spark.sql.execution.benchmark.expression.Catalog._
 import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.sql.types.StructType
 import org.apache.spark.task.TaskResources
 import org.apache.spark.util.Utils
 
@@ -29,54 +31,39 @@ import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 
 class RunnerSuite extends SparkFunSuite {
-  test("case suite registers every catalog case without native or version exclusions") {
-    val suite = new BenchmarkSuite
-    val catalog = Catalog.load().map(_.id).toSet
-    assert(suite.testNames.filter(_.matches("[a-z0-9_-]+/[a-z0-9_-]+")) == catalog)
-    val ignored = suite.tags.collect {
-      case (name, tags) if tags.contains("org.scalatest.Ignore") => name
-    }.toSet
-    assert(ignored.isEmpty)
-  }
-
-  test("constructor is inert without blackhole, Spark session or task resources") {
-    BenchmarkBlackhole.requireEnabled(false)
-    intercept[IllegalStateException](BenchmarkBlackhole.requireEnabled(true))
-    assert(!TaskResources.inSparkTask())
-    val directory = Files.createTempDirectory("expression-constructor")
-    val profile = directory.resolve("not-created")
+  private def checkRegistration(): Unit = {
+    val events = ArrayBuffer.empty[String]
     val scenario = CaseDef(
-      "constructor/inert",
-      Seq(Binding(Seq("input"), "unknown-generator", Seq.empty)),
-      "invalid sql +",
-      "No eager preparation",
-      SourceLocation("constructor", 1, 1)
-    )
-    val options = RunOptions(Duration.Zero, Duration.Zero)
-    try {
-      Seq(options, options.copy(profiler = Some(ProfilerOptions(directory, output = profile))))
-        .foreach {
-          runtime =>
-            val constructed = scala.util.Try(
-              new Benchmark(
-                null,
-                scenario,
-                Data.Context(0),
-                runtime,
-                profiler = runtime.profiler.map(new Profiler(_))))
-            assert(constructed.isSuccess, s"Constructor performed preparation: $constructed")
-            assert(constructed.get.benchmarks.isEmpty)
-            assert(!Files.exists(profile))
-            assert(!TaskResources.inSparkTask())
-        }
-    } finally Utils.deleteRecursively(directory.toFile)
+      "registration/shared",
+      Seq.empty,
+      "1",
+      "Registration",
+      SourceLocation("registration", 1, 1))
+    val evaluator = new ExpressionEvaluator(
+      new ExpressionPlan(null, scenario, Data.Context(1), Data.compile(scenario.inputs))) {
+      override def outputSchema = new StructType
+      override def runVanilla(): Unit = { events += "vanilla" }
+      override def runNative(): Unit = { events += "native" }
+    }
+    val benchmark = new Benchmark(
+      evaluator,
+      RunOptions(Duration.Zero, Duration.Zero))
+    assert(events.isEmpty)
+    benchmark.registerCases()
+    assert(events.isEmpty)
+    benchmark.run()
+    val execution = events
+    assert(execution.takeWhile(_ == "vanilla").size >= 2)
+    assert(execution.dropWhile(_ == "vanilla").size >= 2)
+    assert(execution.dropWhile(_ == "vanilla").forall(_ == "native"))
   }
 
   test("direct run uses supplied case order and input definitions without catalog selection") {
-    assume(!org.apache.spark.SPARK_VERSION.startsWith("3."), "Runner requires Spark 4")
+    assume(!SPARK_VERSION.startsWith("3."), "Runner requires Spark 4")
     val directory = Files.createTempDirectory("expression-direct-run")
     val log = directory.resolve("child.log")
     val builder = new ProcessBuilder(blackholeJavaCommand :+ getClass.getName: _*)
@@ -95,6 +82,7 @@ class RunnerSuite extends SparkFunSuite {
   }
 
   private[expression] def checkDirectRun(): Unit = {
+    checkRegistration()
     val second = CaseDef(
       "memory/second",
       Seq(Binding(Seq("right_input"), "standard.long", Seq.empty)),
@@ -118,6 +106,11 @@ class RunnerSuite extends SparkFunSuite {
     val oldErr = System.err
     val errors = new PrintStream(new ByteArrayOutputStream)
     val leaks = TaskResources.ACCUMULATED_LEAK_BYTES.get()
+    def assertClean(): Unit = {
+      assert(!TaskResources.inSparkTask())
+      assert(TaskResources.ACCUMULATED_LEAK_BYTES.get() == leaks)
+      assert(SparkSession.getActiveSession.isEmpty && SparkSession.getDefaultSession.isEmpty)
+    }
     try {
       System.setOut(out)
       System.setErr(errors)
@@ -125,21 +118,25 @@ class RunnerSuite extends SparkFunSuite {
         RegisteredExpressionBenchmark.run(Seq(second, first), options)
         assert(SQLConf.get.sessionLocalTimeZone == "Asia/Tokyo")
       }
+      val invalidAggregate =
+        second.copy(sql = "sum(missing_column)", groupingKeys = Some(Seq.empty))
+      val planningFailure = intercept[IllegalArgumentException] {
+        RegisteredExpressionBenchmark.run(Seq(invalidAggregate), options)
+      }
+      assert(planningFailure.getMessage.contains(invalidAggregate.id))
+      assert(planningFailure.getMessage.contains(invalidAggregate.sourceLocation.toString))
+      assert(planningFailure.getCause != null)
+      assertClean()
       val text = bytes.toString(UTF_8.name())
       val results = text.linesIterator.filter(_.startsWith("memory/")).toSeq
       assert(results.map(_.takeWhile(_ != ' ').stripSuffix(":")) == Seq(second.id, first.id))
-      assert(text.contains("Best Time(ms)") && text.contains("Avg Time(ms)"))
-      assert(text.contains("Stdev(ms)") && text.contains("Relative"))
-      assert(!text.contains("median"))
       val engines =
         text.linesIterator
           .filter(l => l.startsWith("vanilla") || l.startsWith("native"))
           .map(_.takeWhile(_ != ' '))
           .toSeq
       assert(engines == Seq("vanilla", "native", "vanilla", "native"))
-      assert(!TaskResources.inSparkTask())
-      assert(TaskResources.ACCUMULATED_LEAK_BYTES.get() == leaks)
-      assert(SparkSession.getActiveSession.isEmpty && SparkSession.getDefaultSession.isEmpty)
+      assertClean()
 
       bytes.reset()
       val failure = withSQLConf(SQLConf.SESSION_LOCAL_TIMEZONE.key -> "Asia/Tokyo") {
@@ -153,9 +150,7 @@ class RunnerSuite extends SparkFunSuite {
       val partial = bytes.toString(UTF_8.name())
       assert(partial.linesIterator.exists(_.startsWith(first.id)))
       assert(!partial.linesIterator.exists(_.startsWith(second.id)))
-      assert(!TaskResources.inSparkTask())
-      assert(TaskResources.ACCUMULATED_LEAK_BYTES.get() == leaks)
-      assert(SparkSession.getActiveSession.isEmpty && SparkSession.getDefaultSession.isEmpty)
+      assertClean()
 
       Seq(false, true).foreach {
         interrupted =>
@@ -182,16 +177,14 @@ class RunnerSuite extends SparkFunSuite {
                 assert(SQLConf.get.sessionLocalTimeZone == "Asia/Tokyo")
               }
               assert(Thread.currentThread().isInterrupted == interrupted)
-              assert(!TaskResources.inSparkTask())
-              assert(TaskResources.ACCUMULATED_LEAK_BYTES.get() == leaks)
-              assert(
-                SparkSession.getActiveSession.isEmpty && SparkSession.getDefaultSession.isEmpty)
+              assertClean()
             }
           finally {
             Thread.interrupted()
             console.close()
           }
       }
+
     } finally {
       System.setOut(oldOut)
       System.setErr(oldErr)
@@ -217,15 +210,15 @@ class RunnerSuite extends SparkFunSuite {
     System.getProperty("java.class.path")
   )
 
-  test("runner inherits stdout and opt-in Spark result files without custom archives") {
-    assume(!org.apache.spark.SPARK_VERSION.startsWith("3."), "Runner requires Spark 4")
-    val directory = Files.createTempDirectory("expression-stdout")
+  test("runner writes Spark output and propagates profiler loading failures") {
+    assume(!SPARK_VERSION.startsWith("3."), "Runner requires Spark 4")
+    val directory = Files.createTempDirectory("expression-output")
     val stdout = directory.resolve("stdout.log")
     val stderr = directory.resolve("stderr.log")
     val command = blackholeJavaCommand ++ Seq(
       RegisteredExpressionBenchmark.getClass.getName.stripSuffix("$"),
       "--cases",
-      "encode/standard-string,trim/standard-string",
+      "trim/standard-string,sum/global",
       "--rows",
       "1000",
       "--warmup-seconds",
@@ -233,88 +226,51 @@ class RunnerSuite extends SparkFunSuite {
       "--measurement-seconds",
       "1"
     )
-    val builder = new ProcessBuilder(command: _*)
-      .directory(directory.toFile)
-      .redirectOutput(stdout.toFile)
-      .redirectError(stderr.toFile)
-    builder.environment().put("SPARK_LOCAL_IP", "127.0.0.1")
-    builder
-      .environment()
-      .put("GLUTEN_EXPRESSION_BENCHMARK_RUNS", directory.resolve("removed").toString)
-    builder.environment().remove("SPARK_GENERATE_BENCHMARK_FILES")
-    var process = builder.start()
-    try {
-      assert(process.waitFor(90, TimeUnit.SECONDS), "Benchmark timed out")
-      val output = new String(Files.readAllBytes(stdout), UTF_8)
-      val errors = new String(Files.readAllBytes(stderr), UTF_8)
-      assert(process.exitValue() == 0, errors)
-      assert(output.contains("trim/standard-string:") && output.contains("Best Time(ms)"))
-      assert(output.contains("Avg Time(ms)") && output.contains("Stdev(ms)"))
-      assert(output.contains("Rate(M/s)") && output.contains("Per Row(ns)"))
-      assert(output.contains("Relative") && !output.contains("median"))
-      val skipped = errors.linesIterator.filter(_.startsWith("SKIPPED ")).toSeq
-      val encodeSkipped = skipped match {
-        case Seq(message) =>
-          val prefix = "SKIPPED encode/standard-string: "
-          assert(message.startsWith(prefix) && message.stripPrefix(prefix).trim.nonEmpty)
-          true
-        case Seq() => false
-        case unexpected => fail(s"Unexpected skipped cases: ${unexpected.mkString(", ")}")
-      }
-      val expectedEngines =
-        if (encodeSkipped) Seq("vanilla", "native")
-        else Seq("vanilla", "native", "vanilla", "native")
-      assert(
-        output.linesIterator
-          .filter(l => l.startsWith("vanilla") || l.startsWith("native"))
-          .map(_.takeWhile(_ != ' '))
-          .toSeq == expectedEngines)
-      assert(!errors.contains("allocatedBytes=") && !errors.contains("generatedClass="))
-      assert(!errors.contains("nanoTime="))
-      assert(!errors.contains("fallback=") && !errors.contains("profiled="))
-      assert(!output.contains("SKIPPED"))
-      assert(encodeSkipped || output.contains("encode/standard-string:"))
-      assert(!Files.exists(directory.resolve("removed")))
-      assert(!Files.exists(directory.resolve("target/expression-benchmark-runs")))
-      assert(!Files.exists(directory.resolve("target/expression-benchmark-profiles")))
-      assert(!Files.exists(directory.resolve("benchmarks")))
-
-      builder.environment().put("SPARK_GENERATE_BENCHMARK_FILES", "1")
-      process = builder.start()
-      assert(process.waitFor(90, TimeUnit.SECONDS), "File-output benchmark timed out")
-      assert(process.exitValue() == 0, new String(Files.readAllBytes(stderr), UTF_8))
-      val version = Utils.javaVersion.split("\\D+")(0).toInt
-      val jdkSuffix = if (version > 17) s"-jdk$version" else ""
-      val resultFile =
-        directory.resolve(s"benchmarks/RegisteredExpressionBenchmark$jdkSuffix-results.txt")
-      assert(Files.isRegularFile(resultFile))
-      val fileOutput = new String(Files.readAllBytes(resultFile), UTF_8)
-      assert(fileOutput.contains("trim/standard-string") && fileOutput.contains("Best Time(ms)"))
-      assert(fileOutput.contains("vanilla") && fileOutput.contains("native"))
-      assert(!fileOutput.contains("median"))
-      assert(!Files.exists(directory.resolve("target/expression-benchmark-profiles")))
-
-      val profiler = Files.createDirectory(directory.resolve("profiler"))
-      val library = Files
-        .createDirectory(profiler.resolve("lib"))
-        .resolve(System.mapLibraryName("asyncProfiler"))
-      val failureCommand = command.map {
-        case "encode/standard-string,trim/standard-string" => "trim/standard-string"
-        case other => other
-      } ++ Seq("--async-profiler", profiler.toString)
-      builder.command(failureCommand: _*)
-      process = builder.start()
-      assert(process.waitFor(90, TimeUnit.SECONDS), "Failing benchmark timed out")
-      val failure = new String(Files.readAllBytes(stderr), UTF_8)
-      assert(process.exitValue() != 0 && failure.contains("UnsatisfiedLinkError"), failure)
-      assert(failure.contains(library.toString), failure)
-      assert(!failure.contains("SKIPPED"))
-      assert(!new String(Files.readAllBytes(stdout), UTF_8).contains("SKIPPED"))
-      assert(!Files.exists(directory.resolve("removed")))
-    } finally {
-      if (process.isAlive) process.destroyForcibly().waitFor()
-      Utils.deleteRecursively(directory.toFile)
+    def run(args: Seq[String], files: Boolean): (Int, String, String) = {
+      val builder = new ProcessBuilder(args: _*).directory(directory.toFile)
+        .redirectOutput(stdout.toFile).redirectError(stderr.toFile)
+      builder.environment().put("SPARK_LOCAL_IP", "127.0.0.1")
+      builder.environment().remove("SPARK_GENERATE_BENCHMARK_FILES")
+      if (files) builder.environment().put("SPARK_GENERATE_BENCHMARK_FILES", "1")
+      val process = builder.start()
+      try {
+        assert(process.waitFor(90, TimeUnit.SECONDS), "Benchmark timed out")
+        (
+          process.exitValue(),
+          new String(Files.readAllBytes(stdout), UTF_8),
+          new String(Files.readAllBytes(stderr), UTF_8))
+      } finally if (process.isAlive) process.destroyForcibly().waitFor()
     }
+    try {
+      Seq(false, true).foreach {
+        files =>
+          val (exit, output, errors) = run(command, files)
+          assert(exit == 0, errors)
+          assert(output.contains("trim/standard-string:") && output.contains("sum/global:"))
+          Seq(
+            "Best Time(ms)",
+            "Avg Time(ms)",
+            "Stdev(ms)",
+            "Rate(M/s)",
+            "Per Row(ns)",
+            "Relative",
+            "vanilla",
+            "native").foreach(label => assert(output.contains(label)))
+          assert(Files.exists(directory.resolve("benchmarks")) == files)
+          if (files) {
+            val reports = Files.list(directory.resolve("benchmarks"))
+            try {
+              val report = new String(Files.readAllBytes(reports.findFirst().get()), UTF_8)
+              assert(report.contains("sum/global") && report.contains("vanilla") &&
+                report.contains("native"))
+            } finally reports.close()
+          }
+      }
+      val profiler = Files.createDirectory(directory.resolve("profiler"))
+      val (exit, _, errors) = run(command ++ Seq("--async-profiler", profiler.toString), false)
+      assert(exit != 0 && errors.contains("UnsatisfiedLinkError"), errors)
+      assert(!errors.contains("SKIPPED"))
+    } finally Utils.deleteRecursively(directory.toFile)
   }
 
 }

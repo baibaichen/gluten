@@ -8,6 +8,7 @@
 | partition-id-key | `v = standard.long()` | `sum(v)` | Reproduce partition-local ID state across input partitions. | `monotonically_increasing_id()` | - | - | - | - |
 | random-result | `k = standard.long(); v = standard.long()` | `sum(v) + rand(7)` | Deterministic keys with a nondeterministic result. | `k` | - | - | - | - |
 | complete-global | `v = standard.long()` | `sum(v)` | Single-stage global aggregation. | - | complete | 3 | 1 | - |
+| complete-pruned-input | `k = standard.long(); v = hashedLong(column=1)` | `sum(v)` | Preserve input column pruning below coalesce. | - | complete | 3 | 1 | - |
 | one-map | `v = standard.long()` | `sum(v)` | One map keeps the shuffle boundary; requested reducers are recorded. | - | partial-final | 1 | 7 | - |
 | complete-grouped | `k = standard.long(); v = standard.long()` | `sum(v)` | Single-stage grouped aggregation. | `k` | complete | 3 | 1 | 32 |
 | complete-cast | `v = standard.long()` | `cast(sum(v) as string)` | Preserve aggregate output projection. | - | complete | 3 | 1 | - |

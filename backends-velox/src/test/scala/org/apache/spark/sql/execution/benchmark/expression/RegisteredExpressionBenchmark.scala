@@ -18,21 +18,24 @@ package org.apache.spark.sql.execution.benchmark.expression
 
 import org.apache.gluten.test.MockVeloxBackend
 
-import org.apache.spark.benchmark.BenchmarkBase
+import org.apache.spark.benchmark.{BenchmarkBase => SparkBenchmarkBase}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.execution.GlutenImplicits.withSQLConf
 import org.apache.spark.task.TaskResources
 import org.apache.spark.util.Utils
 
-import org.scalatest.exceptions.TestCanceledException
+import java.nio.file.Files
+
+import scala.util.control.NonFatal
 
 /** Selects catalog cases and owns their Spark session and resource scopes. */
-object RegisteredExpressionBenchmark extends BenchmarkBase {
+object RegisteredExpressionBenchmark extends SparkBenchmarkBase {
   override def runBenchmarkSuite(args: Array[String]): Unit = {
     // BenchmarkBase.main has no finally; close its file even when parsing or execution fails.
     Utils.tryWithSafeFinally {
       val options = RunOptions.parse(args)
-      val catalog = Catalog.load()
+      val catalog =
+        Catalog.load() ++ Catalog.load(root = "expression-benchmark/aggregate", aggregate = true)
       if (options.list) {
         System.out.println(options.listing(catalog)) // scalastyle:ignore println
       } else {
@@ -50,7 +53,6 @@ object RegisteredExpressionBenchmark extends BenchmarkBase {
   private[benchmark] def run(cases: Seq[Catalog.CaseDef], options: RunOptions): Unit = {
     if (cases.isEmpty) return
     val input = options.input
-    val context = Data.Context(input.rows, input.keyCardinality, input.seed)
     BenchmarkBlackhole.requireEnabled(true)
     val profiler = options.profiler.map(new Profiler(_))
     try
@@ -61,13 +63,38 @@ object RegisteredExpressionBenchmark extends BenchmarkBase {
           .setMaster("local[1]")
           .setAppName("ExpressionBenchmark")
           .set("spark.plugins", "org.apache.gluten.GlutenPlugin")
+          .set("spark.shuffle.manager", "org.apache.spark.shuffle.sort.ColumnarShuffleManager")
+          .set("spark.shuffle.compress", "false")
           .set("spark.memory.offHeap.enabled", "true")
           .set("spark.memory.offHeap.size", "8g")
           .set("spark.ui.enabled", "false")
         RunOptions.sqlConf.foreach { case (key, value) => conf.set(key, value) }
-        val spark = SparkSession.builder().config(conf).getOrCreate()
+        input.shuffleDir.foreach {
+          path =>
+            Files.createDirectories(path)
+            require(
+              Files.isWritable(path),
+              s"Shuffle directory is not writable: $path")
+            conf.set("spark.gluten.benchmark.shuffleDir", path.toString)
+        }
+        val spark = SparkSession.builder().config(conf)
+          .withExtensions(new ExpressionBenchmarkExtensions).getOrCreate()
         Utils.tryWithSafeFinally {
-          cases.foreach(runCase(spark, _, context, options, profiler))
+          cases.foreach {
+            scenario =>
+              val resolved = scenario.copy(
+                mode = input.aggregateMode.orElse(scenario.mode),
+                maps = input.maps.orElse(scenario.maps),
+                reducers = input.reducers.orElse(scenario.reducers),
+                keyCardinality = input.keyCardinality.orElse(scenario.keyCardinality)
+              )
+              val context = Data.Context(
+                input.rows,
+                resolved.keyCardinality,
+                input.seed,
+                resolved.maps.getOrElse(3))
+              runCase(spark, resolved, context, options, profiler)
+          }
         } {
           spark.stop()
         }
@@ -88,20 +115,33 @@ object RegisteredExpressionBenchmark extends BenchmarkBase {
       context: Data.Context,
       options: RunOptions,
       profiler: Option[Profiler]): Unit =
-    withSQLConf(RunOptions.sqlConf: _*) {
-      TaskResources.runUnsafe {
-        val benchmark =
-          new Benchmark(spark, scenario, context, options, output, profiler = profiler)
-        try
-          benchmark.checked {
-            System.err.println(s"${scenario.id}: ${scenario.description}")
+    withSQLConf((RunOptions.sqlConf ++ ExpressionEvaluator.aggregateSqlConf): _*) {
+      val plan = new ExpressionPlan(spark, scenario, context, Data.compile(scenario.inputs))
+      try {
+        val validation = plan.validate()
+        if (!validation.ok()) {
+          System.err.println("SKIPPED " + scenario.id + ": " + validation.reason())
+        } else {
+          val evaluator = new ExpressionEvaluator(plan, options.batchSize)
+          val benchmark = new Benchmark(evaluator, options, output, profiler)
+          TaskResources.runUnsafe {
+            System.err.println(scenario.id + ": " + scenario.description)
+            if (plan.aggregate) {
+              val mode = scenario.mode.getOrElse("partial-final")
+              System.err.println(
+                s"mode=$mode, maps=${plan.partitions} (requested=${context.inputPartitions}), " +
+                  s"reducers=1 (requested=${scenario.reducers.getOrElse(1)}), " +
+                  s"keyCardinality=${context.keys}")
+            }
             benchmark.registerCases()
             runBenchmark(scenario.id)(benchmark.run())
           }
-        catch {
-          case canceled: TestCanceledException =>
-            System.err.println(s"SKIPPED ${scenario.id}: ${canceled.getMessage}")
         }
+      } catch {
+        case NonFatal(cause) =>
+          throw new IllegalArgumentException(
+            s"${scenario.sourceLocation} case=${scenario.id}: ${cause.getMessage}",
+            cause)
       }
     }
   // scalastyle:on println

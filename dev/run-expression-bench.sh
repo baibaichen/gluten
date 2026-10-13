@@ -21,7 +21,8 @@ usage() {
     'Usage: dev/run-expression-bench.sh [--skip-build] functionsCSV [options]' \
     '       dev/run-expression-bench.sh [--skip-build] --cases function/case,glob [options]' \
     '       dev/run-expression-bench.sh [--skip-build] --list [functionsCSV] | --config file [options]' \
-    'Options: --rows --batch-size --seed --key-cardinality' \
+    'Options: --input-partitions (alias --maps) --aggregate-mode complete|partial-final --reducers' \
+    '         --shuffle-dir --rows --batch-size --seed --key-cardinality' \
     '         --warmup-seconds N --measurement-seconds N' \
     '         --async-profiler dir --profile-event cpu|alloc --profile-output dir' \
     'Default: 10s warmup / 60s measurement per engine; at least 2 iterations.' \

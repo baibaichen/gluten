@@ -66,9 +66,9 @@ private[expression] class ExpressionEvaluatorCasesSuite(
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    unsupportedCases = withSQLConf(
+    withSQLConf(
       (RunOptions.sqlConf ++ ExpressionEvaluator.aggregateSqlConf): _*) {
-      cases.filterNot {
+      unsupportedCases = cases.filterNot {
         scenario =>
           new ExpressionPlan(
             spark,

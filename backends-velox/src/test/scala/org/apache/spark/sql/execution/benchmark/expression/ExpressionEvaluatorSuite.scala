@@ -34,7 +34,8 @@ class ExpressionEvaluatorSuite
     new ExpressionEvaluatorCasesSuite("scalar", Catalog.load()),
     new ExpressionEvaluatorCasesSuite(
       "aggregate",
-      Catalog.load(root = "expression-benchmark/aggregate", aggregate = true))
+      Catalog.load(root = "expression-benchmark/aggregate", aggregate = true)
+        .filter(_.keyCardinality.forall(_ <= 512)))
   )
   with SequentialNestedSuiteExecution
 

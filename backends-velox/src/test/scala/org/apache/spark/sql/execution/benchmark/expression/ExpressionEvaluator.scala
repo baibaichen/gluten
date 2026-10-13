@@ -91,9 +91,7 @@ private[expression] class ExpressionEvaluator(
             columns.foreach(_.close())
             throw error
         }
-        val out = new ColumnarBatch(columns.map(_.asInstanceOf[ColumnVector]), batch.length) {
-          override def closeIfFreeable(): Unit = ()
-        }
+        val out = new ColumnarBatch(columns.map(_.asInstanceOf[ColumnVector]), batch.length)
         TaskResources.addRecycler("JVM input batch", 0)(out.close())
         out
     }.toArray)

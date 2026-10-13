@@ -63,6 +63,19 @@ VeloxExpressionEvaluator::VeloxExpressionEvaluator(
   expressions_ = exec::makeExprSetFromFlag(std::vector<core::TypedExprPtr>{std::move(typed)}, &execCtx_);
 }
 
+VeloxExpressionEvaluator::VeloxExpressionEvaluator(
+    std::shared_ptr<memory::MemoryPool> pool,
+    std::shared_ptr<core::QueryCtx> queryCtx,
+    RowTypePtr inputType,
+    RowTypePtr outputType,
+    std::vector<core::TypedExprPtr> expressions)
+    : pool_(std::move(pool)),
+      queryCtx_(std::move(queryCtx)),
+      execCtx_(pool_.get(), queryCtx_.get()),
+      inputType_(std::move(inputType)),
+      outputType_(std::move(outputType)),
+      expressions_(exec::makeExprSetFromFlag(std::move(expressions), &execCtx_)) {}
+
 std::shared_ptr<VeloxColumnarBatch> VeloxExpressionEvaluator::evaluate(const std::shared_ptr<ColumnarBatch>& input) {
   GLUTEN_CHECK(input != nullptr, "Input columnar batch must not be null");
   auto batch = std::dynamic_pointer_cast<VeloxColumnarBatch>(input);
@@ -86,10 +99,12 @@ std::shared_ptr<VeloxColumnarBatch> VeloxExpressionEvaluator::evaluate(const std
   exec::EvalCtx context(&execCtx_, expressions_.get(), &boundInput);
   exec::LocalSelectivityVector rows(execCtx_, row->size());
   rows->setAll();
-  std::vector<VectorPtr> result(1);
+  std::vector<VectorPtr> result(outputType_->size());
   expressions_->eval(*rows, context, result);
-  GLUTEN_CHECK(result[0] != nullptr, "Native expression returned no result");
-  GLUTEN_CHECK(result[0]->size() >= row->size(), "Native expression returned too few rows");
+  for (const auto& column : result) {
+    GLUTEN_CHECK(column != nullptr, "Native expression returned no result");
+    GLUTEN_CHECK(column->size() >= row->size(), "Native expression returned too few rows");
+  }
 
   // Each output owns its vector, including references to unchanged input strings.
   return std::make_shared<VeloxColumnarBatch>(

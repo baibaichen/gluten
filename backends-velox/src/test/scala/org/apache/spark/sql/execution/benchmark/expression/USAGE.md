@@ -251,6 +251,10 @@ output-materialization costs. These are not bare-function instruction timings
 or ready-made marginal cost coefficients.
 
 `ExpressionEvaluatorSuite` contains two nested suites, `scalar` and `aggregate`.
+Case names are registered without starting Spark. Native support is validated in
+beforeAll using the group's existing Spark fixture; unsupported cases receive
+ScalaTest Ignore tags before test execution. Selecting a function suite directly
+uses the same group fixture and closes it after the selected tests finish.
 Run the parent suite to exercise both groups. Multi-case files have nested function
 suites; CLI selectors always use function/case. Tests own result collection and
 comparison; the benchmark CLI only executes and times. BenchmarkSuite covers

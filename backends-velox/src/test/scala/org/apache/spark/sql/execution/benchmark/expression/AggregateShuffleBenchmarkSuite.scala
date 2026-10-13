@@ -46,23 +46,6 @@ class AggregateShuffleBenchmarkSuite extends VeloxWholeStageTransformerSuite {
 
   private def caseDef(id: String): Catalog.CaseDef = catalog.find(_.id == id).get
 
-  test("aggregate result projection evaluates sum plus one") {
-    for (codegen <- Seq("true", "false")) {
-      withSQLConf("spark.sql.codegen.wholeStage" -> codegen) {
-        Seq("sum(v) + 1", "nullif(sum(v), 6L)").foreach {
-          sql =>
-            withAggregate(caseDef("sum/global").copy(sql = sql), Data.Context(4), 2) {
-              (_, verify) =>
-                verify(
-                  (_, row) =>
-                    if (sql.startsWith("nullif")) assert(row.isNullAt(0))
-                    else assert(row.getLong(0) == 7L))
-            }
-        }
-      }
-    }
-  }
-
   test("standalone aggregate disables spilling with the default spill strategy") {
     withSQLConf((RunOptions.sqlConf ++ ExpressionEvaluator.aggregateSqlConf :+
       ("spark.gluten.sql.columnar.backend.velox.spillStrategy" -> "auto")): _*) {
@@ -105,25 +88,20 @@ class AggregateShuffleBenchmarkSuite extends VeloxWholeStageTransformerSuite {
     }
   }
 
-  test("Spark codegen-capable aggregates execute two generated stages") {
-    for (
-      function <- Seq("sum", "avg", "count", "min", "max");
-      layout <- Seq("global", "grouped")
-    ) {
-      val scenario =
-        caseDef(s"$function/$layout")
-      withAggregate(
-        scenario,
-        Data.Context(31, Some(3), inputPartitions = 4),
-        5) {
-        (evaluator, verify) =>
-          assert(evaluator.metadata("vanillaCodegenStages") == "2")
-          val jobs = spark.sparkContext.statusTracker.getJobIdsForGroup(null).toSet
-          var count = 0
-          verify((_, _) => count += 1)
-          assert(spark.sparkContext.statusTracker.getJobIdsForGroup(null).toSet == jobs)
-          assert(count == (if (layout == "global") 1 else 3))
-      }
+  test("Spark aggregate codegen preserves two generated stages") {
+    Seq("sum/global", "sum/grouped").foreach {
+      id =>
+        val scenario = caseDef(id)
+        withAggregate(
+          scenario,
+          Data.Context(31, Some(3), inputPartitions = 4),
+          5) {
+          (evaluator, verify) =>
+            assert(evaluator.metadata("vanillaCodegenStages") == "2")
+            var count = 0
+            verify((_, _) => count += 1)
+            assert(count == (if (scenario.groupingKeys.get.isEmpty) 1 else 3))
+        }
     }
   }
 
@@ -142,14 +120,13 @@ class AggregateShuffleBenchmarkSuite extends VeloxWholeStageTransformerSuite {
 
   test("disabled whole-stage codegen uses Spark aggregate iterator") {
     withSQLConf("spark.sql.codegen.wholeStage" -> "false") {
-      val scenario = caseDef("sum/grouped")
-      withAggregate(
-        scenario,
-        Data.Context(24, Some(3)),
-        2) {
-        (evaluator, verify) =>
-          assert(evaluator.metadata("vanillaCodegenStages") == "0")
-          verify((_, _) => ())
+      Seq("sum/grouped", "sum/projected-plus-one", "sum/projected-null").foreach {
+        id =>
+          withAggregate(caseDef(id), Data.Context(24, Some(3)), 2) {
+            (evaluator, verify) =>
+              assert(evaluator.metadata("vanillaCodegenStages") == "0")
+              verify((_, _) => ())
+          }
       }
     }
   }

@@ -21,6 +21,7 @@ import org.apache.spark.sql.internal.SQLConf
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.{DeserializationFeature, JsonNode, ObjectMapper}
 
+import java.math.BigInteger
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files, Path, Paths}
@@ -35,7 +36,14 @@ final private[benchmark] case class InputOptions(
     rows: Int = 4000000,
     batchSize: Int = 10240,
     seed: Long = 20260912L,
-    keyCardinality: Option[Long] = None) {
+    keyCardinality: Option[Long] = None,
+    shuffleDir: Option[Path] = None,
+    maps: Option[Int] = None,
+    aggregateMode: Option[String] = None,
+    reducers: Option[Int] = None) {
+  require(maps.forall(_ > 0), "Maps must be positive")
+  require(reducers.forall(_ > 0), "Reducers must be positive")
+  require(aggregateMode.forall(Set("complete", "partial-final")), "Unknown aggregate mode")
   require(rows > 0, "Row count must be positive")
   require(batchSize > 0, "Batch size must be positive")
   require(keyCardinality.forall(_ > 0), "Key cardinality must be positive")
@@ -125,6 +133,11 @@ private[benchmark] object RunOptions {
   val usage: String = "Usage: dev/run-expression-bench.sh functionsCSV [options] | " +
     "--cases function/case,glob [options] | --config file [options] | --list [functionsCSV]"
   private val names = Map(
+    "input-partitions" -> "inputPartitions",
+    "maps" -> "inputPartitions",
+    "aggregate-mode" -> "aggregateMode",
+    "reducers" -> "reducers",
+    "shuffle-dir" -> "shuffleDir",
     "rows" -> "rows",
     "batch-size" -> "batchSize",
     "seed" -> "seed",
@@ -137,8 +150,11 @@ private[benchmark] object RunOptions {
   )
   private val selectors = Set("functions", "cases")
   private val durations = Set("warmupSeconds", "measurementSeconds")
-  private val integers = Set("rows", "batchSize", "seed", "keyCardinality") ++ durations
-  private val choices = Map("profileEvent" -> Set("cpu", "alloc"))
+  private val integers =
+    Set("rows", "batchSize", "seed", "keyCardinality", "inputPartitions", "reducers") ++ durations
+  private val choices = Map(
+    "profileEvent" -> Set("cpu", "alloc"),
+    "aggregateMode" -> Set("complete", "partial-final"))
   private val fields = names.values.toSet ++ selectors
   private val mapper = new ObjectMapper()
     .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
@@ -162,7 +178,8 @@ private[benchmark] object RunOptions {
                 .forall(v => v.isTextual && v.textValue().trim.nonEmpty),
               s"$key must be a nonempty string array")
           // Positive Int seconds also fit exactly in Long nanoseconds.
-          case "rows" | "batchSize" | "warmupSeconds" | "measurementSeconds" =>
+          case "rows" | "batchSize" | "warmupSeconds" | "measurementSeconds" |
+              "inputPartitions" | "reducers" =>
             require(
               n.isIntegralNumber && n.canConvertToInt && n.intValue() > 0,
               s"$key must be a positive Int")
@@ -173,11 +190,10 @@ private[benchmark] object RunOptions {
               s"Invalid Long field: $key")
           case _ =>
             require(n.isTextual, s"$key must be a string")
-            choices
-              .get(key)
-              .foreach(
-                allowed => require(allowed(n.textValue()), s"Unknown $key: ${n.textValue()}"))
-            if (key == "asyncProfiler" || key == "profileOutput") {
+            choices.get(key).foreach(
+              allowed =>
+                require(allowed(n.textValue()), s"Unknown $key: ${n.textValue()}"))
+            if (key == "asyncProfiler" || key == "profileOutput" || key == "shuffleDir") {
               require(n.textValue().trim.nonEmpty, "Path must not be empty or blank")
             }
         }
@@ -216,7 +232,7 @@ private[benchmark] object RunOptions {
           items
         } else if (integers(key)) {
           require(v.matches("-?[0-9]+"), s"$key must be an integer")
-          mapper.getNodeFactory.numberNode(new java.math.BigInteger(v))
+          mapper.getNodeFactory.numberNode(new BigInteger(v))
         } else mapper.getNodeFactory.textNode(v)
       }
       arg match {
@@ -279,7 +295,11 @@ private[benchmark] object RunOptions {
       rows = integer("rows", inputDefaults.rows),
       batchSize = integer("batchSize", inputDefaults.batchSize),
       seed = values.get("seed").map(_.longValue()).getOrElse(inputDefaults.seed),
-      keyCardinality = values.get("keyCardinality").map(_.longValue())
+      keyCardinality = values.get("keyCardinality").map(_.longValue()),
+      shuffleDir = values.get("shuffleDir").map(_ => path("shuffleDir", "")),
+      maps = values.get("inputPartitions").map(_.intValue()),
+      aggregateMode = values.get("aggregateMode").map(_.textValue()),
+      reducers = values.get("reducers").map(_.intValue())
     )
     val profiler = values.get("asyncProfiler").map {
       _ =>

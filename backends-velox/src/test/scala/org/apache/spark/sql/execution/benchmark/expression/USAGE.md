@@ -63,6 +63,10 @@ options or `--config`.
 | `--batch-size` | `batchSize` | 10240 |
 | `--seed` | `seed` | 20260912 |
 | `--key-cardinality` | `keyCardinality` | Input row count |
+| `--input-partitions` / `--maps` | `inputPartitions` | MD maps, otherwise 3 |
+| `--aggregate-mode` | `aggregateMode` | MD mode, otherwise partial-final |
+| `--reducers` | `reducers` | MD reducers, otherwise 1; execution currently uses 1 |
+| `--shuffle-dir` | `shuffleDir` | JVM temporary directory |
 | `--warmup-seconds` | `warmupSeconds` | 10 |
 | `--measurement-seconds` | `measurementSeconds` | 60 |
 | `--async-profiler` | `asyncProfiler` | Disabled |
@@ -169,6 +173,7 @@ Common generator choices:
 | `rtrimCustom`, `ltrimCustom` | No arguments; bind both value and trim-character columns. |
 | `hashedLong` | Required nonnegative `column` to distinguish changing columns. |
 | `hashedString`, `hashedBinary` | Required `column` and positive `length`; optional `prefix` smaller than `length`, and `nullPercent` from 0 to 100. |
+| `nanPayloadDouble` | No arguments; Double NaNs with distinct payload bits by row index. |
 | `nullableBoundedInt` | Optional `nullPercent` from 0 to 100; bounded integer values. |
 
 Trim patterns are `none`, `first`, `cluster`, `half-even`, `last`,
@@ -333,3 +338,18 @@ identities, inputs, seed and batch size for each arm. Build/packaging can overwr
 mutable artifacts: do not assume an existing classpath or native library matches
 the current worktree. The runner does not schedule interleaved A/B experiments or
 prove repeatability from one run.
+
+## Aggregate catalog definitions
+
+Aggregate resources are registered in `expression-benchmark/aggregate/index.txt`.
+Their Markdown table has five required columns: `case`, `inputs`, `expression`,
+`description`, `grouping`. A plain `-` in grouping means global aggregation;
+otherwise supply one SQL expression in a code span, such as `pmod(id, 256)`.
+Optional columns are mode (complete or partial-final), maps, reducers and
+key-cardinality. Use a plain - for the default. Scalar tables also accept
+key-cardinality. Explicit CLI values override JSON, which overrides Markdown;
+otherwise defaults apply. Rows and batch size remain CLI/JSON options only.
+Maps, reducers and key-cardinality must be positive integers. Reducers is parsed
+and retained, but execution currently uses one reducer regardless of its value.
+
+These definitions and options are parsed here; aggregate execution is connected in the next change.

@@ -29,10 +29,14 @@ import org.apache.spark.unsafe.types.UTF8String
 
 import org.apache.commons.lang3.StringUtils
 
+import java.lang.{Double => JDouble, Long => JLong}
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets.UTF_8
 import java.time.LocalDate
 import java.util.{Base64, Locale}
+import java.util.Arrays
+
+import scala.collection.mutable.HashSet
 
 /**
  * Compile only the requested projections; no calibration rows or sketch fixtures are initialized.
@@ -43,7 +47,9 @@ private[benchmark] object Data {
   final case class Context(
       rows: Long,
       keyCardinality: Option[Long] = None,
-      seed: Long = 20260912L) {
+      seed: Long = 20260912L,
+      inputPartitions: Int = 3) {
+    require(inputPartitions > 0, "Input partitions must be positive")
     require(rows >= 0, "Row count must not be negative")
     val keys: Long = keyCardinality.getOrElse(if (rows == 0) 1L else rows)
     require(keys > 0, "Key cardinality must be positive")
@@ -134,9 +140,15 @@ private[benchmark] object Data {
   private val patterns = Set("none", "first", "cluster", "half-even", "last", "penultimate", "all")
   private val trimGenerators = Set("rtrimPattern", "ltrimPattern", "trimPattern")
   private val hashedGenerators = Set("hashedLong", "hashedString", "hashedBinary")
-  private val special =
+  private val customGenerators =
     trimGenerators ++ hashedGenerators ++
-      Set("rtrimBoundary", "ltrimBoundary", "rtrimCustom", "ltrimCustom", "nullableBoundedInt")
+      Set(
+        "rtrimBoundary",
+        "ltrimBoundary",
+        "rtrimCustom",
+        "ltrimCustom",
+        "nullableBoundedInt",
+        "nanPayloadDouble")
   private val strings = Set("standard.string", "standard.stringArray")
 
   private def argument(binding: Binding, name: String): Option[Argument] =
@@ -161,11 +173,12 @@ private[benchmark] object Data {
   }
 
   def validate(bindings: Seq[Binding]): Unit = {
-    val names = scala.collection.mutable.HashSet.empty[String]
+    val names = HashSet.empty[String]
     bindings.foreach {
       binding =>
         require(
-          standardFields.contains(binding.generator) || special.contains(binding.generator),
+          standardFields.contains(binding.generator) || customGenerators.contains(
+            binding.generator),
           s"Unknown generator: ${binding.generator}")
         require(
           binding.names.size == (if (binding.generator.endsWith("Custom")) 2 else 1),
@@ -175,7 +188,7 @@ private[benchmark] object Data {
             require(name.matches("[A-Za-z_][A-Za-z0-9_]*"), s"Invalid binding: $name")
             require(names.add(name.toLowerCase(Locale.ROOT)), s"Duplicate binding: $name")
         }
-        val args = scala.collection.mutable.HashSet.empty[String]
+        val args = HashSet.empty[String]
         val allowed = if (strings.contains(binding.generator)) {
           Set("length")
         } else if (trimGenerators.contains(binding.generator)) {
@@ -228,6 +241,8 @@ private[benchmark] object Data {
               (context, rowId, _, _) => InternalRow(value(context, rowId)))
           case None =>
             val input: (Context, Long, Int, Int) => InternalRow = binding.generator match {
+              case "nanPayloadDouble" =>
+                (_, i, _, _) => InternalRow(JDouble.longBitsToDouble(0x7ff8000000000000L | i))
               case "nullableBoundedInt" =>
                 val nulls = integer(binding, "nullPercent", Some(0))
                 (c, i, _, _) => {
@@ -252,7 +267,7 @@ private[benchmark] object Data {
                   } else {
                     val key =
                       StringUtils.leftPad(
-                        java.lang.Long.toHexString(hashedKey(c, i, column)),
+                        JLong.toHexString(hashedKey(c, i, column)),
                         16,
                         '0')
                     val value = prefix + StringUtils.rightPad(key, width, key).take(width)
@@ -302,6 +317,7 @@ private[benchmark] object Data {
               case "rtrimCustom" | "ltrimCustom" => (c, i, _, _) => trimCustom(c.seed, i)
             }
             val dataType = binding.generator match {
+              case "nanPayloadDouble" => DoubleType
               case "hashedLong" => LongType
               case "hashedBinary" => BinaryType
               case "nullableBoundedInt" => IntegerType
@@ -382,7 +398,7 @@ private[benchmark] object Data {
         (c, i) =>
           UTF8String.fromBytes(Base64.getEncoder.encode(pad(i % c.keys, 10).getBytes(UTF_8)))
       case "standard.hexString" =>
-        (c, i) => UTF8String.fromString(java.lang.Long.toHexString(i % c.keys))
+        (c, i) => UTF8String.fromString(JLong.toHexString(i % c.keys))
       case "standard.jsonArrayString" =>
         (c, i) => {
           val key = i % c.keys
@@ -451,8 +467,8 @@ private[benchmark] object Data {
       val body = length - spaces
       val offset = if (trim) leadingSpaces else 0
       val bytes = new Array[Byte](length)
-      java.util.Arrays.fill(bytes, 0, offset, ' '.toByte)
-      java.util.Arrays.fill(bytes, offset + body, length, ' '.toByte)
+      Arrays.fill(bytes, 0, offset, ' '.toByte)
+      Arrays.fill(bytes, offset + body, length, ' '.toByte)
       val rowIdentity = (global ^ seed) & 0xffffffffL
       val prefix = math.min(8, body)
       var position = 0
@@ -500,7 +516,7 @@ private[benchmark] object Data {
   }
 
   private def trimCustom(seed: Long, index: Long): InternalRow = {
-    val (value, trim) = customValues(Math.floorMod(index + seed, customValues.length).toInt)
+    val (value, trim) = customValues(Math.floorMod(index + seed, customValues.length.toLong).toInt)
     InternalRow(value, trim)
   }
 }

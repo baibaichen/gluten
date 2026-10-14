@@ -22,7 +22,7 @@ import org.apache.spark.TaskContext
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Project, Repartition}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Project, Repartition, Window}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.classic.ClassicTypes
 import org.apache.spark.sql.execution._
@@ -43,8 +43,9 @@ private[expression] class ExpressionPlan(
     val context: Data.Context,
     val dataPlan: Data.Plan) {
   lazy val aggregate: Boolean = optimizedPlan.exists(_.isInstanceOf[Aggregate])
+  lazy val window: Boolean = optimizedPlan.exists(_.isInstanceOf[Window])
   private val complete = scenario.mode.contains("complete")
-  lazy val partitions = if (!aggregate || complete) 1 else context.inputPartitions
+  lazy val partitions = if ((!aggregate && !window) || complete) 1 else context.inputPartitions
   private val session = spark.asInstanceOf[ClassicTypes.ClassicSparkSession]
   private[expression] def inPlanningScope[T](body: => T): T = {
     val task = TaskContext.get()
@@ -128,6 +129,9 @@ private[expression] class ExpressionPlan(
     }
   }
   def validate(): ValidationResult = {
+    require(
+      optimizedPlan.collect { case w: Window => w }.size <= 1,
+      "One window specification supported")
     val reasons = ArrayBuffer.empty[String]
     GlutenExplainUtils.visitFallbackNodes(
       nativePlan,
@@ -154,6 +158,9 @@ private[expression] class ExpressionPlan(
       case a: Aggregate =>
         val stableGroups = a.groupingExpressions.forall(comparable)
         a.aggregateExpressions.map(e => stableGroups && comparable(e))
+      case w: Window =>
+        w.child.output.map(a => inputs.getOrElse(a.exprId, false)) ++
+          w.windowExpressions.map(comparable)
       case r: Repartition => r.output.map(a => inputs.getOrElse(a.exprId, false))
       case leaf if leaf.children.isEmpty => leaf.output.map(_ => true)
       case other => throw new IllegalArgumentException(s"Unsupported comparison plan: $other")

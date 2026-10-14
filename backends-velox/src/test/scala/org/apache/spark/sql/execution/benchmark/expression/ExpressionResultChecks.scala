@@ -53,6 +53,11 @@ private[expression] object ExpressionResultChecks extends SparkFunSuite
       result: (Long, InternalRow) => Any = (_, _) => ()): Unit = {
     val schema = evaluator.outputSchema
     val (expected, actual, comparable, canMatchGroups) = evaluator match {
+      case window if window.plan.window =>
+        assert(vanilla.size == window.numRows && native.size == window.numRows)
+        val ordering =
+          RowOrdering.createNaturalAscendingOrdering(schema.fields.map(_.dataType).toSeq)
+        (vanilla.sorted(ordering), native.sorted(ordering), window.plan.outputDeterminism, true)
       case scalar if !scalar.plan.aggregate =>
         checkScalarInputs(scalar, vanilla.size, native.size)
         (vanilla, native, scalar.plan.outputDeterminism, true)

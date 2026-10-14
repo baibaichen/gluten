@@ -129,8 +129,8 @@ object RegisteredExpressionBenchmark extends SparkBenchmarkBase {
           TaskResources.runUnsafe {
             System.err.println(scenario.id + ": " + scenario.description)
             System.err.println(s"rows=${context.rows}, batchSize=${options.batchSize}")
-            if (plan.aggregate) {
-              val mode = scenario.mode.getOrElse("partial-final")
+            if (plan.aggregate || plan.window) {
+              val mode = if (plan.window) "window" else scenario.mode.getOrElse("partial-final")
               System.err.println(
                 s"mode=$mode, maps=${plan.partitions} (requested=${context.inputPartitions}), " +
                   s"reducers=1 (requested=${scenario.reducers.getOrElse(1)}), " +

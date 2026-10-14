@@ -24,8 +24,10 @@
 #include "velox/exec/AggregateInfo.h"
 #include "velox/exec/GroupingSet.h"
 #include "velox/exec/Operator.h"
+#include "velox/exec/OrderBy.h"
 #include "velox/exec/Task.h"
 #include "velox/exec/VectorHasher.h"
+#include "velox/exec/Window.h"
 
 namespace gluten {
 using namespace facebook::velox;
@@ -53,6 +55,71 @@ class ProjectOutput final : public ColumnarBatchIterator {
  private:
   std::shared_ptr<ResultIterator> input_;
   VeloxExpressionEvaluator evaluator_;
+};
+
+class WindowStageOutput final : public ColumnarBatchIterator {
+ public:
+  WindowStageOutput(
+      std::shared_ptr<ResultIterator> input,
+      const core::PlanNodePtr& plan,
+      const std::shared_ptr<core::QueryCtx>& query)
+      : input_(std::move(input)),
+        task_(exec::Task::create(
+            "expression-window-" + std::to_string(nextAggregateId++),
+            core::PlanFragment{plan},
+            0,
+            query,
+            exec::Task::ExecutionMode::kParallel)),
+        driver_(exec::Driver::testingCreate(std::make_unique<exec::DriverCtx>(task_, 0, 0, 0, 0))) {
+    if (auto window = std::dynamic_pointer_cast<const core::WindowNode>(plan)) {
+      operator_ = std::make_unique<exec::Window>(0, driver_->driverCtx(), window);
+    } else {
+      operator_ = std::make_unique<exec::OrderBy>(
+          0, driver_->driverCtx(), std::dynamic_pointer_cast<const core::OrderByNode>(plan));
+    }
+    try {
+      operator_->initialize();
+    } catch (...) {
+      try {
+        operator_->close();
+      } catch (const std::exception& error) {
+        LOG(WARNING) << "Closing uninitialized benchmark window stage: " << error.what();
+      }
+      throw;
+    }
+  }
+  ~WindowStageOutput() override {
+    try {
+      operator_->close();
+    } catch (const std::exception& error) {
+      LOG(WARNING) << "Closing benchmark window stage: " << error.what();
+    }
+  }
+  std::shared_ptr<ColumnarBatch> next() override {
+    while (!operator_->isFinished()) {
+      if (auto result = operator_->getOutput()) {
+        return std::make_shared<VeloxColumnarBatch>(std::move(result));
+      }
+      if (operator_->isFinished())
+        break;
+      GLUTEN_CHECK(operator_->needsInput(), "Window stage made no progress");
+      if (input_->hasNext()) {
+        auto batch = std::dynamic_pointer_cast<VeloxColumnarBatch>(input_->next());
+        GLUTEN_CHECK(batch != nullptr, "Expected native window input");
+        operator_->addInput(batch->getRowVector());
+      } else {
+        operator_->noMoreInput();
+      }
+    }
+    return nullptr;
+  }
+
+ private:
+  std::shared_ptr<ResultIterator> input_;
+  std::shared_ptr<exec::Task> task_;
+  // Only anchors the operator reclaimer; no Driver pipeline is initialized or run.
+  std::shared_ptr<exec::Driver> driver_;
+  std::unique_ptr<exec::Operator> operator_;
 };
 
 class AggregateOutput final : public ColumnarBatchIterator {
@@ -160,7 +227,9 @@ VeloxPlanEvaluator::VeloxPlanEvaluator(VeloxRuntime* runtime, const uint8_t* dat
     GLUTEN_CHECK(node->sources().size() == 1, "Expected unary expression stage");
     GLUTEN_CHECK(
         std::dynamic_pointer_cast<const core::ProjectNode>(node) ||
-            std::dynamic_pointer_cast<const core::AggregationNode>(node),
+            std::dynamic_pointer_cast<const core::AggregationNode>(node) ||
+            std::dynamic_pointer_cast<const core::OrderByNode>(node) ||
+            std::dynamic_pointer_cast<const core::WindowNode>(node),
         "Unsupported expression stage: " + node->toString());
     nodes_.push_back(node);
     node = node->sources().front();
@@ -183,6 +252,11 @@ std::shared_ptr<ResultIterator> VeloxPlanEvaluator::evaluate(
     if (auto project = std::dynamic_pointer_cast<const core::ProjectNode>(node)) {
       input = std::make_shared<ResultIterator>(
           std::make_unique<ProjectOutput>(std::move(input), memory->getLeafMemoryPool(), query, *project), runtime_);
+    } else if (
+        std::dynamic_pointer_cast<const core::WindowNode>(node) ||
+        std::dynamic_pointer_cast<const core::OrderByNode>(node)) {
+      input = std::make_shared<ResultIterator>(
+          std::make_unique<WindowStageOutput>(std::move(input), node, query), runtime_);
     } else {
       input = std::make_shared<ResultIterator>(
           std::make_unique<AggregateOutput>(

@@ -143,7 +143,8 @@ private[expression] class ExpressionEvaluatorCasesSuite(
             val expectedModes = if (!evaluator.plan.aggregate) Seq.empty
             else if (scenario.mode.contains("complete")) Seq(Complete)
             else Seq(Final, Partial)
-            val expectedExchanges = if (expectedModes == Seq(Final, Partial)) 1 else 0
+            val expectedExchanges =
+              if (evaluator.plan.window || expectedModes == Seq(Final, Partial)) 1 else 0
             Seq(evaluator.plan.vanillaPlan, evaluator.plan.nativePlan).foreach {
               physical =>
                 withClue(physical.treeString) {

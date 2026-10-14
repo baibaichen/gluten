@@ -304,73 +304,108 @@ class AggregateShuffleBenchmarkSuite extends VeloxWholeStageTransformerSuite {
   }
 
   test("early close and collector failures release execution state and allow retry") {
-    val scenario = caseDef("sum/grouped")
-    withSQLConf(RunOptions.sqlConf ++ ExpressionEvaluator.aggregateSqlConf: _*) {
-      var failConsumer = false
-      var batches = 0
-      var earlyClose: Option[Boolean] = None
-      val evaluator = new ExpressionEvaluator(
-        new ExpressionPlan(
-          spark,
-          scenario,
-          Data.Context(20000, Some(20000)),
-          Data.compile(scenario)),
-        127,
-        vanillaCollector = Some(
-          _ => {
-            if (failConsumer) throw new IllegalStateException("injected collector failure")
-          }),
-        nativeCollector = None
-      ) {
-        override protected lazy val nativeExecutor = new NativeExecutor(
-          plan,
-          nativeInputs,
-          batchSize,
-          () => shuffleDir,
-          Some(
-            _ => {
-              batches += 1
-              if (failConsumer) throw new IllegalStateException("injected collector failure")
-            })) {
-          override protected def consume(output: ColumnarBatchOutIterator): Unit =
-            earlyClose match {
-              case None => super.consume(output)
-              case Some(readBatch) =>
-                try {
-                  if (readBatch) {
-                    assert(output.hasNext)
-                    output.next().close()
-                  }
-                } finally output.close()
+    Seq(
+      caseDef("sum/grouped"),
+      Catalog.load().find(_.id == "window/row-number").get).foreach {
+      scenario =>
+        withSQLConf(RunOptions.sqlConf ++ ExpressionEvaluator.aggregateSqlConf: _*) {
+          var failConsumer = false
+          var batches = 0
+          var earlyClose: Option[Boolean] = None
+          val evaluator = new ExpressionEvaluator(
+            new ExpressionPlan(
+              spark,
+              scenario,
+              Data.Context(20000, Some(20000)),
+              Data.compile(scenario)),
+            127,
+            vanillaCollector = Some(
+              _ => {
+                if (failConsumer) throw new IllegalStateException("injected collector failure")
+              }),
+            nativeCollector = None
+          ) {
+            override protected lazy val nativeExecutor = new NativeExecutor(
+              plan,
+              nativeInputs,
+              batchSize,
+              () => shuffleDir,
+              Some(
+                _ => {
+                  batches += 1
+                  if (failConsumer) throw new IllegalStateException("injected collector failure")
+                })) {
+              override protected def consume(output: ColumnarBatchOutIterator): Unit =
+                earlyClose match {
+                  case None => super.consume(output)
+                  case Some(readBatch) =>
+                    try {
+                      if (readBatch) {
+                        assert(output.hasNext)
+                        output.next().close()
+                      }
+                    } finally output.close()
+                }
+            }
+          }
+          TaskResources.runUnsafe {
+            assert(batches == 0)
+            evaluator.runVanilla()
+            evaluator.runNative()
+            assert(batches > 1)
+            val retained = evaluator.metadata("native.retainedPoolBytes")
+            Seq(false, true).foreach {
+              readBatch =>
+                earlyClose = Some(readBatch)
+                try evaluator.runNative()
+                finally earlyClose = None
+                assert(evaluator.metadata("native.retainedPoolBytes") == retained)
+                evaluator.runNative()
+            }
+            failConsumer = true
+            intercept[IllegalStateException](evaluator.runVanilla())
+            intercept[IllegalStateException](evaluator.runNative())
+            val files = Files.list(Paths.get(evaluator.metadata("shuffleDirectory")))
+            try assert(files.count() == 6)
+            finally files.close()
+            assert(evaluator.metadata("native.retainedPoolBytes") == retained)
+            failConsumer = false
+            evaluator.runVanilla()
+            evaluator.runNative()
+            assert(evaluator.metadata("native.retainedPoolBytes") == retained)
+          }
+        }
+    }
+  }
+
+  test("window preserves known results across empty inputs and repeated iterations") {
+    val scenario = Catalog.load().find(_.id == "window/global-row-number").get
+    Seq(0, 1, 17).foreach {
+      count =>
+        withAggregate(scenario, Data.Context(count, inputPartitions = 3), 2) {
+          (evaluator, verify) =>
+            (0 until 3).foreach {
+              _ =>
+                var rows = 0
+                verify {
+                  (i, row) =>
+                    assert(row.getInt(0) == i + 1)
+                    rows += 1
+                }
+                assert(rows == count)
+                assert(evaluator.metadata("mode") == "window")
             }
         }
-      }
-      TaskResources.runUnsafe {
-        assert(batches == 0)
-        evaluator.runVanilla()
-        evaluator.runNative()
-        assert(batches > 1)
-        val retained = evaluator.metadata("native.retainedPoolBytes")
-        Seq(false, true).foreach {
-          readBatch =>
-            earlyClose = Some(readBatch)
-            try evaluator.runNative()
-            finally earlyClose = None
-            assert(evaluator.metadata("native.retainedPoolBytes") == retained)
-            evaluator.runNative()
-        }
-        failConsumer = true
-        intercept[IllegalStateException](evaluator.runVanilla())
-        intercept[IllegalStateException](evaluator.runNative())
-        val files = Files.list(Paths.get(evaluator.metadata("shuffleDirectory")))
-        try assert(files.count() == 6)
-        finally files.close()
-        assert(evaluator.metadata("native.retainedPoolBytes") == retained)
-        failConsumer = false
-        evaluator.runVanilla()
-        evaluator.runNative()
-        assert(evaluator.metadata("native.retainedPoolBytes") == retained)
-      }
+    }
+  }
+
+  test("window sliding frame includes following rows across batches") {
+    val scenario = Catalog.load().find(_.id == "window/sum-sliding").get
+      .copy(sql = "sum(id) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING)")
+    withAggregate(scenario, Data.Context(4, inputPartitions = 3), 1) {
+      (_, verify) =>
+        val expected = Seq(1L, 3L, 5L, 6L)
+        verify((i, row) => assert(row.getLong(0) == expected(i.toInt)))
     }
   }
 

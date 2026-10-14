@@ -122,7 +122,8 @@ private[expression] class ExpressionEvaluator(
     dir
   }
   def metadata: Map[String, String] = nativeExecutor.metadata ++ Map(
-    "mode" -> (if (plan.vanillaExchange.isDefined) "partial-final"
+    "mode" -> (if (plan.window) "window"
+               else if (plan.vanillaExchange.isDefined) "partial-final"
                else if (!plan.aggregate) "scalar" else "complete"),
     "requestedReducers" -> scenario.reducers.getOrElse(1).toString,
     "actualReducers" -> "1",
@@ -158,7 +159,7 @@ private[expression] object ExpressionEvaluator {
         rows =>
           lazy val collect = collectNative(plan.outputSchema)(rows)
           batch => {
-            if (!plan.aggregate) {
+            if (!plan.aggregate && !plan.window) {
               val rows = batch.numRows()
               require(
                 batch.numCols() == 1 && rows > 0 &&

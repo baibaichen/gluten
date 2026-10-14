@@ -105,3 +105,4 @@ weekofyear.md
 xxhash64.md
 year.md
 zip_with.md
+window.md

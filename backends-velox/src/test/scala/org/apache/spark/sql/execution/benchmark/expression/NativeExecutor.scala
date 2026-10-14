@@ -60,6 +60,8 @@ private[expression] class NativeExecutor(
   @tailrec
   private def nativeStage(root: SparkPlan): WholeStageTransformer = root match {
     case whole: WholeStageTransformer => whole
+    case scan: RDDScanTransformer if plan.window =>
+      WholeStageTransformer(InputIteratorTransformer(ColumnarInputAdapter(scan)))(0)
     case c: ColumnarToRowExecBase if root eq plan.nativePlan => nativeStage(c.child)
     case r: VeloxResizeBatchesExec if plan.nativeExchange.exists(_.child eq r) =>
       require(!r.executionMode.contains(GPUStageMode), "GPU batch resizing is unsupported")

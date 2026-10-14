@@ -183,7 +183,7 @@ unsupported native preparation is reported as `SKIPPED`, not as a timing result.
 
 Expressions may be deterministic or nondeterministic. Aggregate execution is detected
 from the optimized logical plan, even without a grouping declaration; grouping specifies
-keys rather than the execution type. Windows, generators and subqueries are outside
+keys rather than the execution type. Generators and subqueries are outside
 the supported benchmark execution model. Plans rejected by fallback validation are
 reported as SKIPPED; unsupported executor operations and other errors fail.
 No fallback is counted as native performance.
@@ -378,3 +378,27 @@ shares that input; use separate bindings when independent values are needed.
 The collect_set/global and collect_set/grouped cases execute both engines but
 skip result comparison because their output arrays have unspecified order.
 No sorting is added to their timed SQL or to the generic comparison framework.
+
+## Window benchmarks
+
+Window cases use the existing expression cell, for example
+`sum(id) OVER (PARTITION BY pmod(id, 7) ORDER BY id ROWS BETWEEN 2 PRECEDING AND 1 FOLLOWING)`.
+Select `--cases 'window/*'` to run the catalog examples. One logical window
+specification is supported, with at most one Exchange and one actual reducer.
+Input maps use the existing maps option; global windows also gather their inputs
+through local shuffle. Multiple window specifications are not supported yet.
+
+Spark executes its standard Sort and Window plans through local RDD iterators.
+Native executes Velox OrderBy and Window operators through batch iterators. An
+unstarted Driver only supplies the operator memory-reclaimer context; no Driver
+pipeline or Spark job runs. Sort and window state is recreated each iteration.
+Sorting, frame evaluation, shuffle and output consumption are timed; spilling is
+disabled, and JVM spilling fails the run.
+
+Window tests compare output multisets (including duplicate counts), not output
+batch boundaries or row order. The initial cases have orderable result types.
+Use deterministic expressions and unique ordering keys for row_number, lag/lead
+and ROWS frames; rank/dense_rank and RANGE cases deliberately exercise peers.
+Empty input, repeated execution, early close and consumer failures are checked
+in the existing lifecycle suite. Sorting by result value does not establish
+which input row produced a result; small known-answer checks supplement comparison.

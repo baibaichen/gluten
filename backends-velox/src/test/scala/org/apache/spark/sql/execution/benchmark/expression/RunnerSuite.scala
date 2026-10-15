@@ -99,7 +99,7 @@ class RunnerSuite extends SparkFunSuite {
     val options = RunOptions(
       Duration.Zero,
       Duration.Zero,
-      input = InputOptions(rows = 7, batchSize = 3, seed = -7L))
+      input = InputOptions(rows = Some(7), batchSize = 3, seed = -7L))
     val bytes = new ByteArrayOutputStream
     val out = new PrintStream(bytes)
     val oldOut = System.out

@@ -59,7 +59,7 @@ options or `--config`.
 | --- | --- | --- |
 | Positional function list | `functions` | No default |
 | `--cases` | `cases` | No default |
-| `--rows` | `rows` | 4000000 |
+| `--rows` | `rows` | Markdown rows, otherwise 4000000 |
 | `--batch-size` | `batchSize` | 10240 |
 | `--seed` | `seed` | 20260912 |
 | `--key-cardinality` | `keyCardinality` | Input row count |
@@ -297,7 +297,7 @@ otherwise supply one SQL expression in a code span, such as `pmod(id, 256)`.
 Optional columns are mode (complete or partial-final), maps, reducers and
 key-cardinality. Use a plain - for the default. Scalar tables also accept
 key-cardinality. Explicit CLI values override JSON, which overrides Markdown;
-otherwise defaults apply. Rows and batch size remain CLI/JSON options only.
+otherwise defaults apply. Rows also supports a Markdown case default; batch size remains a CLI/JSON option.
 Maps, reducers and key-cardinality must be positive integers. Reducers is parsed
 and retained, but execution currently uses one reducer regardless of its value.
 
@@ -345,3 +345,14 @@ including on failure. Native spilling is disabled; JVM spilling fails the run.
   high-cardinality or memory-limited results do not include these production policies.
 - Support multiple reducers. Requested reducers are recorded, but execution uses
   exactly one reducer today.
+
+## Per-case row counts
+
+A scalar or aggregate Markdown table may include an optional rows column.
+Values must be positive 32-bit integers; a missing column or dash leaves the
+case default unset. Effective precedence is CLI --rows, JSON rows, Markdown
+rows, then 4,000,000. Explicit overrides are never reduced automatically.
+The runner prints the effective rows and batch size before each case.
+The array_join/long-elements case defaults to 2,000,000 rows. The launcher
+uses a 16 GB JVM heap; native allocations need additional host memory.
+Correctness suites retain their own small row counts.

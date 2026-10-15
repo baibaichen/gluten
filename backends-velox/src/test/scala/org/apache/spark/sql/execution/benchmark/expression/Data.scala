@@ -144,18 +144,17 @@ private[benchmark] object Data {
   private val patterns = Set("none", "first", "cluster", "half-even", "last", "penultimate", "all")
   private val trimGenerators = Set("rtrimPattern", "ltrimPattern", "trimPattern")
   private val hashedGenerators = Set("hashedLong", "hashedString", "hashedBinary")
+  private val fixtureGenerators = Set("arrayJoinInput", "arrayJoinDelimiter", "quarterInput")
   private val customGenerators =
-    trimGenerators ++ hashedGenerators ++
+    trimGenerators ++ hashedGenerators ++ fixtureGenerators ++
       Set(
         "rtrimBoundary",
         "ltrimBoundary",
         "rtrimCustom",
         "ltrimCustom",
         "nullableBoundedInt",
-        "nanPayloadDouble",
-        "arrayJoinInput",
-        "arrayJoinDelimiter",
-        "quarterInput")
+        "nanPayloadDouble"
+      )
   private val strings = Set("standard.string", "standard.stringArray")
 
   private def argument(binding: Binding, name: String): Option[Argument] =
@@ -254,12 +253,12 @@ private[benchmark] object Data {
               case "nanPayloadDouble" =>
                 (_, i, _, _) => InternalRow(JDouble.longBitsToDouble(0x7ff8000000000000L | i))
               case "arrayJoinInput" =>
-                val mode = fixtureMode(binding)
-                (c, i, _, _) => InternalRow(arrayJoinInput(mode, i % c.keys))
+                val input = arrayJoinInput(fixtureMode(binding))
+                (c, i, _, _) => InternalRow(input(i % c.keys))
               case "arrayJoinDelimiter" =>
                 val mode = fixtureMode(binding)
-                (_, _, _, _) =>
-                  InternalRow(UTF8String.fromString(if (mode == "utf8") "分" else "!" + 0.toChar))
+                val delimiter = UTF8String.fromString(if (mode == "utf8") "分" else "!" + 0.toChar)
+                (_, _, _, _) => InternalRow(delimiter)
               case "quarterInput" =>
                 val mode = fixtureMode(binding)
                 val dates = quarterDates(mode)
@@ -375,7 +374,6 @@ private[benchmark] object Data {
     )
   }
 
-  private val fixtureGenerators = Set("arrayJoinInput", "arrayJoinDelimiter", "quarterInput")
   private val arrayJoinModes = Set(
     "empty-array",
     "single-element",
@@ -402,21 +400,29 @@ private[benchmark] object Data {
     }
   }
 
-  private def arrayJoinInput(mode: String, row: Long): GenericArrayData = {
-    val key = row.toString
-    val values: Seq[String] = mode match {
-      case "null-array" => return null
-      case "empty-array" => Seq.empty
-      case "single-element" => Seq(key)
-      case "many-short" => (0 until 32).map(n => ((row + n) % 10000).toString)
-      case "long-elements" => (0 until 8).map(n => StringUtils.rightPad(s"$key:$n", 128, 'x'))
-      case "empty-elements" => Seq("", key, "", "fixed", "")
-      case "mixed-nulls" => Seq(null, key, null, "fixed", null)
-      case "all-null" => Seq(null, null, null)
-      case "utf8" => Seq(s"中文$key", "é😀", "")
-      case "embedded-nul" => Seq(key + 0.toChar + "tail", "", "fixed" + 0.toChar)
-    }
-    new GenericArrayData(values.map(s => if (s == null) null else UTF8String.fromString(s)).toArray)
+  private def arrayJoinInput(mode: String): Long => GenericArrayData = mode match {
+    case "null-array" => _ => null
+    case "many-short" =>
+      val values = Array.tabulate(10000)(n => UTF8String.fromString(n.toString))
+      row =>
+        new GenericArrayData(
+          Array.tabulate[Any](32)(n => values(((row + n) % values.length).toInt)))
+    case _ =>
+      row => {
+        val key = row.toString
+        val values: Seq[String] = mode match {
+          case "empty-array" => Seq.empty
+          case "single-element" => Seq(key)
+          case "long-elements" => (0 until 8).map(n => StringUtils.rightPad(s"$key:$n", 128, 'x'))
+          case "empty-elements" => Seq("", key, "", "fixed", "")
+          case "mixed-nulls" => Seq(null, key, null, "fixed", null)
+          case "all-null" => Seq(null, null, null)
+          case "utf8" => Seq(s"中文$key", "é😀", "")
+          case "embedded-nul" => Seq(key + 0.toChar + "tail", "", "fixed" + 0.toChar)
+        }
+        new GenericArrayData(
+          values.map(s => if (s == null) null else UTF8String.fromString(s)).toArray)
+      }
   }
 
   private def quarterDates(mode: String): Array[Int] = {

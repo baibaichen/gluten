@@ -272,7 +272,9 @@ private[benchmark] object Data {
                 (c, i, _, _) => InternalRow(input(i % c.keys))
               case "arrayJoinDelimiter" =>
                 val mode = fixtureMode(binding)
+                // scalastyle:off nonascii
                 val delimiter = UTF8String.fromString(if (mode == "utf8") "分" else "!" + 0.toChar)
+                // scalastyle:on nonascii
                 (_, _, _, _) => InternalRow(delimiter)
               case "quarterInput" =>
                 val mode = fixtureMode(binding)
@@ -439,7 +441,9 @@ private[benchmark] object Data {
           case "empty-elements" => Seq("", key, "", "fixed", "")
           case "mixed-nulls" => Seq(null, key, null, "fixed", null)
           case "all-null" => Seq(null, null, null)
+          // scalastyle:off nonascii
           case "utf8" => Seq(s"中文$key", "é😀", "")
+          // scalastyle:on nonascii
           case "embedded-nul" => Seq(key + 0.toChar + "tail", "", "fixed" + 0.toChar)
         }
         new GenericArrayData(

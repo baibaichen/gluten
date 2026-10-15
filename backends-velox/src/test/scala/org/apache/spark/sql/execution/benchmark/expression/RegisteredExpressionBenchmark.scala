@@ -68,7 +68,9 @@ object RegisteredExpressionBenchmark extends SparkBenchmarkBase {
           .set("spark.memory.offHeap.enabled", "true")
           .set("spark.memory.offHeap.size", "8g")
           .set("spark.ui.enabled", "false")
-        RunOptions.sqlConf.foreach { case (key, value) => conf.set(key, value) }
+        (RunOptions.sqlConf ++ ExpressionEvaluator.aggregateSqlConf).foreach {
+          case (key, value) => conf.set(key, value)
+        }
         input.shuffleDir.foreach {
           path =>
             Files.createDirectories(path)

@@ -195,7 +195,7 @@ class BenchmarkSuite extends VeloxWholeStageTransformerSuite {
         "Persistent evaluator",
         "monotonically_increasing_id()")
       val evaluator = new ExpressionEvaluator(
-        new ExpressionPlan(spark, scenario, Context(5), Data.compile(scenario.inputs)),
+        new ExpressionPlan(spark, scenario, Context(5), Data.compile(scenario)),
         vanillaCollector = Some(row => collected += row))
       TaskResources.runUnsafe {
         (0 until 2).foreach {
@@ -257,7 +257,7 @@ class BenchmarkSuite extends VeloxWholeStageTransformerSuite {
     val benchmark =
       new Benchmark(
         new ExpressionEvaluator(
-          new ExpressionPlan(null, scenario, Context(3), Data.compile(scenario.inputs)),
+          new ExpressionPlan(null, scenario, Context(3), Data.compile(scenario)),
           options.batchSize),
         options,
         profiler = Some(profiler))
@@ -333,7 +333,7 @@ class BenchmarkSuite extends VeloxWholeStageTransformerSuite {
             val scenario = metricCase(id, "Profile registration")
             val benchmark = new Benchmark(
               new ExpressionEvaluator(
-                new ExpressionPlan(null, scenario, Context(0), Data.compile(scenario.inputs))),
+                new ExpressionPlan(null, scenario, Context(0), Data.compile(scenario))),
               RunOptions(Duration.Zero, Duration.Zero),
               profiler = Some(profiler)
             )

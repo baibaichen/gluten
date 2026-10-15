@@ -55,6 +55,9 @@ private[expression] class ExpressionEvaluatorCasesSuite(
     .set("spark.shuffle.compress", "false")
 
   private val ignoreCompareCases = Set(
+    // collect_set output ordering differs between engines; still execute both paths.
+    "collect_set/global",
+    "collect_set/grouped",
     // Known issue: Spark and Velox HLL estimates differ; exact result comparison fails.
     "approx_count_distinct/projected-count",
     "approx_count_distinct/long-g1024",
@@ -67,19 +70,21 @@ private[expression] class ExpressionEvaluatorCasesSuite(
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    withSQLConf(
-      (RunOptions.sqlConf ++ ExpressionEvaluator.aggregateSqlConf): _*) {
-      unsupportedCases = cases.filterNot {
-        scenario =>
-          new ExpressionPlan(
-            spark,
-            scenario,
-            Data.Context(
-              10000,
-              scenario.keyCardinality,
-              inputPartitions = scenario.maps.getOrElse(3)),
-            Data.compile(scenario.inputs)).validate().ok()
-      }.map(_.id).toSet
+    withSQLConf((RunOptions.sqlConf ++ ExpressionEvaluator.aggregateSqlConf): _*) {
+      unsupportedCases = cases
+        .filterNot {
+          scenario =>
+            new ExpressionPlan(
+              spark,
+              scenario,
+              Data.Context(
+                10000,
+                scenario.keyCardinality,
+                inputPartitions = scenario.maps.getOrElse(3)),
+              Data.compile(scenario)).validate().ok()
+        }
+        .map(_.id)
+        .toSet
     }
   }
 
@@ -108,11 +113,9 @@ private[expression] class ExpressionEvaluatorCasesSuite(
 
   private def verifySupportedCase(scenario: Catalog.CaseDef, ignoreCompare: Boolean): Unit =
     withSQLConf((RunOptions.sqlConf ++ ExpressionEvaluator.aggregateSqlConf): _*) {
-      val context = Data.Context(
-        10000,
-        scenario.keyCardinality,
-        inputPartitions = scenario.maps.getOrElse(3))
-      val data = Data.compile(scenario.inputs)
+      val context =
+        Data.Context(10000, scenario.keyCardinality, inputPartitions = scenario.maps.getOrElse(3))
+      val data = Data.compile(scenario)
       val checkedData = Some(data.copy(row = (context, rowId, local, count) => {
         val row = data.row(context, rowId, local, count)
         assert(

@@ -30,6 +30,7 @@ import org.apache.spark.task.TaskResources
 import org.apache.spark.unsafe.types.UTF8String
 
 import org.apache.commons.lang3.StringUtils
+import org.apache.datasketches.hll.HllSketch
 
 import java.lang.{Double => JDouble, Long => JLong}
 import java.net.URLEncoder
@@ -45,6 +46,12 @@ import scala.collection.mutable.HashSet
  */
 private[benchmark] object Data {
   import Catalog._
+
+  private lazy val hllSketch: Array[Byte] = {
+    val sketch = new HllSketch(12)
+    Seq(1L, 2L, 3L).foreach(sketch.update)
+    sketch.toCompactByteArray
+  }
 
   final case class Context(
       rows: Long,
@@ -126,6 +133,7 @@ private[benchmark] object Data {
     StructField("base64String", StringType, nullable = false),
     StructField("hexString", StringType, nullable = false),
     StructField("jsonArrayString", StringType, nullable = false),
+    StructField("hllSketch", BinaryType, nullable = false),
     StructField("urlString", StringType, nullable = false),
     StructField("dateString", StringType, nullable = false),
     StructField(
@@ -531,6 +539,7 @@ private[benchmark] object Data {
           val key = i % c.keys
           UTF8String.fromString(if (key % 4 == 0) "[]" else s"[$key,${key + 1},null]")
         }
+      case "standard.hllSketch" => (_, _) => hllSketch
       case "standard.urlString" =>
         (c, i) =>
           UTF8String.fromString(

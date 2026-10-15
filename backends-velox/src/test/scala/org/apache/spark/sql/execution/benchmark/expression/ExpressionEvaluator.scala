@@ -73,12 +73,16 @@ private[expression] class ExpressionEvaluator(
   }
   private lazy val inputs = withCaseResources {
     val rows = Data.materializeRows(dataPlan, context, batchSize)
-    val partitionRows = if (plan.partitions == 1) Seq(rows)
-    else (0 until plan.partitions).map(
-      i =>
-        rows.slice(
-          (rows.length.toLong * i / plan.partitions).toInt,
-          (rows.length.toLong * (i + 1) / plan.partitions).toInt))
+    val partitionRows =
+      if (plan.partitions == 1) {
+        Seq(rows)
+      } else {
+        (0 until plan.partitions).map(
+          i =>
+            rows.slice(
+              (rows.length.toLong * i / plan.partitions).toInt,
+              (rows.length.toLong * (i + 1) / plan.partitions).toInt))
+      }
     val writable = new Array[WritableColumnVector](dataPlan.inputSchema.length)
     val converter = new RowToColumnConverter(dataPlan.inputSchema)
     val vanilla = partitionRows.map(_.grouped(batchSize).map {

@@ -24,6 +24,7 @@ import com.vladsch.flexmark.ext.tables.{TableBlock, TableCell, TableHead, TableR
 import com.vladsch.flexmark.parser.Parser
 import com.vladsch.flexmark.util.ast.Node
 import com.vladsch.flexmark.util.data.MutableDataSet
+import com.vladsch.flexmark.util.misc.Extension
 import org.apache.commons.io.IOUtils
 
 import java.io.FileNotFoundException
@@ -60,15 +61,13 @@ private[benchmark] object Catalog {
       mode: Option[String] = None,
       maps: Option[Int] = None,
       reducers: Option[Int] = None,
-      keyCardinality: Option[Long] = None)
+      keyCardinality: Option[Long] = None,
+      rows: Option[Int] = None)
 
   private val markdown = Parser
     .builder(
       new MutableDataSet()
-        .set(
-          Parser.EXTENSIONS,
-          Collections.singletonList[com.vladsch.flexmark.util.misc.Extension](
-            TablesExtension.create()))
+        .set(Parser.EXTENSIONS, Collections.singletonList[Extension](TablesExtension.create()))
         .set(TablesExtension.COLUMN_SPANS, JBoolean.FALSE)
         .set(TablesExtension.APPEND_MISSING_COLUMNS, JBoolean.FALSE)
         .set(TablesExtension.DISCARD_EXTRA_COLUMNS, JBoolean.FALSE)
@@ -164,7 +163,7 @@ private[benchmark] object Catalog {
       "Missing table header")
     val required = Seq("case", "inputs", "expression", "description") ++
       (if (aggregate) Seq("grouping") else Seq.empty)
-    val optional = Set("key-cardinality") ++
+    val optional = Set("key-cardinality", "rows") ++
       (if (aggregate) Set("mode", "maps", "reducers") else Set.empty[String])
     val headers = rows.head.getChildren.asScala.collect {
       case cell: TableCell => plain(cell, function)
@@ -220,6 +219,7 @@ private[benchmark] object Catalog {
               require(Set("complete", "partial-final")(value), s"Unknown aggregate mode: $value")
               value
           },
+          rows = parameter("rows")(positiveInt),
           maps = parameter("maps")(positiveInt),
           reducers = parameter("reducers")(positiveInt),
           keyCardinality = parameter("key-cardinality") {
@@ -302,6 +302,9 @@ private[benchmark] object Catalog {
     }
     entries
   }
+
+  def loadAggregates(): Seq[CaseDef] =
+    load(root = "expression-benchmark/aggregate", aggregate = true)
 
   def load(
       loader: ClassLoader = getClass.getClassLoader,

@@ -20,6 +20,8 @@ import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.IntegerType
 
+import com.fasterxml.jackson.databind.ObjectMapper
+
 import java.io.ByteArrayInputStream
 import java.io.FileNotFoundException
 import java.io.InputStream
@@ -47,6 +49,23 @@ class CatalogSuite extends SparkFunSuite {
        || --- | --- | --- | --- |
        || example | $inputs | $sql | $description |
        |""".stripMargin
+
+  test("optional rows validates case defaults") {
+    def parseRows(value: String): Option[Int] = parseMarkdown(
+      "trim",
+      "rows.md",
+      table()
+        .replace("| description |", "| description | rows |")
+        .replace("| --- | --- | --- | --- |", "| --- | --- | --- | --- | --- |")
+        .replace("Plain description |", s"Plain description | $value |")
+    ).head.rows
+    assert(parseMarkdown("trim", "rows.md", table()).head.rows.isEmpty)
+    assert(parseRows("-").isEmpty)
+    assert(parseRows("2000000").contains(2000000))
+    Seq("0", "-1", "1.5", "2147483648", "abc").foreach {
+      value => intercept[IllegalArgumentException](parseRows(value))
+    }
+  }
 
   test("Markdown preserves one complete code span including SQL punctuation and escapes") {
     val sql = """concat(`input`, 'a,b;(x)', 'quote''s', '\\d+', 'a\|b', '\\\|')"""
@@ -311,7 +330,7 @@ class CatalogSuite extends SparkFunSuite {
     val first = materializeRows(plan, context, 4)
     val second = materializeRows(plan, context, 7)
     assert(first.toSeq == second.toSeq)
-    val json = new com.fasterxml.jackson.databind.ObjectMapper()
+    val json = new ObjectMapper()
     first.zipWithIndex.foreach {
       case (row, i) =>
         val key = i % 11

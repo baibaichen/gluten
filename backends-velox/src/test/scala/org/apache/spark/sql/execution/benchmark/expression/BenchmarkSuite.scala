@@ -33,6 +33,7 @@ import org.apache.spark.util.Utils
 
 import org.apache.xbean.asm9.{ClassReader, ClassVisitor, MethodVisitor, Opcodes}
 import org.codehaus.commons.compiler.util.reflect.ByteArrayClassLoader
+import org.mockito.Mockito
 
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
@@ -242,8 +243,8 @@ class BenchmarkSuite extends VeloxWholeStageTransformerSuite {
     val root = Files.createTempDirectory("expression-shared-profiler")
     val commands = ArrayBuffer.empty[String]
     val profiler =
-      org.mockito.Mockito.spy(new Profiler(ProfilerOptions(root, output = root)))
-    org.mockito.Mockito
+      Mockito.spy(new Profiler(ProfilerOptions(root, output = root)))
+    Mockito
       .doReturn(
         (command: String) => {
           commands += command

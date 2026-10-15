@@ -183,10 +183,12 @@ private[expression] object JvmExecutor {
     val stages = plans.map(compileStage)
     (inputs, metrics) =>
       runSafe {
-        if (stages.length == 1) consume(stages.head(
-          0,
-          inputs.iterator.flatMap(_.iterator).asInstanceOf[Iterator[InternalRow]]))
-        else executeWithShuffle(stages, inputs, metrics)
+        if (stages.length == 1) {
+          consume(
+            stages.head(0, inputs.iterator.flatMap(_.iterator).asInstanceOf[Iterator[InternalRow]]))
+        } else {
+          executeWithShuffle(stages, inputs, metrics)
+        }
       }
   }
 

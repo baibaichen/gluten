@@ -321,8 +321,12 @@ class RunOptionsSuite extends SparkFunSuite {
       value => assertThrows[IllegalArgumentException](parse("trim", "--input-partitions", value))
     }
     assert(parse("trim").runtime.input.shuffleDir.isEmpty)
-    assert(parse("trim", "--shuffle-dir", "/dev/shm/gluten-benchmark")
-      .runtime.input.shuffleDir.get.toString == "/dev/shm/gluten-benchmark")
+    val shuffleDir = "/dev/shm/gluten-benchmark"
+    assert(
+      parse(
+        "trim",
+        "--shuffle-dir",
+        shuffleDir).runtime.input.shuffleDir.get.toString == shuffleDir)
     assertThrows[IllegalArgumentException](parse("trim", "--shuffle-dir", " "))
   }
 

@@ -339,6 +339,9 @@ including on failure. Native spilling is disabled; JVM spilling fails the run.
 
 ## TODO
 
+- Redesign standard.hllSketch(). It currently returns the same sketch for {1, 2, 3}
+  on every row. Add varied sketches with partially overlapping and disjoint members
+  so hll_union_agg benchmarks cover more than repeated identical inputs.
 - Align native Partial aggregation with production HashAggregation's adaptive
   policy: abandon grouping when reduction is poor and adjust the Partial memory
   budget after flushing. The current GroupingSet driver uses a fixed budget;
@@ -356,3 +359,22 @@ The runner prints the effective rows and batch size before each case.
 The array_join/long-elements case defaults to 2,000,000 rows. The launcher
 uses a 16 GB JVM heap; native allocations need additional host memory.
 Correctness suites retain their own small row counts.
+
+## Test scope
+
+This is a benchmark framework, not a function-validation framework. Tests should
+focus on benchmark planning, execution, timing, and resource ownership. Do not
+add function-specific partial-flush regression tests here; those belong in the
+aggregation implementation's tests. Catalog result checks may still be used to
+validate benchmark inputs and execution.
+
+For aggregate cases, key-cardinality applies only to input bindings referenced
+by the grouping expression. Other bindings use the full row range: with
+16 grouping keys, k cycles through 0..15 while standard.long() values v grow
+with the row ID. Global aggregates have no grouping bindings. Scalar generator
+behavior is unchanged. An expression used as both grouping input and value
+shares that input; use separate bindings when independent values are needed.
+
+The collect_set/global and collect_set/grouped cases execute both engines but
+skip result comparison because their output arrays have unspecified order.
+No sorting is added to their timed SQL or to the generic comparison framework.

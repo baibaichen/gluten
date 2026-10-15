@@ -118,7 +118,7 @@ object RegisteredExpressionBenchmark extends SparkBenchmarkBase {
       options: RunOptions,
       profiler: Option[Profiler]): Unit =
     withSQLConf((RunOptions.sqlConf ++ ExpressionEvaluator.aggregateSqlConf): _*) {
-      val plan = new ExpressionPlan(spark, scenario, context, Data.compile(scenario.inputs))
+      val plan = new ExpressionPlan(spark, scenario, context, Data.compile(scenario))
       try {
         val validation = plan.validate()
         if (!validation.ok()) {

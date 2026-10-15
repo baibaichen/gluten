@@ -145,11 +145,8 @@ private[expression] object ExpressionEvaluator {
       data: Option[Data.Plan] = None,
       vanillaCollector: Option[InternalRow => Unit] = None,
       nativeCollector: Option[InternalRow => Unit] = None): ExpressionEvaluator = {
-    val plan = new ExpressionPlan(
-      spark,
-      scenario,
-      context,
-      data.getOrElse(Data.compile(scenario.inputs)))
+    val plan =
+      new ExpressionPlan(spark, scenario, context, data.getOrElse(Data.compile(scenario)))
     val validation = plan.validate()
     require(validation.ok(), validation.reason())
     val batches: Option[ColumnarBatch => Unit] =

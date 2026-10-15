@@ -50,6 +50,21 @@ class CatalogSuite extends SparkFunSuite {
        || example | $inputs | $sql | $description |
        |""".stripMargin
 
+  test("aggregate value inputs are independent of key cardinality") {
+    val inputs = Seq("v", "k").map(n => Binding(Seq(n), "standard.long", Seq.empty))
+    val scenario = CaseDef(
+      "stddev/grouped",
+      inputs,
+      "stddev(v)",
+      "Fixture",
+      SourceLocation("fixture", 1, 1),
+      groupingKeys = Some(Seq("k")))
+    val plan = Data.compile(scenario)
+    def values(keys: Long): Seq[Long] =
+      Data.materializeRows(plan, Data.Context(64, Some(keys)), 8).map(_.getLong(0)).toSeq
+    assert(values(2) == values(16))
+  }
+
   test("optional rows validates case defaults") {
     def parseRows(value: String): Option[Int] = parseMarkdown(
       "trim",

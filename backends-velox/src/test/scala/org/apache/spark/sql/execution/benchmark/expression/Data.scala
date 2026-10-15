@@ -20,7 +20,9 @@ import org.apache.gluten.columnarbatch.ColumnarBatches
 import org.apache.gluten.execution.RowToVeloxColumnarExec
 
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.expressions.{UnsafeProjection, UnsafeRow, XXH64}
+import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
 import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, GenericArrayData}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
@@ -238,11 +240,24 @@ private[benchmark] object Data {
     }
   }
 
-  def compile(bindings: Seq[Binding]): Plan = {
+  def compile(scenario: CaseDef): Plan = {
+    val groupingInputs = scenario.groupingKeys.map(_.flatMap {
+      sql =>
+        CatalystSqlParser.parseExpression(sql).collect {
+          case attribute: UnresolvedAttribute => attribute.nameParts.head.toLowerCase(Locale.ROOT)
+        }
+    }.toSet)
+    compile(scenario.inputs, groupingInputs)
+  }
+
+  def compile(bindings: Seq[Binding]): Plan = compile(bindings, None)
+
+  private def compile(bindings: Seq[Binding], groupingInputs: Option[Set[String]]): Plan = {
+
     validate(bindings)
     val projections = bindings.map {
       binding =>
-        standardFields.get(binding.generator) match {
+        val projection = standardFields.get(binding.generator) match {
           case Some(field) =>
             val value = standard(binding.generator, integer(binding, "length", Some(10)))
             Plan(
@@ -350,6 +365,13 @@ private[benchmark] object Data {
             }
             Plan(StructType(binding.names.map(StructField(_, dataType, nullable = true))), input)
         }
+        if (
+          groupingInputs.exists(
+            keys => !binding.names.exists(n => keys(n.toLowerCase(Locale.ROOT))))
+        ) {
+          projection.copy(row = (context, rowId, local, count) =>
+            projection.row(context.copy(keyCardinality = None), rowId, local, count))
+        } else projection
     }
     val generate: (Context, Long, Int, Int) => InternalRow = if (projections.size == 1) {
       projections.head.row

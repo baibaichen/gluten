@@ -35,7 +35,7 @@ object RegisteredExpressionBenchmark extends SparkBenchmarkBase {
     Utils.tryWithSafeFinally {
       val options = RunOptions.parse(args)
       val catalog =
-        Catalog.load() ++ Catalog.load(root = "expression-benchmark/aggregate", aggregate = true)
+        Catalog.load() ++ Catalog.loadAggregates()
       if (options.list) {
         System.out.println(options.listing(catalog)) // scalastyle:ignore println
       } else {
@@ -91,7 +91,7 @@ object RegisteredExpressionBenchmark extends SparkBenchmarkBase {
                 keyCardinality = input.keyCardinality.orElse(scenario.keyCardinality)
               )
               val context = Data.Context(
-                input.rows,
+                input.rowsFor(resolved),
                 resolved.keyCardinality,
                 input.seed,
                 resolved.maps.getOrElse(3))
@@ -128,6 +128,7 @@ object RegisteredExpressionBenchmark extends SparkBenchmarkBase {
           val benchmark = new Benchmark(evaluator, options, output, profiler)
           TaskResources.runUnsafe {
             System.err.println(scenario.id + ": " + scenario.description)
+            System.err.println(s"rows=${context.rows}, batchSize=${options.batchSize}")
             if (plan.aggregate) {
               val mode = scenario.mode.getOrElse("partial-final")
               System.err.println(

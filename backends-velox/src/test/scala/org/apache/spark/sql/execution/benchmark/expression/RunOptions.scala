@@ -33,7 +33,7 @@ import scala.concurrent.duration._
 import scala.util.control.NonFatal
 
 final private[benchmark] case class InputOptions(
-    rows: Int = 4000000,
+    rows: Option[Int] = None,
     batchSize: Int = 10240,
     seed: Long = 20260912L,
     keyCardinality: Option[Long] = None,
@@ -41,10 +41,12 @@ final private[benchmark] case class InputOptions(
     maps: Option[Int] = None,
     aggregateMode: Option[String] = None,
     reducers: Option[Int] = None) {
+  def rowsFor(scenario: Catalog.CaseDef): Int = rows.orElse(scenario.rows).getOrElse(4000000)
+
   require(maps.forall(_ > 0), "Maps must be positive")
   require(reducers.forall(_ > 0), "Reducers must be positive")
   require(aggregateMode.forall(Set("complete", "partial-final")), "Unknown aggregate mode")
-  require(rows > 0, "Row count must be positive")
+  require(rows.forall(_ > 0), "Row count must be positive")
   require(batchSize > 0, "Batch size must be positive")
   require(keyCardinality.forall(_ > 0), "Key cardinality must be positive")
 }
@@ -292,7 +294,7 @@ private[benchmark] object RunOptions {
     }
     val inputDefaults = InputOptions()
     val input = inputDefaults.copy(
-      rows = integer("rows", inputDefaults.rows),
+      rows = values.get("rows").map(_.intValue()),
       batchSize = integer("batchSize", inputDefaults.batchSize),
       seed = values.get("seed").map(_.longValue()).getOrElse(inputDefaults.seed),
       keyCardinality = values.get("keyCardinality").map(_.longValue()),

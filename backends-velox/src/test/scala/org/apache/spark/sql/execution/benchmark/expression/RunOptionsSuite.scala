@@ -36,6 +36,14 @@ class RunOptionsSuite extends SparkFunSuite {
   private def parse(args: String*): RunOptions.Parsed =
     RunOptions.parse(args.toArray)
 
+  test("case rows fills only an unspecified row count") {
+    val scenario = catalog.head.copy(rows = Some(2000000))
+    val input = parse("trim").runtime.input
+    assert(input.rowsFor(scenario) == 2000000)
+    assert(input.rowsFor(scenario.copy(rows = None)) == 4000000)
+    assert(parse("trim", "--rows", "4000000").runtime.input.rowsFor(scenario) == 4000000)
+  }
+
   test("benchmark SQL configuration disables unsupported ANSI mode") {
     assert(RunOptions.sqlConf.toMap.get(SQLConf.ANSI_ENABLED.key).contains("false"))
     assert(!RunOptions.sqlConf.exists(_._1.endsWith("expression.dedup_non_deterministic")))
@@ -139,7 +147,7 @@ class RunOptionsSuite extends SparkFunSuite {
   test("defaults and input sizes are strict without forcing iteration counts") {
     val options = parse("trim")
     val input = options.runtime.input
-    assert(input.rows == 4000000 && input.batchSize == 10240)
+    assert(input.rows.isEmpty && input.rowsFor(catalog.head) == 4000000 && input.batchSize == 10240)
     assert(input.seed == 20260912L && input.keyCardinality.isEmpty)
     assert(options.runtime.warmup.toSeconds == 10 && options.runtime.minTime.toSeconds == 60)
     assert(options.runtime.minNumIters == 2)
@@ -260,7 +268,7 @@ class RunOptionsSuite extends SparkFunSuite {
       assert(options.cases.isEmpty && options.functions == Seq("substring"))
       val input = options.runtime.input
       assert(input.seed == Long.MinValue && input.keyCardinality.contains(Long.MaxValue))
-      assert(options.runtime.input.rows == 3)
+      assert(options.runtime.input.rows.contains(3))
       Seq("--rows", "--seed").foreach {
         flag =>
           Seq("+1", " 1", "1e2").foreach {
@@ -269,7 +277,7 @@ class RunOptionsSuite extends SparkFunSuite {
           assertThrows[IllegalArgumentException](parse("trim", flag, "1", flag, "2"))
           assertThrows[IllegalArgumentException](parse("trim", flag))
       }
-      assert(parse("trim", "--rows", "001").runtime.input.rows == 1)
+      assert(parse("trim", "--rows", "001").runtime.input.rows.contains(1))
       assert(parse("trim", "--seed", "-0").runtime.input.seed == 0)
     } finally Files.delete(file)
   }
@@ -300,7 +308,7 @@ class RunOptionsSuite extends SparkFunSuite {
         cwd
       )
       assert(overrideJson.selected(catalog).map(_.id) == Seq("rtrim/l13-half-even"))
-      assert(overrideJson.runtime.input.rows == 17)
+      assert(overrideJson.runtime.input.rows.contains(17))
       assert(overrideJson.runtime.profiler.get.home == cwd.resolve("cli-ap"))
       assert(overrideJson.runtime.profiler.get.output == cwd.resolve("cli-out"))
     } finally Utils.deleteRecursively(cwd.toFile)

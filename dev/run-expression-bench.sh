@@ -93,7 +93,7 @@ for entry in "${DEPENDENCIES[@]}"; do
 done
 
 exec "$JAVA_HOME/bin/java" @"$JVM_ARGS_FILE" \
-  -Dspark.testing=true -Xmx4g \
+  -Dspark.testing=true -Xmx16g \
   "-Dgluten.expressionBenchmark.cwd=$CALLER_CWD" \
   -XX:+UnlockExperimentalVMOptions \
   '-XX:CompileCommand=blackhole,org.apache.spark.sql.execution.benchmark.expression.BenchmarkBlackhole::consume' \

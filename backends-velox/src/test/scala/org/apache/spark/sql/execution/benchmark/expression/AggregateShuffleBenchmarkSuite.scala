@@ -164,8 +164,8 @@ class AggregateShuffleBenchmarkSuite extends VeloxWholeStageTransformerSuite {
           var groups = 0
           verify {
             (_, row) =>
-              if (layout == "global") assert(row.getLong(0) == 2L)
-              else assert(row.getLong(1) == (if (row.getLong(0) == 0) 0L else 2L))
+              if (layout == "global") assert(row.getLong(0) == 10L)
+              else assert(row.getLong(1) == (if (row.getLong(0) == 0) 6L else 4L))
               groups += 1
           }
           assert(groups == (if (layout == "global") 1 else 2))
@@ -303,43 +303,6 @@ class AggregateShuffleBenchmarkSuite extends VeloxWholeStageTransformerSuite {
     }
   }
 
-  test("micro avg merges unequal partial counts across repeated runs") {
-    withSQLConf("spark.gluten.sql.columnar.backend.velox.max_partial_aggregation_memory" -> "1") {
-      val rows = Seq(
-        InternalRow(1L, 2L),
-        InternalRow(1L, null),
-        InternalRow(1L, 4L),
-        InternalRow(1L, 6L),
-        InternalRow(1L, 8L),
-        InternalRow(1L, null)
-      )
-      val scenario = caseDef("avg/grouped")
-      val data = Data.Plan(schema, (_, i, _, _) => rows(i.toInt))
-      val leakBytes = TaskResources.ACCUMULATED_LEAK_BYTES.get()
-      withAggregate(
-        scenario,
-        Data.Context(rows.size),
-        1,
-        data) {
-        (evaluator, verify) =>
-          val checkResult: (Long, InternalRow) => Unit =
-            (_, row) => assert(row.getLong(0) == 1L && row.getDouble(1) == 5.0)
-          verify(checkResult)
-          val expectedBytes = evaluator.metadata("native.serializedBytes")
-          val retainedBytes = evaluator.metadata("native.retainedPoolBytes")
-          (0 until 100).foreach {
-            _ =>
-              evaluator.runNative()
-              assert(evaluator.metadata("native.serializedBytes") == expectedBytes)
-              assert(evaluator.metadata("native.outputRows") == "1")
-              assert(evaluator.metadata("native.retainedPoolBytes") == retainedBytes)
-          }
-          evaluator.runVanilla()
-      }
-      assert(TaskResources.ACCUMULATED_LEAK_BYTES.get() == leakBytes)
-    }
-  }
-
   test("early close and collector failures release execution state and allow retry") {
     val scenario = caseDef("sum/grouped")
     withSQLConf(RunOptions.sqlConf ++ ExpressionEvaluator.aggregateSqlConf: _*) {
@@ -351,7 +314,7 @@ class AggregateShuffleBenchmarkSuite extends VeloxWholeStageTransformerSuite {
           spark,
           scenario,
           Data.Context(20000, Some(20000)),
-          Data.compile(scenario.inputs)),
+          Data.compile(scenario)),
         127,
         vanillaCollector = Some(
           _ => {

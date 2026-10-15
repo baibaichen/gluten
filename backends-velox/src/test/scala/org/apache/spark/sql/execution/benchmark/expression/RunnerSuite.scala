@@ -44,7 +44,7 @@ class RunnerSuite extends SparkFunSuite {
       "Registration",
       SourceLocation("registration", 1, 1))
     val evaluator = new ExpressionEvaluator(
-      new ExpressionPlan(null, scenario, Data.Context(1), Data.compile(scenario.inputs))) {
+      new ExpressionPlan(null, scenario, Data.Context(1), Data.compile(scenario))) {
       override def outputSchema = new StructType
       override def runVanilla(): Unit = { events += "vanilla" }
       override def runNative(): Unit = { events += "native" }

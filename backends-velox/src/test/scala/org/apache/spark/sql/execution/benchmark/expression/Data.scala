@@ -470,7 +470,10 @@ private[benchmark] object Data {
           offset <- -1 to 1
         } yield day(year, month, 1) + offset).toArray
       case "leap-centuries" =>
-        (for { year <- Seq(1900, 2000, 2100); offset <- -2 to 1 } yield day(
+        (for {
+          year <- Seq(1900, 2000, 2100)
+          offset <- -2 to 1
+        } yield day(
           year,
           3,
           1) + offset).toArray

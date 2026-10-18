@@ -33,8 +33,8 @@ function(add_velox_test TEST_EXEC)
     PRIVATE GLUTEN_VELOX_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
   target_link_libraries(
     ${TEST_EXEC}
-    gluten_velox_impl
-    gluten_core_impl
+    gluten_velox_objects
+    gluten_core_objects
     ${GLUTEN_VELOX_TEST_LIBRARIES}
     ${GLUTEN_ROARING_LINK_LIBRARY}
     GTest::gtest
@@ -89,8 +89,8 @@ if(ENABLE_GPU)
              facebook::velox::velox_cudf_hive_connector)
     target_link_libraries(
       ${TEST_EXEC}
-      PRIVATE gluten_velox_impl
-              gluten_core_impl
+      PRIVATE gluten_velox_objects
+              gluten_core_objects
               ${GLUTEN_VELOX_TEST_LIBRARIES}
               ${GLUTEN_ROARING_LINK_LIBRARY}
               cudf::cudf

@@ -45,8 +45,8 @@ message(STATUS "Set Substrait Proto Directory in ${SUBSTRAIT_PROTO_SRC_DIR}")
 
 find_program(CCACHE_FOUND ccache)
 if(CCACHE_FOUND)
-  set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
-  set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
+  set_property(DIRECTORY PROPERTY RULE_LAUNCH_COMPILE ccache)
+  set_property(DIRECTORY PROPERTY RULE_LAUNCH_LINK ccache)
 endif(CCACHE_FOUND)
 
 macro(find_protobuf)
@@ -259,7 +259,7 @@ if(NOT ENABLE_GLUTEN_VCPKG)
   target_link_libraries(gluten_core_objects
                         PUBLIC Arrow::arrow_bundled_dependencies)
 endif()
-target_link_libraries(gluten_core_objects PRIVATE glog::glog)
+target_link_libraries(gluten_core_objects PRIVATE glog::glog gflags::gflags)
 
 install(TARGETS gluten DESTINATION ${CMAKE_INSTALL_LIBDIR})
 

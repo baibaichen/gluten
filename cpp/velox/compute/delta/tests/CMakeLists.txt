@@ -17,7 +17,7 @@ add_executable(velox_roaring_bitmap_array_test RoaringBitmapArrayTest.cpp)
 
 target_link_libraries(
   velox_roaring_bitmap_array_test gluten_velox_objects gluten_core_objects
-  ${GLUTEN_ROARING_LINK_LIBRARY} GTest::gtest GTest::gtest_main)
+  roaring GTest::gtest GTest::gtest_main)
 
 add_test(
   NAME velox_roaring_bitmap_array_test

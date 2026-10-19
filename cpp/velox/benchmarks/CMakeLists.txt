@@ -24,7 +24,7 @@ function(add_velox_benchmark BM_EXEC BM_FILE)
   add_executable(${BM_EXEC} ${BM_FILE})
   target_link_libraries(
     ${BM_EXEC} PRIVATE velox_benchmark_common gluten_velox_objects
-                       gluten_core_objects ${GLUTEN_VELOX_TEST_LIBRARIES})
+                       gluten_core_objects velox_exec_test_lib)
   if(ENABLE_GPU)
     target_link_libraries(${BM_EXEC} PRIVATE velox_curl)
   endif()

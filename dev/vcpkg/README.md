@@ -69,12 +69,23 @@ toolchain defaults Velox to installed dependencies and static gflags; explicit
 CMake settings can override these defaults. Without that toolchain, Velox
 retains its normal dependency resolution defaults.
 
-Gluten tests and benchmarks are enabled by default; Velox's own tests and
-benchmarks are disabled by default. Configure with `BUILD_TESTS` /
+Direct CMake builds enable Gluten tests and benchmarks by default; Velox's
+own tests and benchmarks are disabled by default. Configure with `BUILD_TESTS` /
 `BUILD_BENCHMARKS` for Gluten and `VELOX_BUILD_TESTING` /
 `VELOX_ENABLE_BENCHMARKS` for Velox to override these defaults. These options
 are independent; the native library and required test utilities are built in
-the same graph. To check IDE target visibility, request the CMake File API:
+the same graph.
+
+The default `dev/builddeps-veloxbe.sh` flow configures and builds this unified
+graph without a standalone Velox build first. It recreates `cpp/build`, relying
+on ccache for compilation reuse, and sets all four test/benchmark options from `--build_tests`,
+`--build_benchmarks`, `--build_velox_tests`, and `--build_velox_benchmarks`
+(each defaults to `OFF`); pass the flags again to keep them enabled.
+Before using `dev/builddep-veloxbe-inc.sh`, configure the unified graph through
+the main script with the required flags. The incremental script builds only
+`gluten_velox_backend` and its dependencies, not test/benchmark targets.
+
+To check IDE target visibility, request the CMake File API:
 
 ```sh
 mkdir -p cpp/build/.cmake/api/v1/query

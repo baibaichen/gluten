@@ -194,6 +194,26 @@ class NativeDependencyTest(unittest.TestCase):
         self.assertEqual(cmake.count(flag), 1)
         self.assertGreater(cmake.index(expected), cmake.index('add_subdirectory("${VELOX_HOME}"'))
 
+    def test_unknown_warning_option_is_clang_only(self):
+        cmake = (ROOT / "cpp/CMakeLists.txt").read_text()
+        warnings = cmake[cmake.index('set(KNOWN_WARNINGS'):
+                         cmake.index('# see https://issues.apache.org/jira/browse/ARROW-4665')]
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "warnings.cmake"
+            for compiler in ("GNU", "Clang", "AppleClang"):
+                with self.subTest(compiler=compiler):
+                    condition = "" if compiler == "GNU" else "NOT "
+                    script.write_text(
+                        "cmake_minimum_required(VERSION 3.28)\n"
+                        f"set(CMAKE_CXX_COMPILER_ID {compiler})\n"
+                        "set(CMAKE_CXX_COMPILER_VERSION 13.3.0)\n"
+                        f"{warnings}\n"
+                        f'if({condition}KNOWN_WARNINGS MATCHES "-Wno-unknown-warning-option")\n'
+                        '  message(FATAL_ERROR "Incorrect compiler warning scope")\n'
+                        "endif()\n"
+                    )
+                    self.run_command("cmake", "-P", str(script))
+
     def test_prefix_includes_are_preserved_in_both_modes(self):
         cmake = (ROOT / "cpp/CMakeLists.txt").read_text()
         prefixes = cmake[cmake.index("set(GLUTEN_PREFIX_INCLUDE_DIRS)"):

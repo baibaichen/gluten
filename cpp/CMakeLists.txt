@@ -103,7 +103,6 @@ set(KNOWN_WARNINGS
        -Wno-error=unused-variable \
        -Wno-error=uninitialized \
        -Wno-error=maybe-uninitialized \
-       -Wno-unknown-warning-option \
        -Wno-strict-aliasing \
        -Wno-ignored-qualifiers \
        -Wno-deprecated-declarations \
@@ -119,14 +118,16 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
 elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
   # Experimental
   set(KNOWN_WARNINGS
-      "-Wno-implicit-int-float-conversion \
+      "-Wno-unknown-warning-option \
+      -Wno-implicit-int-float-conversion \
       -Wno-nullability-completeness \
       -Wno-mismatched-tags \
       ${KNOWN_WARNINGS}")
 elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
   # Experimental
   set(KNOWN_WARNINGS
-      "-Wno-implicit-int-float-conversion \
+      "-Wno-unknown-warning-option \
+      -Wno-implicit-int-float-conversion \
       -Wno-nullability-completeness \
       -Wno-mismatched-tags \
       -Wno-error=unused-private-field \

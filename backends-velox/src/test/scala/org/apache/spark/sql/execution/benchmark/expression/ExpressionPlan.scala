@@ -22,7 +22,7 @@ import org.apache.spark.TaskContext
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Project, Repartition, Window}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Generate, Project, Repartition, Window}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.classic.ClassicTypes
 import org.apache.spark.sql.execution._
@@ -44,6 +44,11 @@ private[expression] class ExpressionPlan(
     val dataPlan: Data.Plan) {
   lazy val aggregate: Boolean = optimizedPlan.exists(_.isInstanceOf[Aggregate])
   lazy val window: Boolean = optimizedPlan.exists(_.isInstanceOf[Window])
+  lazy val hasJsonTuple: Boolean = optimizedPlan.exists {
+    case generate: Generate => generate.generator.isInstanceOf[JsonTuple]
+    case _ => false
+  }
+  lazy val generator: Boolean = optimizedPlan.exists(_.isInstanceOf[Generate])
   private val complete = scenario.mode.contains("complete")
   lazy val partitions = if ((!aggregate && !window) || complete) 1 else context.inputPartitions
   private val session = spark.asInstanceOf[ClassicTypes.ClassicSparkSession]
@@ -69,10 +74,20 @@ private[expression] class ExpressionPlan(
         val input = if (complete) s"(SELECT /*+ COALESCE(1) */ * FROM $name)" else name
         val keys = scenario.groupingKeys.getOrElse(Seq.empty)
         require(keys.size <= 1, "One grouping key supported")
-        val select =
-          (keys :+ (scenario.sql + " AS __gluten_expression_benchmark_result")).mkString(", ")
+        val resultName = "__gluten_expression_benchmark_result"
+        // Let Spark resolve generator arity before assigning unique output names.
+        val select = (keys :+ scenario.sql).mkString(", ")
         val group = if (keys.isEmpty) "" else keys.mkString(" GROUP BY ", ", ", "")
-        session.sql(s"SELECT $select FROM $input$group").queryExecution.optimizedPlan
+        val query = session.sql(s"SELECT $select FROM $input$group")
+        if (query.queryExecution.analyzed.exists(_.isInstanceOf[Generate])) {
+          query
+            .toDF(query.schema.fields.indices.map(i => s"$resultName$i"): _*)
+            .queryExecution
+            .optimizedPlan
+        } else {
+          val aliased = (keys :+ (scenario.sql + " AS " + resultName)).mkString(", ")
+          session.sql(s"SELECT $aliased FROM $input$group").queryExecution.optimizedPlan
+        }
       } finally session.catalog.dropTempView(name)
     }
   }
@@ -161,6 +176,9 @@ private[expression] class ExpressionPlan(
       case w: Window =>
         w.child.output.map(a => inputs.getOrElse(a.exprId, false)) ++
           w.windowExpressions.map(comparable)
+      case g: Generate =>
+        g.requiredChildOutput.map(a => inputs.getOrElse(a.exprId, false)) ++
+          g.generatorOutput.map(_ => comparable(g.generator))
       case r: Repartition => r.output.map(a => inputs.getOrElse(a.exprId, false))
       case leaf if leaf.children.isEmpty => leaf.output.map(_ => true)
       case other => throw new IllegalArgumentException(s"Unsupported comparison plan: $other")

@@ -114,14 +114,19 @@ private[expression] object ExpressionResultChecks extends SparkFunSuite
       scalar: ExpressionEvaluator,
       vanillaRows: Int,
       nativeRows: Int): Unit = {
+    if (!scalar.plan.generator || scalar.plan.hasJsonTuple) {
+      assert(
+        vanillaRows == scalar.numRows && nativeRows == scalar.numRows,
+        "Row-preserving expression changed output row count")
+    }
     val inputProjection = UnsafeProjection.create(scalar.dataPlan.inputSchema.asNullable)
     inputProjection.initialize(0)
     val inputs = scalar.inputRows.map(inputProjection(_))
     val batches = scalar.nativeInputBatches
     val inputSchema = scalar.dataPlan.inputSchema
     assert(
-      batches.map(_.numRows()) == (0 until vanillaRows by scalar.batchSize).map(
-        start => math.min(scalar.batchSize, vanillaRows - start)),
+      batches.map(_.numRows()) == (0 until scalar.numRows.toInt by scalar.batchSize).map(
+        start => math.min(scalar.batchSize, scalar.numRows.toInt - start)),
       "Native batch sizes differ"
     )
     val read = UnsafeProjection.create(inputSchema.asNullable)
@@ -144,7 +149,7 @@ private[expression] object ExpressionResultChecks extends SparkFunSuite
         offset += input.numRows()
     }
     assert(
-      !inputs.hasNext && offset == nativeRows,
+      !inputs.hasNext && offset == scalar.numRows,
       "Native inputs do not cover every logical row")
   }
 

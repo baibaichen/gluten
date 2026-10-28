@@ -46,7 +46,7 @@ private[expression] class ExpressionEvaluatorCasesSuite(
   extends VeloxWholeStageTransformerSuite {
   override val invokeBeforeAllAndAfterAllEvenIfNoTestsAreExpected = true
   override def suiteName: String = group
-  override def suiteId: String = s"${getClass.getName}:$group"
+  override def suiteId: String = s"${getClass.getName}-$group"
   override protected val resourcePath: String = "N/A"
   override protected val fileFormat: String = "N/A"
   override protected def sparkConf: SparkConf = super.sparkConf
@@ -162,8 +162,11 @@ private[expression] class ExpressionEvaluatorCasesSuite(
               evaluator.runNative()
             } else {
               verify(checkRow)
-              if (!evaluator.plan.aggregate) assert(checked == context.rows)
-              else if (evaluator.plan.groupingExpressions.isEmpty) assert(checked == 1)
+              if (!evaluator.plan.aggregate && !evaluator.plan.generator) {
+                assert(checked == context.rows)
+              } else if (evaluator.plan.aggregate && evaluator.plan.groupingExpressions.isEmpty) {
+                assert(checked == 1)
+              }
             }
         }
       }
@@ -172,7 +175,7 @@ private[expression] class ExpressionEvaluatorCasesSuite(
   @DoNotDiscover
   private class FunctionSuite(cases: Seq[Catalog.CaseDef]) extends SparkFunSuite {
     override def suiteName: String = cases.head.id.takeWhile(_ != '/')
-    override def suiteId: String = s"${ExpressionEvaluatorCasesSuite.this.suiteId}:$suiteName"
+    override def suiteId: String = s"${ExpressionEvaluatorCasesSuite.this.suiteId}-$suiteName"
     // The enclosing group owns the Spark session, thread audit and accumulator cleanup.
     private var ownsFixture = false
     override protected def beforeAll(): Unit = {

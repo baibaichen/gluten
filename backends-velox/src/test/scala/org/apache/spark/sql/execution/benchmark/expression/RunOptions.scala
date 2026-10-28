@@ -16,6 +16,7 @@
  */
 package org.apache.spark.sql.execution.benchmark.expression
 
+import org.apache.spark.sql.catalyst.optimizer.InferFiltersFromGenerate
 import org.apache.spark.sql.internal.SQLConf
 
 import com.fasterxml.jackson.core.JsonParser
@@ -80,6 +81,8 @@ private[benchmark] object RunOptions {
     SQLConf.CASE_SENSITIVE.key -> "false",
     SQLConf.ANSI_ENABLED.key -> "false",
     SQLConf.CODEGEN_FACTORY_MODE.key -> "CODEGEN_ONLY",
+    // Generators handle null and empty collections without an inferred input filter.
+    SQLConf.OPTIMIZER_EXCLUDED_RULES.key -> InferFiltersFromGenerate.ruleName,
     "spark.sql.alwaysInlineCommonExpr" -> "false"
   )
 

@@ -48,6 +48,7 @@ initcap.md
 instr.md
 isnan.md
 json_array_length.md
+json_tuple.md
 last_day.md
 least.md
 len.md
@@ -106,3 +107,10 @@ xxhash64.md
 year.md
 zip_with.md
 window.md
+explode.md
+explode_outer.md
+posexplode.md
+posexplode_outer.md
+inline.md
+inline_outer.md
+stack.md

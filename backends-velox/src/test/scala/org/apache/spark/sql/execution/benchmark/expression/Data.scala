@@ -133,6 +133,8 @@ private[benchmark] object Data {
     StructField("base64String", StringType, nullable = false),
     StructField("hexString", StringType, nullable = false),
     StructField("jsonArrayString", StringType, nullable = false),
+    StructField("jsonTupleString", StringType, nullable = false),
+    StructField("mixedLongArray", ArrayType(LongType, containsNull = false), nullable = true),
     StructField("hllSketch", BinaryType, nullable = false),
     StructField("urlString", StringType, nullable = false),
     StructField("dateString", StringType, nullable = false),
@@ -541,6 +543,18 @@ private[benchmark] object Data {
         (c, i) => {
           val key = i % c.keys
           UTF8String.fromString(if (key % 4 == 0) "[]" else s"[$key,${key + 1},null]")
+        }
+      case "standard.jsonTupleString" =>
+        (c, i) => {
+          val key = i % c.keys
+          UTF8String.fromString(s"""{"v":"${pad(key, 10)}","n":$key,"b":${key % 2 == 0}}""")
+        }
+      case "standard.mixedLongArray" =>
+        (c, i) => {
+          val key = i % c.keys
+          if (key % 3 == 0) null
+          else if (key % 3 == 1) new GenericArrayData(Array.emptyLongArray)
+          else new GenericArrayData(Array(key, key + 1L))
         }
       case "standard.hllSketch" => (_, _) => hllSketch
       case "standard.urlString" =>

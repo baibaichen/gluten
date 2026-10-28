@@ -25,6 +25,11 @@ dev/run-expression-bench.sh --skip-build \
   --rows 4000000 --batch-size 10240 \
   --seed 20260912 --key-cardinality 4000000 \
   --warmup-seconds 10 --measurement-seconds 50
+
+# Measure JSON tuple cases after rebuilding native code and the JVM artifacts.
+dev/run-expression-bench.sh --skip-build json_tuple \
+  --rows 4000000 --batch-size 10240 \
+  --warmup-seconds 5 --measurement-seconds 20
 ```
 
 `--skip-build` must be the first argument. It skips both Maven compilation and
@@ -162,6 +167,8 @@ Common generator choices:
 | `standard.fractionalDouble`, `standard.positiveDouble` | No arguments; key plus 0.125, with alternating signs for fractionalDouble. |
 | `standard.text` | No arguments; mixed-case words, a changing numeric key and UTF-8 text. |
 | `standard.base64String`, `standard.hexString`, `standard.jsonArrayString`, `standard.urlString` | No arguments; valid encoded strings prepared before evaluation. JSON arrays cycle through empty and three-element arrays containing NULL. |
+| `standard.jsonTupleString` | No arguments; changing JSON objects with padded string v, integer n and boolean b fields, prepared before evaluation. |
+| `standard.mixedLongArray` | No arguments; cycles through NULL, an empty array and a two-element long array. |
 | `standard.dateString` | No arguments; ISO dates cycling through 2020-2029, including leap days. |
 | `standard.intMap`, `standard.mapEntries` | No arguments; two unique string keys with bounded integer values and a periodically NULL second value, as a map or an array of key/value structs. |
 | `rtrimPattern`, `ltrimPattern`, `trimPattern` | Required `length >= 2` in bytes and `pattern`; optional `nullPercent` from 0 to 100 and `utf8`, default false. |
@@ -183,9 +190,16 @@ unsupported native preparation is reported as `SKIPPED`, not as a timing result.
 
 Expressions may be deterministic or nondeterministic. Aggregate execution is detected
 from the optimized logical plan, even without a grouping declaration; grouping specifies
-keys rather than the execution type. Generators and subqueries are outside
-the supported benchmark execution model. Plans rejected by fallback validation are
-reported as SKIPPED; unsupported executor operations and other errors fail.
+keys rather than the execution type. Top-level `json_tuple` generators are supported:
+the planner supplies one output alias per requested field, and correctness checks compare
+every output column and require one output row per input. Native output may use different
+batch boundaries. The measured native pipeline includes Gluten's field-extraction and
+generator rewrite, not an isolated JSON parsing function. The native benchmark evaluator
+drives Velox's Unnest operator and drains each input before advancing to the next batch.
+This requires the matching native library, not just rebuilt Scala classes.
+Other supported generators and their variable output cardinality are described below.
+Subqueries are outside the supported benchmark execution model. Plans rejected by fallback validation are reported as SKIPPED; unsupported executor
+operations and other errors fail.
 No fallback is counted as native performance.
 
 Common preparation fixes current-time/catalog constants and resolves random seeds.
@@ -402,3 +416,19 @@ and ROWS frames; rank/dense_rank and RANGE cases deliberately exercise peers.
 Empty input, repeated execution, early close and consumer failures are checked
 in the existing lifecycle suite. Sorting by result value does not establish
 which input row produced a result; small known-answer checks supplement comparison.
+## Generator expressions
+
+Expression cases also accept explode, explode_outer, posexplode,
+posexplode_outer, inline, inline_outer, stack and json_tuple. Spark resolves
+output arity; the framework assigns unique aliases and compares every output
+column. Generators can produce zero, one or multiple output rows per input.
+Input batch checks use input row count, independently of generated row count.
+Null/empty inputs follow Spark's inner or outer generator semantics.
+
+Table-valued-only routines such as collations, sql_keywords and variant_explode
+are not supported by this SELECT-expression catalog or by the current Gluten
+Generate transformer. They require separate TVF/backend support; they are not
+substituted with another function or treated as successful benchmark cases.
+
+The benchmark disables Spark's InferFiltersFromGenerate rule for both JVM and
+native planning because generators handle null and empty collections themselves.

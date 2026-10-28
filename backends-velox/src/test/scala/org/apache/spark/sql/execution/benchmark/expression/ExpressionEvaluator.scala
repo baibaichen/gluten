@@ -162,9 +162,10 @@ private[expression] object ExpressionEvaluator {
             if (!plan.aggregate && !plan.window) {
               val rows = batch.numRows()
               require(
-                batch.numCols() == 1 && rows > 0 &&
-                  (rows == batchSize || rows == context.rows % batchSize),
-                "Native output batch shape differs")
+                batch.numCols() == plan.outputSchema.length && rows > 0 &&
+                  (plan.generator || rows == batchSize || rows == context.rows % batchSize),
+                "Native output batch shape differs"
+              )
             }
             collect(batch)
           }

@@ -25,6 +25,7 @@
 #include "jni/JniHashTable.h"
 #include "operators/hashjoin/HashTableBuilder.h"
 #include "operators/plannodes/RowVectorStream.h"
+#include "operators/plannodes/SparkUnnest.h"
 #ifdef ENABLE_KAFKA
 #include "kafka.pb.h"
 #include "operators/reader/KafkaConnector.h"
@@ -1082,33 +1083,63 @@ core::PlanNodePtr SubstraitToVeloxPlanConverter::toVeloxPlan(const ::substrait::
     unnest.emplace_back(unnestFieldExpr);
   }
 
-  std::vector<std::optional<std::string>> unnestNames;
+  bool isPosExplode = false;
+  bool isOuter = false;
+  bool isInline = false;
+  if (generateRel.has_advanced_extension()) {
+    isPosExplode = SubstraitParser::configSetInOptimization(generateRel.advanced_extension(), "isPosExplode=");
+    isOuter = SubstraitParser::configSetInOptimization(generateRel.advanced_extension(), "isOuter=");
+    isInline = SubstraitParser::configSetInOptimization(generateRel.advanced_extension(), "isInline=");
+  }
+
+  std::vector<std::string> outputNames;
+  std::vector<TypePtr> outputTypes;
+  for (const auto& variable : replicated) {
+    outputNames.emplace_back(variable->name());
+    outputTypes.emplace_back(variable->type());
+  }
+
   int unnestIndex = 0;
+  if (isPosExplode) {
+    outputNames.emplace_back(SubstraitParser::makeNodeName(planNodeId_, unnestIndex++));
+    outputTypes.emplace_back(INTEGER());
+  }
+
   for (const auto& variable : unnest) {
-    if (variable->type()->isArray()) {
-      unnestNames.emplace_back(SubstraitParser::makeNodeName(planNodeId_, unnestIndex++));
+    if (isInline) {
+      VELOX_CHECK(variable->type()->isArray(), "Inline generator expects ARRAY<ROW> input.");
+      const auto& elementType = variable->type()->asArray().elementType();
+      VELOX_CHECK(elementType->isRow(), "Inline generator expects ROW element type.");
+      const auto& rowType = elementType->asRow();
+      for (uint32_t i = 0; i < rowType.size(); ++i) {
+        outputNames.emplace_back(SubstraitParser::makeNodeName(planNodeId_, unnestIndex++));
+        outputTypes.emplace_back(rowType.childAt(i));
+      }
+    } else if (variable->type()->isArray()) {
+      outputNames.emplace_back(SubstraitParser::makeNodeName(planNodeId_, unnestIndex++));
+      outputTypes.emplace_back(variable->type()->asArray().elementType());
     } else if (variable->type()->isMap()) {
-      unnestNames.emplace_back(SubstraitParser::makeNodeName(planNodeId_, unnestIndex++));
-      unnestNames.emplace_back(SubstraitParser::makeNodeName(planNodeId_, unnestIndex++));
+      const auto& mapType = variable->type()->asMap();
+      outputNames.emplace_back(SubstraitParser::makeNodeName(planNodeId_, unnestIndex++));
+      outputTypes.emplace_back(mapType.keyType());
+      outputNames.emplace_back(SubstraitParser::makeNodeName(planNodeId_, unnestIndex++));
+      outputTypes.emplace_back(mapType.valueType());
     } else {
       VELOX_FAIL(
           "Unexpected type of unnest variable. Expected ARRAY or MAP, but got {}.", variable->type()->toString());
     }
   }
 
-  std::optional<std::string> ordinalityName = std::nullopt;
-  std::optional<std::string> markerName = std::nullopt;
-  if (generateRel.has_advanced_extension()) {
-    if (SubstraitParser::configSetInOptimization(generateRel.advanced_extension(), "isPosExplode=")) {
-      ordinalityName = std::make_optional<std::string>("pos");
-    }
-    if (SubstraitParser::configSetInOptimization(generateRel.advanced_extension(), "isOuter=")) {
-      markerName = std::make_optional<std::string>("marker");
-    }
-  }
-
-  return std::make_shared<core::UnnestNode>(
-      nextPlanNodeId(), replicated, unnest, std::move(unnestNames), ordinalityName, markerName, childNode);
+  auto outputType = ROW(std::move(outputNames), std::move(outputTypes));
+  return std::make_shared<SparkUnnestNode>(
+      nextPlanNodeId(),
+      std::move(replicated),
+      std::move(unnest),
+      isPosExplode,
+      isOuter,
+      isInline,
+      std::move(outputType),
+      childNode);
 }
 
 const core::WindowNode::Frame SubstraitToVeloxPlanConverter::createWindowFrame(

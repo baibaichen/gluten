@@ -27,7 +27,6 @@ import org.apache.gluten.utils.PullOutProjectHelper
 
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.execution.{GenerateExec, ProjectExec, SparkPlan}
-import org.apache.spark.sql.types.{BooleanType, IntegerType}
 
 import com.google.protobuf.StringValue
 
@@ -126,6 +125,14 @@ case class GenerateExecTransformer(
       parametersStr
         .append("isOuter=")
         .append(if (outer) "1" else "0")
+        .append("\n")
+
+      // isInline: 1 for Inline or JsonTupleExplode, 0 for others.
+      val isInline =
+        generator.isInstanceOf[Inline] || generator.isInstanceOf[JsonTupleExplode]
+      parametersStr
+        .append("isInline=")
+        .append(if (isInline) "1" else "0")
         .append("\n")
 
       val injectProject = if (isStack) {
@@ -268,96 +275,5 @@ object PullOutGenerateProjectHelper extends PullOutProjectHelper {
     }
   }
 
-  def pullOutPostProject(generate: GenerateExec): SparkPlan = {
-    if (GenerateExecTransformer.supportsGenerate(generate.generator)) {
-      generate.generator match {
-        case PosExplode(_) =>
-          val originalOrdinal = generate.generatorOutput.head
-          val ordinal = {
-            val subtract = Subtract(Cast(originalOrdinal, IntegerType), Literal(1))
-            Alias(subtract, generatePostAliasName)(
-              originalOrdinal.exprId,
-              originalOrdinal.qualifier)
-          }
-
-          if (generate.outer) {
-            val isPresent =
-              AttributeReference(generatePostAliasName, BooleanType, nullable = true)()
-
-            val newOutput = (ordinal +: generate.generatorOutput.tail).map {
-              attr =>
-                val caseWhen = CaseWhen(
-                  Seq((isPresent, attr)),
-                  Literal(null, attr.dataType)
-                )
-                Alias(caseWhen, generatePostAliasName)(attr.exprId, attr.qualifier)
-            }
-
-            // Reorder the generatorOutput to match the output from the Unnest operator in Velox.
-            val newGenerate = generate.copy(generatorOutput =
-              generate.generatorOutput.tail :+ originalOrdinal :+ isPresent)
-
-            ProjectExec(generate.requiredChildOutput ++ newOutput, newGenerate)
-          } else {
-            val newGenerate =
-              generate.copy(generatorOutput = generate.generatorOutput.tail :+ originalOrdinal)
-            ProjectExec(
-              (generate.requiredChildOutput :+ ordinal) ++ generate.generatorOutput.tail,
-              newGenerate)
-          }
-        case Inline(_) | JsonTupleExplode(_) =>
-          val unnestOutput = {
-            val struct = CreateStruct(generate.generatorOutput)
-            val alias = Alias(struct, generatePostAliasName)()
-            alias.toAttribute
-          }
-          if (generate.outer) {
-            val isPresent =
-              AttributeReference(generatePostAliasName, BooleanType, nullable = true)()
-            val newGenerate = generate.copy(generatorOutput = Seq(unnestOutput) :+ isPresent)
-            val newOutput = generate.generatorOutput.zipWithIndex.map {
-              case (attr, i) =>
-                val getStructField = GetStructField(unnestOutput, i, Some(attr.name))
-                val caseWhen = CaseWhen(
-                  Seq((isPresent, getStructField)),
-                  Literal(null, getStructField.dataType)
-                )
-                Alias(caseWhen, generatePostAliasName)(attr.exprId, attr.qualifier)
-            }
-            ProjectExec(generate.requiredChildOutput ++ newOutput, newGenerate)
-          } else {
-            val newGenerate = generate.copy(generatorOutput = Seq(unnestOutput))
-            val newOutput = generate.generatorOutput.zipWithIndex.map {
-              case (attr, i) =>
-                val getStructField = GetStructField(unnestOutput, i, Some(attr.name))
-                Alias(getStructField, generatePostAliasName)(attr.exprId, attr.qualifier)
-            }
-            ProjectExec(generate.requiredChildOutput ++ newOutput, newGenerate)
-          }
-        case (_: Explode | _: Stack) if generate.outer =>
-          // Drop the last column of generatorOutput, which is the boolean marker Velox's Unnest
-          // appends for an OUTER generator (true when the row is a real unnested value, false for
-          // the synthetic padding row of an empty/null input). Explode and Stack share this
-          // layout -- value columns followed by the trailing marker, with no ordinality column --
-          // so the same handling applies to both. Wrap each output column in a CaseWhen on the
-          // marker so the padding row projects NULLs.
-          val isPresent =
-            AttributeReference(generatePostAliasName, BooleanType, nullable = true)()
-          val newGenerate =
-            generate.copy(generatorOutput = generate.generatorOutput :+ isPresent)
-          val newOutput = generate.generatorOutput.map {
-            attr =>
-              val caseWhen = CaseWhen(
-                Seq((isPresent, attr)),
-                Literal(null, attr.dataType)
-              )
-              Alias(caseWhen, generatePostAliasName)(attr.exprId, attr.qualifier)
-          }
-          ProjectExec(generate.requiredChildOutput ++ newOutput, newGenerate)
-        case _ => generate
-      }
-    } else {
-      generate
-    }
-  }
+  def pullOutPostProject(generate: GenerateExec): SparkPlan = generate
 }

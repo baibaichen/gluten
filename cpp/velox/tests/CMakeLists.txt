@@ -140,7 +140,8 @@ add_velox_test(
   VeloxColumnarBatchSerializerTest.cc
   VeloxColumnarBatchTest.cc
   VeloxBatchResizerTest.cc
-  ValueStreamDynamicFilterTest.cc)
+  ValueStreamDynamicFilterTest.cc
+  SparkUnnestTest.cc)
 add_velox_test(
   velox_plan_conversion_test
   SOURCES

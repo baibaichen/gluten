@@ -183,6 +183,7 @@ set(VELOX_SRCS
     operators/functions/RowConstructorWithNull.cc
     operators/functions/SparkExprToSubfieldFilterParser.cc
     operators/plannodes/RowVectorStream.cc
+    operators/plannodes/SparkUnnest.cc
     operators/hashjoin/HashTableBuilder.cc
     operators/hashjoin/HashTableSerializer.cc
     operators/reader/FileReaderIterator.cc

@@ -21,6 +21,56 @@ import org.apache.gluten.execution.GenerateExecTransformerBase
 import org.apache.spark.sql.internal.SQLConf
 
 class GlutenGeneratorFunctionSuite extends GeneratorFunctionSuite with GlutenSQLTestsTrait {
+  testGluten("SparkUnnest preserves mixed null/empty collections and eliminates post-project") {
+    for (batchSize <- Seq(2, 65)) {
+      withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "false",
+        SQLConf.OPTIMIZER_EXCLUDED_RULES.key ->
+          "org.apache.spark.sql.catalyst.optimizer.InferFiltersFromGenerate",
+        "spark.gluten.sql.columnar.maxBatchSize" -> batchSize.toString,
+        "spark.gluten.sql.columnar.backend.velox.unnest_split_output" -> "true"
+      ) {
+        val input = spark
+          .range(0L, 65L, 1L, 1)
+          .selectExpr(
+            "id",
+            "IF(id % 5 = 0, CAST(NULL AS ARRAY<BIGINT>), " +
+              "IF(id % 5 = 1, array(), IF(id % 5 = 2, array(NULL, id), " +
+              "IF(id % 5 = 3, array(id, id + 1, id + 2), array(id))))) AS a"
+          )
+          .selectExpr(
+            "id",
+            "a",
+            "transform(a, x -> IF(x IS NULL, CAST(NULL AS STRUCT<v:BIGINT,s:STRING>), " +
+              "named_struct('v', x, 's', repeat(CAST(x AS STRING), 20)))) AS s"
+          )
+        for (
+          function <- Seq(
+            "explode",
+            "explode_outer",
+            "posexplode",
+            "posexplode_outer",
+            "inline",
+            "inline_outer")
+        ) {
+          val column = if (function.startsWith("inline")) "s" else "a"
+          val expected = withSQLConf("spark.gluten.enabled" -> "false") {
+            input.selectExpr("id", s"$function($column)").collect().toSeq
+          }
+          val result = input.selectExpr("id", s"$function($column)")
+          checkAnswer(result, expected)
+          assert(getExecutedPlan(result).exists(_.isInstanceOf[GenerateExecTransformerBase]))
+          val pruned = result.drop("id")
+          checkAnswer(pruned, expected.map(row => Row.fromSeq(row.toSeq.drop(1))))
+          if (function.startsWith("posexplode")) {
+            val posOnly = result.select("pos")
+            checkAnswer(posOnly, expected.map(row => Row(row.get(1))))
+          }
+        }
+      }
+    }
+  }
+
   testGluten("stack is offloaded") {
     val df = spark.range(2).selectExpr("stack(2, id, id + 1, id + 2)")
     checkAnswer(df, Seq(Row(0L, 1L), Row(2L, null), Row(1L, 2L), Row(3L, null)))

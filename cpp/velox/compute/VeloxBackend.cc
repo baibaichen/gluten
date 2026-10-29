@@ -53,6 +53,7 @@
 #include "memory/GlutenBufferedInputBuilder.h"
 #include "operators/functions/SparkExprToSubfieldFilterParser.h"
 #include "operators/plannodes/RowVectorStream.h"
+#include "operators/plannodes/SparkUnnest.h"
 #include "shuffle/ArrowShuffleDictionaryWriter.h"
 #include "udf/UdfLoader.h"
 #include "utils/Exception.h"
@@ -193,6 +194,7 @@ void VeloxBackend::init(
 
   // Setup and register.
   velox::filesystems::registerLocalFileSystem();
+  velox::exec::Operator::registerOperator(std::make_unique<SparkUnnestTranslator>());
 
 #ifdef ENABLE_HDFS
   velox::filesystems::registerHdfsFileSystem();

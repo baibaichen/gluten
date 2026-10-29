@@ -19,6 +19,7 @@
 #include <atomic>
 #include "compute/VeloxExpressionEvaluator.h"
 #include "compute/VeloxPlanConverter.h"
+#include "operators/plannodes/SparkUnnest.h"
 #include "utils/ConfigExtractor.h"
 #include "velox/exec/Aggregate.h"
 #include "velox/exec/AggregateInfo.h"
@@ -130,7 +131,7 @@ class UnnestOutput final : public ColumnarBatchIterator {
  public:
   UnnestOutput(
       std::shared_ptr<ResultIterator> input,
-      const std::shared_ptr<const core::UnnestNode>& plan,
+      const core::PlanNodePtr& plan,
       const std::shared_ptr<core::QueryCtx>& query)
       : input_(std::move(input)),
         task_(exec::Task::create(
@@ -152,7 +153,7 @@ class UnnestOutput final : public ColumnarBatchIterator {
         nullptr,
         std::make_shared<exec::PipelinePushdownFilters>(),
         [](int) { return 1; });
-    unnest_ = dynamic_cast<exec::Unnest*>(driver_->findOperator(plan->id()));
+    unnest_ = driver_->findOperator(plan->id());
     GLUTEN_CHECK(unnest_ != nullptr, "Expected native Unnest operator for plan node " + plan->id());
     driver_->initializeOperators();
     VLOG(1) << "Expression benchmark Unnest stage prepared: planNodeId=" << plan->id();
@@ -187,7 +188,7 @@ class UnnestOutput final : public ColumnarBatchIterator {
   std::shared_ptr<ResultIterator> input_;
   std::shared_ptr<exec::Task> task_;
   std::shared_ptr<exec::Driver> driver_;
-  exec::Unnest* unnest_{nullptr}; // Owned by driver_.
+  exec::Operator* unnest_{nullptr}; // Owned by driver_.
 };
 
 class AggregateOutput final : public ColumnarBatchIterator {
@@ -298,7 +299,8 @@ VeloxPlanEvaluator::VeloxPlanEvaluator(VeloxRuntime* runtime, const uint8_t* dat
             std::dynamic_pointer_cast<const core::AggregationNode>(node) ||
             std::dynamic_pointer_cast<const core::OrderByNode>(node) ||
             std::dynamic_pointer_cast<const core::WindowNode>(node) ||
-            std::dynamic_pointer_cast<const core::UnnestNode>(node),
+            std::dynamic_pointer_cast<const core::UnnestNode>(node) ||
+            std::dynamic_pointer_cast<const SparkUnnestNode>(node),
         "Unsupported expression stage: " + node->toString());
     nodes_.push_back(node);
     node = node->sources().front();
@@ -326,9 +328,10 @@ std::shared_ptr<ResultIterator> VeloxPlanEvaluator::evaluate(
         std::dynamic_pointer_cast<const core::OrderByNode>(node)) {
       input = std::make_shared<ResultIterator>(
           std::make_unique<WindowStageOutput>(std::move(input), node, query), runtime_);
-    } else if (auto unnest = std::dynamic_pointer_cast<const core::UnnestNode>(node)) {
-      input =
-          std::make_shared<ResultIterator>(std::make_unique<UnnestOutput>(std::move(input), unnest, query), runtime_);
+    } else if (
+        std::dynamic_pointer_cast<const core::UnnestNode>(node) ||
+        std::dynamic_pointer_cast<const SparkUnnestNode>(node)) {
+      input = std::make_shared<ResultIterator>(std::make_unique<UnnestOutput>(std::move(input), node, query), runtime_);
     } else {
       input = std::make_shared<ResultIterator>(
           std::make_unique<AggregateOutput>(

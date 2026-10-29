@@ -14,6 +14,7 @@ arrays_zip.md
 ascii.md
 between.md
 bround.md
+case_when.md
 cast.md
 char.md
 concat.md
@@ -44,6 +45,7 @@ from_utc_timestamp.md
 greatest.md
 hash.md
 hex.md
+if.md
 ifnull.md
 initcap.md
 instr.md

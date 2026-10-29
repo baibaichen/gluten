@@ -1,6 +1,7 @@
 abs.md
 add_months.md
 aggregate.md
+array.md
 array_contains.md
 array_intersect.md
 array_join.md
